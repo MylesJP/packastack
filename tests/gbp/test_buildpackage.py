@@ -78,7 +78,7 @@ def test_import_orig_success(mock_run, temp_repo, tmp_path):
     assert args[0] == "gbp"
     assert args[1] == "import-orig"
     assert "--merge-mode" in args
-    assert "replace" in args
+    assert "merge" in args
     assert "--no-interactive" in args
     assert str(tarball) in args
 
