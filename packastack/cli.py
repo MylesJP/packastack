@@ -8,10 +8,11 @@
 
 """CLI entry point for packastack."""
 
-import click
 import logging
-from datetime import datetime
 from pathlib import Path
+
+import click
+
 from packastack.logging_setup import _setup_cli_logging
 
 

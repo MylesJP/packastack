@@ -8,6 +8,8 @@
 
 """Tests for packastack.importer.openstack module."""
 
+from unittest.mock import patch
+
 import pytest
 import yaml
 
@@ -431,17 +433,12 @@ def test_get_signing_key_index_not_found(temp_releases_repo):
         get_signing_key(temp_releases_repo)
 
 
-def test_get_signing_key_index_read_error(temp_releases_repo, monkeypatch):
+@patch("packastack.importer.openstack.Path.read_text", side_effect=OSError("Permission denied"))
+def test_get_signing_key_index_read_error(mock_read_text, temp_releases_repo):
     """Test error when index.rst can't be read."""
-    from pathlib import Path
 
     index_file = temp_releases_repo / "doc" / "source" / "index.rst"
     index_file.write_text("content")
-
-    def mock_read_text(self):
-        raise OSError("Permission denied")
-
-    monkeypatch.setattr(Path, "read_text", mock_read_text)
 
     with pytest.raises(ImporterError, match="Failed to read index.rst"):
         get_signing_key(temp_releases_repo)
@@ -465,9 +462,8 @@ Cryptographic Signatures
         get_signing_key(temp_releases_repo)
 
 
-def test_get_signing_key_file_read_error(temp_releases_repo, monkeypatch):
+def test_get_signing_key_file_read_error(temp_releases_repo):
     """Test error when key file can't be read."""
-    from pathlib import Path
 
     index_content = """
 Cryptographic Signatures
@@ -486,17 +482,20 @@ Cryptographic Signatures
     )
     key_file.write_text("key data")
 
-    original_read_text = Path.read_text
+    # Capture original read_text from the module under test
+    import importlib
+    os_mod = importlib.import_module("packastack.importer.openstack")
+    original_read_text = os_mod.Path.read_text
 
     def mock_read_text(self):
         if "0xABCDEF1234567890.txt" in str(self):
             raise OSError("Permission denied")
         return original_read_text(self)
 
-    monkeypatch.setattr(Path, "read_text", mock_read_text)
-
-    with pytest.raises(ImporterError, match="Failed to read signing key file"):
-        get_signing_key(temp_releases_repo)
+    from unittest.mock import patch
+    with patch("packastack.importer.openstack.Path.read_text", new=mock_read_text):
+        with pytest.raises(ImporterError, match="Failed to read signing key file"):
+            get_signing_key(temp_releases_repo)
 
 
 def test_get_deliverable_info_parse_error(temp_releases_repo):

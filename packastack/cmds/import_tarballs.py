@@ -12,11 +12,8 @@ import fnmatch
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import Optional
-from packastack.logging_setup import _setup_cli_logging
 from datetime import datetime
-import logging
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -586,7 +583,7 @@ def process_repositories(
     else:
         # Parallel processing
         with ThreadPoolExecutor(max_workers=jobs) as executor:
-                            
+
             futures = {
                 executor.submit(
                     process_repository,

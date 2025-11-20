@@ -8,13 +8,13 @@
 
 """Git-buildpackage (gbp) command wrapper."""
 
+import logging
 import re
 import subprocess
 from pathlib import Path
-import logging
 
-from packastack.git.repo import RepoManager
 from packastack.exceptions import DebianError
+from packastack.git.repo import RepoManager
 
 
 class GitBuildPackage:

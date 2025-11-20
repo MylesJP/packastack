@@ -6,8 +6,8 @@
 #
 # This file is part of PackaStack. See LICENSE for details.
 
-import re
 import logging
+import re
 from pathlib import Path
 
 from packastack.exceptions import LaunchpadError

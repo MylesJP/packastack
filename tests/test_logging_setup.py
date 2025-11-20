@@ -1,4 +1,3 @@
-from pathlib import Path
 import logging
 
 from packastack.logging_setup import _setup_cli_logging

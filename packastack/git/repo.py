@@ -8,8 +8,8 @@
 
 """Git repository management with retry logic."""
 
-from pathlib import Path
 import logging
+from pathlib import Path
 
 from git import Repo
 from git.exc import GitCommandError

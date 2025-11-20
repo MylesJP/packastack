@@ -8,12 +8,11 @@
 
 """Tests for Launchpad CI file update."""
 
-from pathlib import Path
 
 import pytest
 
-from packastack.launchpad.lpci import update_launchpad_ci_file
 from packastack.exceptions import LaunchpadError
+from packastack.launchpad.lpci import update_launchpad_ci_file
 
 
 def test_update_launchpad_ci_file_missing(tmp_path):

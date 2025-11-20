@@ -8,6 +8,8 @@
 
 """Tests for base importer."""
 
+from unittest.mock import patch
+
 import pytest
 
 from packastack.exceptions import ImporterError
@@ -196,9 +198,9 @@ def test_import_tarball(importer_paths):
     assert debian_version == "1.0.0"  # From ConcreteImporter
 
 
-def test_save_gpg_key_error(importer_paths, monkeypatch):
+@patch("packastack.importer.base.Path.write_text", side_effect=OSError("Permission denied"))
+def test_save_gpg_key_error(mock_write_text, importer_paths):
     """Test saving GPG key with error."""
-    from pathlib import Path
 
     packaging, upstream, tarballs, releases = importer_paths
 
@@ -213,15 +215,15 @@ def test_save_gpg_key_error(importer_paths, monkeypatch):
     def mock_write_text(self, content):
         raise OSError("Permission denied")
 
-    monkeypatch.setattr(Path, "write_text", mock_write_text)
+    # Patched via decorator to raise OSError when write_text is called
 
     with pytest.raises(ImporterError, match="Failed to save GPG key"):
         importer.save_gpg_key("key content")
 
 
-def test_rename_tarball_error(importer_paths, monkeypatch):
+@patch("packastack.importer.base.Path.rename", side_effect=OSError("Permission denied"))
+def test_rename_tarball_error(mock_rename, importer_paths):
     """Test renaming tarball with error."""
-    from pathlib import Path
 
     packaging, upstream, tarballs, releases = importer_paths
     tarballs.mkdir(exist_ok=True)
@@ -241,7 +243,7 @@ def test_rename_tarball_error(importer_paths, monkeypatch):
     def mock_rename(self, target):
         raise OSError("Permission denied")
 
-    monkeypatch.setattr(Path, "rename", mock_rename)
+    # Patched via decorator to raise OSError when rename is called
 
     with pytest.raises(ImporterError, match="Failed to rename tarball"):
         importer.rename_tarball(source, "nova", "1.0.0")

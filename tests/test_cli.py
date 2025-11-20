@@ -10,6 +10,7 @@
 
 import subprocess
 import sys
+
 import click
 
 
@@ -35,12 +36,14 @@ def test_cli_import():
     assert callable(cli)
 
 
-def test_cli_logging_setup_failure(tmp_path, monkeypatch):
+from unittest.mock import patch
+
+
+@patch("packastack.cli._setup_cli_logging", side_effect=Exception("boom"))
+def test_cli_logging_setup_failure(mock_setup, tmp_path):
     """Ensure CLI doesn't crash when _setup_cli_logging raises an exception."""
-    from click.testing import CliRunner
     from packastack.cli import cli
-    # Patch the _setup_cli_logging function to raise an exception
-    monkeypatch.setattr("packastack.cli._setup_cli_logging", lambda root: (_ for _ in ()).throw(Exception("boom")))
+    # _setup_cli_logging patched via decorator to raise an exception
 
     # Calling the Click group via CliRunner with --help won't execute the
     # group callback. Call the underlying callback directly to exercise the
