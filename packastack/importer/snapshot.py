@@ -12,10 +12,10 @@ import re
 import subprocess
 from pathlib import Path
 
-from packastack.debian.version import VersionConverter
 from packastack.exceptions import ImporterError
 from packastack.git import RepoManager
 from packastack.importer.base import BaseImporter
+from packastack.package.version import VersionConverter
 
 
 class SnapshotImporter(BaseImporter):

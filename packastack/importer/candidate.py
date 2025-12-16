@@ -8,8 +8,8 @@
 
 """Release candidate tarball importer."""
 
-from packastack.debian.version import VersionConverter
 from packastack.importer.release import ReleaseImporter
+from packastack.package.version import VersionConverter
 
 
 class CandidateImporter(ReleaseImporter):

@@ -29,7 +29,9 @@ from packastack.exceptions import RepositoryError
 class RepoManager:
     """Manages Git repository operations with retry logic for network operations."""
 
-    def __init__(self, path: str | Path | None = None, url: str | None = None):
+    def __init__(
+        self, path: str | Path | None = None, url: str | None = None
+    ):
         """
         Initialize repository manager.
 
@@ -40,7 +42,7 @@ class RepoManager:
         Raises:
             ValueError: If neither path nor url is provided
         """
-        if not path and not url:
+        if path is None and url is None:
             raise ValueError("Either path or url must be provided")
 
         self.path = Path(path) if path else None
@@ -76,6 +78,8 @@ class RepoManager:
         if not self.url:
             self._logger.error("Attempted clone without url set")
             raise ValueError("url must be set to clone")
+        if not self.path:
+            raise ValueError("path must be set to clone")
 
         try:
             self._logger.info("Cloning repo %s into %s", self.url, self.path)
@@ -90,6 +94,8 @@ class RepoManager:
         Raises:
             RepositoryError: If repository cannot be opened
         """
+        if not self.path:
+            raise RepositoryError("Repository path not set")
         try:
             self._logger.debug("Opening repository at %s", self.path)
             self.repo = Repo(self.path)
@@ -348,7 +354,10 @@ class RepoManager:
 
         # Store original branch
         original_branch = self.get_current_branch()
-        self._logger.debug("Checkout important branches; original branch %s", original_branch)
+        self._logger.debug(
+            "Checkout important branches; original branch %s",
+            original_branch,
+        )
 
         # Try to checkout pristine-tar
         try:

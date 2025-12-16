@@ -213,7 +213,7 @@ UPSTREAM_GIT_REPOS = {
     "python-purestorage":               f"{GITHUB_BASE_URL}/PureStorage-OpenConnect/rest-client.git",  # noqa: E501
     "python-pyasyncore":                f"{GITHUB_BASE_URL}/simonrob/pyasyncore.git",  # noqa: E501
     "python-pycdlib":                   f"{GITHUB_BASE_URL}/clalancette/pycdlib.git",  # noqa: E501
-    "python-qinlingclient":             f"{OPENSTACK_GIT_BASE_URL}/python-qinlingclient.git",
+    "python-qinlingclient":             f"{OPENSTACK_GIT_BASE_URL}/python-qinlingclient.git",  # noqa: E501
     "python-saharaclient":              f"{OPENSTACK_GIT_BASE_URL}/saharaclient.git",
     "python-scciclient":                f"{OPENDEV_BASE_URL}/x/python-scciclient.git",
     "python-searchlightclient":         f"{OPENSTACK_GIT_BASE_URL}/searchlightclient.git",  # noqa: E501
@@ -229,7 +229,7 @@ UPSTREAM_GIT_REPOS = {
     "python-vmware-nsxlib":             f"{OPENDEV_BASE_URL}/x/vmware-nsxlib.git",
     "python-watcherclient":             f"{OPENSTACK_GIT_BASE_URL}/watcherclient.git",  # noqa: E501
     # TODO(wolsen) Where does this one come from?
-    # "python-xclarityclient":            f"{OPENSTACK_GIT_BASE_URL}/xclarityclient.git",
+    # "python-xclarityclient":            f"{OPENSTACK_GIT_BASE_URL}/xclarityclient.git",  # noqa: E501
     "python-zaqarclient":               f"{OPENSTACK_GIT_BASE_URL}/python-zaqarclient.git",  # noqa: E501
     "python-zunclient":                 f"{OPENSTACK_GIT_BASE_URL}/python-zunclient.git",  # noqa: E501
     # TODO(wolsen) Need to update the homepage in debian/control

@@ -10,8 +10,8 @@
 
 import pytest
 
-from packastack.debian.version import VersionConverter
 from packastack.exceptions import DebianError
+from packastack.package.version import VersionConverter
 
 
 class TestBetaVersionConversion:

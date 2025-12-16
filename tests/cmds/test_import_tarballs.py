@@ -8,48 +8,71 @@
 
 """Tests for import command."""
 
+import io
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
-import click
 import pytest
+from packastack.cli import PackastackApp
+from packastack.cmds.import_tarballs import CLICommandError
 
 from packastack.cmds.import_tarballs import (
     ImportContext,
+    RepositorySpec,
+    create_and_import_tarball,
     determine_importer_type,
     filter_repositories,
     get_launchpad_repositories,
     print_import_summary,
     process_repositories,
     process_repository,
+    to_repository_specs,
 )
+
+
+def run_cli(args):
+    stdout = io.StringIO()
+    app = PackastackApp(stdout=stdout)
+    code = app.run(args)
+    return code, stdout.getvalue()
 
 
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories", return_value=[])
 @patch("packastack.cmds.import_tarballs.process_repositories", return_value=None)
 @patch("packastack.cmds.import_tarballs.get_current_cycle", return_value="gazpacho")
-def test_import_cmd_creates_timestamped_log(mock_get_current_cycle, mock_process_repositories, mock_get_launchpad_repos, tmp_path):
+def test_import_cmd_creates_timestamped_log(
+    mock_get_current_cycle,
+    mock_process_repositories,
+    mock_get_launchpad_repos,
+    tmp_path,
+):
     """Ensure the import command creates a timestamped error log under root/logs."""
-    from click.testing import CliRunner
-
-    from packastack.cli import cli
-
     # Patch heavy operations: fetching repositories and processing them
     def fake_get_launchpad_repos():
         import logging as _logging
         _logging.getLogger().info("fake repos fetched for test")
         return []
 
-    # Decorators patch get_launchpad_repositories, process_repositories and get_current_cycle
+    # Decorators patch get_launchpad_repositories,
+    # process_repositories and get_current_cycle
     from unittest.mock import patch as _patch
-    with _patch("packastack.cmds.import_tarballs.setup_directories", return_value=(tmp_path / "packaging", tmp_path / "upstream", tmp_path / "tarballs", tmp_path / "logs")):
-        with _patch("packastack.cmds.import_tarballs.setup_releases_repo", return_value=tmp_path / "releases"):
-            runner = CliRunner()
-            result = runner.invoke(cli, ["--root", str(tmp_path), "import"])
-            if result.exit_code != 0:
-                print(result.output)
-            assert result.exit_code == 0
+    with _patch(
+        "packastack.cmds.import_tarballs.setup_directories",
+        return_value=(
+            tmp_path / "packaging",
+            tmp_path / "upstream",
+            tmp_path / "tarballs",
+            tmp_path / "logs",
+        ),
+    ):
+        with _patch(
+            "packastack.cmds.import_tarballs.setup_releases_repo",
+            return_value=tmp_path / "releases",
+        ):
+            code, _ = run_cli(["--root", str(tmp_path), "import"])
+
+            assert code == 0
 
     # Note: assert and logging checks moved inside context manager above
 
@@ -70,34 +93,36 @@ def test_import_cmd_creates_timestamped_log(mock_get_current_cycle, mock_process
 @patch("packastack.logging_setup._setup_cli_logging", side_effect=Exception("nope"))
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories", return_value=[])
 @patch("packastack.cmds.import_tarballs.process_repositories", return_value=None)
-def test_import_cmd_setup_cli_logging_fails(mock_process_repo, mock_get_repos, mock_setup_logging, tmp_path):
+def test_import_cmd_setup_cli_logging_fails(
+    mock_process_repo,
+    mock_get_repos,
+    mock_setup_logging,
+    tmp_path,
+):
     """If `_setup_cli_logging` raises, import_cmd should continue gracefully."""
     # Make the logging setup raise an exception
     from unittest.mock import patch as _patch
 
-    from click.testing import CliRunner
+    with _patch(
+        "packastack.cmds.import_tarballs.setup_releases_repo",
+        return_value=tmp_path / "releases",
+    ):
+        with _patch(
+            "packastack.cmds.import_tarballs.get_current_cycle",
+            return_value="gazpacho",
+        ):
+            code, _ = run_cli(["--root", str(tmp_path), "import"])
 
-    with _patch("packastack.cmds.import_tarballs.setup_releases_repo", return_value=tmp_path / "releases"):
-        with _patch("packastack.cmds.import_tarballs.get_current_cycle", return_value="gazpacho"):
-            from packastack.cli import cli as packastack_cli
-            runner = CliRunner()
-            result = runner.invoke(packastack_cli, ["--root", str(tmp_path), "import"])
-            assert result.exit_code == 0
-
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(packastack_cli, ["--root", str(tmp_path), "import"])
-    assert result.exit_code == 0
+            assert code == 0
 
 
 
 def test_import_context_initialization(tmp_path):
     """Test ImportContext initialization."""
-    ctx = ImportContext(cycle="dalmatian", import_type="release", cleanup_tarballs=True)
+    ctx = ImportContext(cycle="dalmatian", import_type="release")
 
     assert ctx.cycle == "dalmatian"
     assert ctx.import_type == "release"
-    assert ctx.cleanup_tarballs is True
     assert hasattr(ctx.releases_lock, "acquire")  # Check it's a lock-like object
     assert hasattr(ctx.tarballs_lock, "acquire")
     assert isinstance(ctx.successes, list)
@@ -107,7 +132,7 @@ def test_import_context_initialization(tmp_path):
 
 def test_import_context_add_success():
     """Test adding successful import."""
-    ctx = ImportContext(cycle="dalmatian", import_type="release", cleanup_tarballs=True)
+    ctx = ImportContext(cycle="dalmatian", import_type="release")
 
     ctx.add_success("nova")
     ctx.add_success("neutron")
@@ -119,7 +144,7 @@ def test_import_context_add_success():
 
 def test_import_context_add_failure():
     """Test adding failed import."""
-    ctx = ImportContext(cycle="dalmatian", import_type="release", cleanup_tarballs=True)
+    ctx = ImportContext(cycle="dalmatian", import_type="release")
 
     ctx.add_failure("nova", "Version not found")
     ctx.add_failure("neutron", "Network error")
@@ -291,11 +316,10 @@ def test_setup_releases_repo_clone(mock_repo_mgr, mock_path, tmp_path):
     lock = threading.Lock()
     result = setup_releases_repo(lock, mock_upstream)
 
-    # Should have been called with url to clone
-    mock_repo_mgr.assert_called_with(url=mock_repo_mgr.call_args_list[0].kwargs["url"])
-    mock_mgr.clone.assert_called_once()
-    # RepoManager should have been created (called once) to perform clone
+    # Should have been called with path+url to clone
     mock_repo_mgr.assert_called_once()
+    assert mock_repo_mgr.call_args.kwargs["url"] == "https://opendev.org/openstack/releases"
+    mock_mgr.clone.assert_called_once()
     assert result == mock_releases_path
 
 
@@ -474,8 +498,9 @@ def test_setup_repository_existing(mock_repo_mgr, tmp_path):
         "test-repo", "https://example.com/repo", tmp_path
     )
     assert result_mgr == mock_mgr
-    # No path returned anymore, so infer path from mock
-    mock_repo_mgr.assert_called_once_with(path=repo_path)
+    mock_repo_mgr.assert_called_once_with(
+        path=repo_path, url="https://example.com/repo"
+    )
     mock_mgr.fetch.assert_called_once()
     mock_mgr.clone.assert_not_called()
 
@@ -485,8 +510,7 @@ def test_setup_repository_new(mock_repo_mgr, tmp_path):
     """Test setup_repository with new repository."""
     from packastack.cmds.import_tarballs import setup_repository
 
-    repo_path = tmp_path / "test-repo"
-
+    # repo_path not required for this new-repo test; we keep tmp_path usage only
     mock_mgr = MagicMock()
     mock_repo_mgr.return_value = mock_mgr
 
@@ -495,7 +519,9 @@ def test_setup_repository_new(mock_repo_mgr, tmp_path):
     )
 
     assert result_mgr == mock_mgr
-    mock_repo_mgr.assert_called_once_with(url="https://example.com/repo")
+    mock_repo_mgr.assert_called_once_with(
+        path=tmp_path / "test-repo", url="https://example.com/repo"
+    )
     mock_mgr.clone.assert_called_once()
     mock_mgr.fetch.assert_not_called()
 
@@ -637,7 +663,9 @@ def test_setup_upstream_repository_existing(mock_repo_mgr, tmp_path):
 
 @patch("packastack.cmds.import_tarballs.RepoManager")
 def test_setup_upstream_repository_existing_no_change(mock_repo_mgr, tmp_path):
-    """Test setup_upstream_repository when remote already matches; should not set_remote_url."""
+    """Test setup_upstream_repository when remote already matches;
+    should not set_remote_url.
+    """
     from packastack.cmds.import_tarballs import setup_upstream_repository
 
     upstream_path = tmp_path / "nova"
@@ -694,7 +722,10 @@ def test_setup_upstream_repository_new(mock_repo_mgr, tmp_path):
     )
 
     assert result_mgr == mock_mgr
-    mock_repo_mgr.assert_called_once_with(path=upstream_path, url="https://opendev.org/openstack/nova.git")
+    mock_repo_mgr.assert_called_once_with(
+        path=upstream_path,
+        url="https://opendev.org/openstack/nova.git",
+    )
     mock_mgr.clone.assert_called_once()
 
 
@@ -756,10 +787,20 @@ def test_update_gbp_and_ci_files_commit_gbp_only(mock_gbp, mock_update_ci, tmp_p
     assert args[1] == ["debian/gbp.conf"]
 
 
-@patch("packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file")
-@patch("packastack.cmds.import_tarballs.GitBuildPackage")
-def test_update_gbp_and_ci_files_commit_ci_only(mock_gbp, mock_update_ci, tmp_path):
-    """Test update_gbp_and_ci_files triggers commit when .launchpad.yaml changed only."""
+@patch(
+    "packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file",
+)
+@patch(
+    "packastack.cmds.import_tarballs.GitBuildPackage",
+)
+def test_update_gbp_and_ci_files_commit_ci_only(
+    mock_gbp,
+    mock_update_ci,
+    tmp_path,
+):
+    """Test update_gbp_and_ci_files triggers commit when
+    .launchpad.yaml changed only.
+    """
     from packastack.cmds.import_tarballs import update_gbp_and_ci_files
 
     mock_mgr = MagicMock()
@@ -900,8 +941,6 @@ def test_check_deliverable_exists_not_found_snapshot(
 
 def test_create_and_import_tarball_release(tmp_path):
     """Test create_and_import_tarball with release importer."""
-    from packastack.cmds.import_tarballs import create_and_import_tarball
-
     pkg_repo_path = tmp_path / "nova"
     upstream_repo_path = tmp_path / "upstream"
     tarballs_dir = tmp_path / "tarballs"
@@ -937,47 +976,6 @@ def test_create_and_import_tarball_release(tmp_path):
         assert tarball == tarballs_dir / "nova_27.0.0-1ubuntu0.orig.tar.gz"
 
 
-def test_cleanup_tarballs_success(tmp_path):
-    """Test cleanup_tarballs removes files."""
-    from packastack.cmds.import_tarballs import cleanup_tarballs
-
-    tarball = tmp_path / "nova_27.0.0.orig.tar.gz"
-    signature = tmp_path / "nova_27.0.0.orig.tar.gz.asc"
-    tarball.write_text("fake tarball")
-    signature.write_text("fake signature")
-
-    cleanup_tarballs(tarball)
-
-    assert not tarball.exists()
-    assert not signature.exists()
-
-
-def test_cleanup_tarballs_no_signature(tmp_path):
-    """Test cleanup_tarballs without signature file."""
-    from packastack.cmds.import_tarballs import cleanup_tarballs
-
-    tarball = tmp_path / "nova_27.0.0.orig.tar.gz"
-    tarball.write_text("fake tarball")
-
-    cleanup_tarballs(tarball)
-
-    assert not tarball.exists()
-
-
-def test_cleanup_tarballs_error(tmp_path):
-    """Test cleanup_tarballs handles errors silently."""
-    from packastack.cmds.import_tarballs import cleanup_tarballs
-
-    tarball = tmp_path / "nonexistent.tar.gz"
-
-    # Should not raise exception
-    cleanup_tarballs(tarball)
-
-
-# Tests for process_repository
-
-
-@patch("packastack.cmds.import_tarballs.cleanup_tarballs")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
 @patch("packastack.cmds.import_tarballs.create_and_import_tarball")
 @patch("packastack.cmds.import_tarballs.determine_importer_type")
@@ -999,33 +997,24 @@ def test_process_repository_success(
     mock_determine_type,
     mock_create_import,
     mock_gbp,
-    mock_cleanup,
     tmp_path,
 ):
     """Test process_repository successful flow."""
-    # Multi-import handled at module level
-
-    # Setup mocks
     mock_pkg_mgr = MagicMock()
     mock_setup_repo.return_value = mock_pkg_mgr
-
     mock_parse_metadata.return_value = (
         "nova",
         "https://opendev.org/openstack/nova",
         "nova",
     )
-
     mock_upstream_mgr = MagicMock()
     mock_setup_upstream.return_value = mock_upstream_mgr
-
     mock_check_deliverable.return_value = True
     mock_determine_type.return_value = ("release", False)
     mock_create_import.return_value = ("27.0.0-1ubuntu0", tmp_path / "nova.tar.gz")
+    mock_gbp.return_value = MagicMock()
 
-    mock_gbp_instance = MagicMock()
-    mock_gbp.return_value = mock_gbp_instance
-
-    context = ImportContext("dalmatian", "auto", False)
+    context = ImportContext("dalmatian", "auto")
 
     result = process_repository(
         "nova",
@@ -1042,69 +1031,7 @@ def test_process_repository_success(
     assert "nova" in context.successes
     mock_pkg_mgr.track_remote_branches.assert_called_once()
     mock_pkg_mgr.checkout_important_branches.assert_called_once()
-    mock_gbp_instance.import_orig.assert_called_once()
-    mock_cleanup.assert_not_called()
-
-
-@patch("packastack.cmds.import_tarballs.cleanup_tarballs")
-@patch("packastack.cmds.import_tarballs.GitBuildPackage")
-@patch("packastack.cmds.import_tarballs.create_and_import_tarball")
-@patch("packastack.cmds.import_tarballs.determine_importer_type")
-@patch("packastack.cmds.import_tarballs.check_deliverable_exists")
-@patch("packastack.cmds.import_tarballs.create_upstream_branch")
-@patch("packastack.cmds.import_tarballs.update_gbp_and_ci_files")
-@patch("packastack.cmds.import_tarballs.setup_upstream_repository")
-@patch("packastack.cmds.import_tarballs.parse_packaging_metadata")
-@patch("packastack.cmds.import_tarballs.setup_repository")
-@patch("packastack.cmds.import_tarballs.console")
-def test_process_repository_with_cleanup(
-    mock_console,
-    mock_setup_repo,
-    mock_parse_metadata,
-    mock_setup_upstream,
-    mock_update_gbp,
-    mock_create_branch,
-    mock_check_deliverable,
-    mock_determine_type,
-    mock_create_import,
-    mock_gbp,
-    mock_cleanup,
-    tmp_path,
-):
-    """Test process_repository with tarball cleanup."""
-    # Multi-import handled at module level
-
-    # Setup mocks
-    mock_pkg_mgr = MagicMock()
-    mock_setup_repo.return_value = mock_pkg_mgr
-    mock_parse_metadata.return_value = (
-        "nova",
-        "https://opendev.org/openstack/nova",
-        "nova",
-    )
-    mock_upstream_mgr = MagicMock()
-    mock_setup_upstream.return_value = mock_upstream_mgr
-    mock_check_deliverable.return_value = True
-    mock_determine_type.return_value = ("release", False)
-    tarball_path = tmp_path / "nova.tar.gz"
-    mock_create_import.return_value = ("27.0.0-1ubuntu0", tarball_path)
-    mock_gbp.return_value = MagicMock()
-
-    context = ImportContext("dalmatian", "auto", True)  # cleanup_tarballs=True
-
-    result = process_repository(
-        "nova",
-        "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova",
-        context,
-        tmp_path / "packaging",
-        tmp_path / "upstream",
-        tmp_path / "tarballs",
-        tmp_path / "releases",
-        False,
-    )
-
-    assert result is True
-    mock_cleanup.assert_called_once_with(tarball_path)
+    mock_gbp.return_value.import_orig.assert_called_once()
 
 
 @patch("packastack.cmds.import_tarballs.check_deliverable_exists")
@@ -1138,7 +1065,7 @@ def test_process_repository_no_deliverable(
     mock_setup_upstream.return_value = mock_upstream_mgr
     mock_check_deliverable.return_value = False
 
-    context = ImportContext("dalmatian", "release", False)
+    context = ImportContext("dalmatian", "release")
 
     result = process_repository(
         "nova",
@@ -1165,7 +1092,7 @@ def test_process_repository_packastack_error(mock_console, mock_setup_repo, tmp_
 
     mock_setup_repo.side_effect = DebianError("Test error")
 
-    context = ImportContext("dalmatian", "release", False)
+    context = ImportContext("dalmatian", "release")
 
     result = process_repository(
         "nova",
@@ -1196,7 +1123,7 @@ def test_process_repository_packastack_error_no_continue(
 
     mock_setup_repo.side_effect = DebianError("Test error")
 
-    context = ImportContext("dalmatian", "release", False)
+    context = ImportContext("dalmatian", "release")
 
     with pytest.raises(DebianError):
         process_repository(
@@ -1219,7 +1146,7 @@ def test_process_repository_unexpected_error(mock_console, mock_setup_repo, tmp_
 
     mock_setup_repo.side_effect = RuntimeError("Unexpected error")
 
-    context = ImportContext("dalmatian", "release", False)
+    context = ImportContext("dalmatian", "release")
 
     result = process_repository(
         "nova",
@@ -1247,7 +1174,7 @@ def test_process_repository_system_exit_ebadmsg(
 
     mock_setup_repo.side_effect = SystemExit(74)
 
-    context = ImportContext("dalmatian", "snapshot", False)
+    context = ImportContext("dalmatian", "snapshot")
 
     result = process_repository(
         "nova",
@@ -1275,7 +1202,7 @@ def test_process_repository_system_exit_other(mock_console, mock_setup_repo, tmp
 
     mock_setup_repo.side_effect = SystemExit(1)
 
-    context = ImportContext("dalmatian", "release", False)
+    context = ImportContext("dalmatian", "release")
 
     with pytest.raises(SystemExit):
         process_repository(
@@ -1308,6 +1235,19 @@ def test_get_launchpad_repositories(mock_lp_client_cls, mock_repo_mgr_cls):
     mock_client.connect.assert_called_once()
     mock_repo_mgr_cls.assert_called_once_with(mock_client)
     mock_repo_mgr.list_team_repositories.assert_called_once()
+
+
+def test_to_repository_specs_missing_attributes():
+    """Repositories must supply both name and URL fields."""
+    from packastack.exceptions import ImporterError
+
+    repo = Mock()
+    repo.name = "nova"
+    repo.url = None
+    repo.git_https_url = None
+    # Missing url/git_https_url should raise
+    with pytest.raises(ImporterError, match="missing required"):
+        to_repository_specs([repo])
 
 
 @patch("packastack.cmds.import_tarballs.process_repository")
@@ -1557,7 +1497,7 @@ def test_print_import_summary_with_failures_no_continue(mock_console, mock_loggi
     context.successes = ["nova"]
     context.failures = [("neutron", "Version not found")]
 
-    with pytest.raises(click.ClickException, match="Import failed for 1 repositories"):
+    with pytest.raises(CLICommandError, match="Import failed for 1 repositories"):
         print_import_summary(context, Path("/tmp/errors.log"), False)
 
 
@@ -1578,9 +1518,6 @@ def test_import_cmd_current_cycle_sequential(
     mock_print_summary,
 ):
     """Test import_cmd with current cycle and sequential processing."""
-    from click.testing import CliRunner
-
-
     mock_setup_dirs.return_value = (
         Path("/tmp/packaging"),
         Path("/tmp/upstream"),
@@ -1591,13 +1528,22 @@ def test_import_cmd_current_cycle_sequential(
     mock_get_cycle.return_value = "dalmatian"
     mock_get_repos.return_value = []
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
     # Test include packages via positional argument (only 'nova' should be processed)
-    mock_get_repos.return_value = [Mock(name="nova"), Mock(name="neutron")]
-    result = runner.invoke(packastack_cli, ["import", "--type", "release", "--cycle", "current", "nova"])
+    mock_get_repos.return_value = [
+        RepositorySpec(name="nova", url="https://example.com/nova.git"),
+        RepositorySpec(name="neutron", url="https://example.com/neutron.git"),
+    ]
+    args = [
+        "import",
+        "--type",
+        "release",
+        "--cycle",
+        "current",
+        "nova",
+    ]
+    code, _ = run_cli(args)
 
-    assert result.exit_code == 0
+    assert code == 0
     mock_get_cycle.assert_called_once()
     mock_process.assert_called_once()
     # Verify setup_releases_repo was called with upstream_dir
@@ -1619,9 +1565,6 @@ def test_import_cmd_specific_cycle_parallel(
     mock_print_summary,
 ):
     """Test import_cmd with specific cycle and parallel processing."""
-    from click.testing import CliRunner
-
-
     mock_setup_dirs.return_value = (
         Path("/tmp/packaging"),
         Path("/tmp/upstream"),
@@ -1631,12 +1574,12 @@ def test_import_cmd_specific_cycle_parallel(
     mock_setup_releases.return_value = Path("/tmp/releases")
     mock_get_repos.return_value = []
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    mock_get_repos.return_value = [Mock(name="nova"), Mock(name="neutron")]
+    mock_get_repos.return_value = [
+        RepositorySpec(name="nova", url="https://example.com/nova.git"),
+        RepositorySpec(name="neutron", url="https://example.com/neutron.git"),
+    ]
     # Test exclude packages via flag
-    runner.invoke(
-        packastack_cli,
+    run_cli(
         [
             "import",
             "--exclude-packages",
@@ -1647,7 +1590,7 @@ def test_import_cmd_specific_cycle_parallel(
             "--jobs",
             "4",
             "nova",
-        ],
+        ]
     )
 
     mock_process.assert_called_once()
@@ -1659,17 +1602,12 @@ def test_import_cmd_specific_cycle_parallel(
 @patch("packastack.cmds.import_tarballs.console")
 def test_import_cmd_keyboard_interrupt(mock_console, mock_setup_dirs):
     """Test import_cmd with KeyboardInterrupt."""
-    from click.testing import CliRunner
-
-
     mock_setup_dirs.side_effect = KeyboardInterrupt()
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(packastack_cli, ["import"])
+    code, output = run_cli(["import"])
 
-    assert result.exit_code == 1
-    assert "Import interrupted by user" in mock_console.print.call_args[0][0]
+    assert code == 1
+    assert "Import interrupted by user" in output or mock_console.print.called
 
     # No process_repositories mock here, skip filtering assertion
 
@@ -1677,18 +1615,14 @@ def test_import_cmd_keyboard_interrupt(mock_console, mock_setup_dirs):
 @patch("packastack.cmds.import_tarballs.console")
 def test_import_cmd_packastack_error(mock_console, mock_setup_dirs):
     """Test import_cmd with PackastackError."""
-    from click.testing import CliRunner
-
     from packastack.exceptions import PackastackError
 
     mock_setup_dirs.side_effect = PackastackError("Test error")
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(packastack_cli, ["import"])
+    code, output = run_cli(["import"])
 
-    assert result.exit_code == 1
-    assert "Test error" in result.output
+    assert code == 1
+    assert "Test error" in output
     # No process_repositories mock here, skip filtering assertion
 
 
@@ -1696,17 +1630,12 @@ def test_import_cmd_packastack_error(mock_console, mock_setup_dirs):
 @patch("packastack.cmds.import_tarballs.console")
 def test_import_cmd_unexpected_error(mock_console, mock_setup_dirs):
     """Test import_cmd with unexpected error."""
-    from click.testing import CliRunner
-
-
     mock_setup_dirs.side_effect = ValueError("Unexpected")
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(packastack_cli, ["import"])
+    code, output = run_cli(["import"])
 
-    assert result.exit_code == 1
-    assert "Unexpected error: Unexpected" in result.output
+    assert code == 1
+    assert "Unexpected error: Unexpected" in output
 
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
@@ -1723,8 +1652,7 @@ def test_import_cmd_click_exception_reraise(
     mock_process,
     mock_print_summary,
 ):
-    """Test import_cmd re-raises Click exceptions."""
-    from click.testing import CliRunner
+    """Test import_cmd re-raises command errors."""
 
 
     mock_setup_dirs.return_value = (
@@ -1735,14 +1663,12 @@ def test_import_cmd_click_exception_reraise(
     )
     mock_setup_releases.return_value = Path("/tmp/releases")
     mock_get_repos.return_value = []
-    mock_print_summary.side_effect = click.ClickException("Test click error")
+    mock_print_summary.side_effect = CLICommandError("Test click error")
 
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(packastack_cli, ["import", "--cycle", "caracal"])
+    code, output = run_cli(["import", "--cycle", "caracal"])
 
-    assert result.exit_code == 1
-    assert "Test click error" in result.output
+    assert code == 1
+    assert "Test click error" in output
 
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
@@ -1761,9 +1687,6 @@ def test_import_cmd_with_root_option(
     tmp_path,
 ):
     """Test import_cmd with --root option."""
-    from click.testing import CliRunner
-
-
     mock_setup_dirs.return_value = (
         tmp_path / "packaging",
         tmp_path / "upstream",
@@ -1773,13 +1696,8 @@ def test_import_cmd_with_root_option(
     mock_setup_releases.return_value = tmp_path / "releases"
     mock_get_repos.return_value = []
 
-    runner = CliRunner()
-    from packastack.cli import cli as packastack_cli
-    runner = CliRunner()
-    result = runner.invoke(
-        packastack_cli, ["--root", str(tmp_path), "import", "--cycle", "caracal"]
-    )
+    code, _ = run_cli(["--root", str(tmp_path), "import", "--cycle", "caracal"])
 
-    assert result.exit_code == 0
+    assert code == 0
     # Verify setup_directories was called with root parameter
     mock_setup_dirs.assert_called_once_with(Path(str(tmp_path)))

@@ -8,10 +8,13 @@
 
 """Tests for CLI entry point."""
 
+import io
 import subprocess
 import sys
+from unittest.mock import patch
 
-import click
+import pytest
+
 
 
 def test_cli_main_execution():
@@ -30,32 +33,23 @@ def test_cli_main_execution():
 
 def test_cli_import():
     """Test that CLI can be imported."""
-    from packastack.cli import cli
+    from packastack.cli import PackastackApp
 
-    # Test that the CLI function exists and is callable
-    assert callable(cli)
-
-
-from unittest.mock import patch
+    app = PackastackApp(stdout=io.StringIO())
+    assert app.command_manager.find_command("import")
 
 
-@patch("packastack.cli._setup_cli_logging", side_effect=Exception("boom"))
+@patch(
+    "packastack.cli._setup_cli_logging",
+    side_effect=Exception("boom"),
+)
 def test_cli_logging_setup_failure(mock_setup, tmp_path):
     """Ensure CLI doesn't crash when _setup_cli_logging raises an exception."""
-    from packastack.cli import cli
-    # _setup_cli_logging patched via decorator to raise an exception
+    from packastack.cli import PackastackApp
 
-    # Calling the Click group via CliRunner with --help won't execute the
-    # group callback. Call the underlying callback directly to exercise the
-    # exception handling in the CLI group.
-    ctx = click.Context(cli)
-    # The underlying function should accept (ctx, root) — call it directly while
-    # using the context manager to ensure Click's context stack is active.
-    with ctx:
-        # Call the original wrapped function to avoid the Click decorator wrapper
-        # supplying its own context; the wrapped function requires the Context
-        # object as the first argument.
-        cli.callback.__wrapped__(ctx, tmp_path)
+    app = PackastackApp(stdout=io.StringIO())
+    # Should exit gracefully even though logging setup fails
+    assert app.run(["--root", str(tmp_path), "--help"]) == 0
 
 
 def test_cli_main_block():

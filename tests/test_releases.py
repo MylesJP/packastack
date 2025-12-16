@@ -274,7 +274,10 @@ def test_get_signing_key_index_not_found(temp_releases_repo):
         get_signing_key(str(temp_releases_repo))
 
 
-@patch("packastack.importer.openstack.Path.read_text", side_effect=OSError("Permission denied"))
+@patch(
+    "packastack.importer.openstack.Path.read_text",
+    side_effect=OSError("Permission denied"),
+)
 def test_get_signing_key_index_read_error(mock_read_text, temp_releases_repo):
     """Test error when index.rst can't be read."""
     index_file = temp_releases_repo / "doc" / "source" / "index.rst"

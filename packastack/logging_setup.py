@@ -27,7 +27,11 @@ def _setup_cli_logging(root: Path | None = None):
 
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setLevel(logging.INFO)
-    fh.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    fh.setFormatter(
+        logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+    )
     # Mark handler so we can remove it in future runs
     setattr(fh, "packastack_cli", True)
     root_logger.addHandler(fh)

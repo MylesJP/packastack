@@ -22,10 +22,10 @@ from packastack.constants import (
     RETRY_MULTIPLIER,
     TARBALLS_BASE_URL,
 )
-from packastack.debian.version import VersionConverter
 from packastack.exceptions import ImporterError, NetworkError
 from packastack.importer.base import BaseImporter
 from packastack.importer.openstack import get_deliverable_info, get_signing_key
+from packastack.package.version import VersionConverter
 
 
 class ReleaseImporter(BaseImporter):

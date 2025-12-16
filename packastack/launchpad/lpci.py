@@ -46,9 +46,17 @@ def update_launchpad_ci_file(pkg_repo_path: Path, cycle: str) -> bool:
     if changed:
         with ci_file_path.open("w", encoding="utf-8") as f:
             f.write(updated_content)
-        logger.info("Updated CI file %s to set openstack_series=%s", ci_file_path, cycle)
+        logger.info(
+            "Updated CI file %s to set openstack_series=%s",
+            ci_file_path,
+            cycle,
+        )
     else:
-        logger.debug("No change required for CI file %s (openstack_series already %s)", ci_file_path, cycle)
+        logger.debug(
+            "No change required for CI file %s (openstack_series already %s)",
+            ci_file_path,
+            cycle,
+        )
 
     # Return True if any change occurred, False otherwise
     return changed

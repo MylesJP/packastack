@@ -26,10 +26,18 @@ def test_setup_cli_logging_idempotent(tmp_path):
 
     _setup_cli_logging(logs_root)
     # Record current handlers
-    handlers_first = [h for h in root_logger.handlers if getattr(h, "packastack_cli", False)]
+    handlers_first = [
+        h
+        for h in root_logger.handlers
+        if getattr(h, "packastack_cli", False)
+    ]
     assert len(handlers_first) == 1
 
     # Call again; should not add duplicate handlers
     _setup_cli_logging(logs_root)
-    handlers_second = [h for h in root_logger.handlers if getattr(h, "packastack_cli", False)]
+    handlers_second = [
+        h
+        for h in root_logger.handlers
+        if getattr(h, "packastack_cli", False)
+    ]
     assert len(handlers_second) == 1

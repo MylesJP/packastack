@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from packastack.debian.control import ControlFileParser
 from packastack.exceptions import DebianError
+from packastack.package.control import ControlFileParser
 
 
 @pytest.fixture

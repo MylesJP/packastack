@@ -1,9 +1,15 @@
 # Integration test demonstrating a minimal CLI run without network calls
+import io
 from unittest.mock import patch
 
-from click.testing import CliRunner
+from packastack.cli import PackastackApp
 
-from packastack.cli import cli
+
+def run_cli(args):
+    stdout = io.StringIO()
+    app = PackastackApp(stdout=stdout)
+    code = app.run(args)
+    return code, stdout.getvalue()
 
 
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories", return_value=[])
@@ -37,22 +43,44 @@ def test_cli_end_to_end(mock_get_repos, tmp_path):
     _sub.run(["git", "init"], cwd=str(releases), check=True)
     (releases / "README").write_text("initial")
     _sub.run(["git", "add", "README"], cwd=str(releases), check=True)
-    _sub.run(["git", "-c", "commit.gpgsign=false", "-c", "user.name=Test User", "-c", "user.email=test@example.com", "commit", "-m", "init"], cwd=str(releases), check=True)
+    _sub.run(
+        [
+            "git",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Test User",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd=str(releases),
+        check=True,
+    )
     # Ensure a 'master' branch exists and is checked out for tests expecting it
     _sub.run(["git", "branch", "master"], cwd=str(releases), check=True)
     # Create a bare mirror of the releases repo and push to it so fetch/pull works
     bare_releases = upstream / "releases.git"
     bare_releases.mkdir()
     _sub.run(["git", "init", "--bare"], cwd=str(bare_releases), check=True)
-    _sub.run(["git", "remote", "add", "origin", f"file://{bare_releases}"], cwd=str(releases), check=True)
+    _sub.run(
+        ["git", "remote", "add", "origin", f"file://{bare_releases}"],
+        cwd=str(releases),
+        check=True,
+    )
     _sub.run(["git", "push", "origin", "master"], cwd=str(releases), check=True)
 
-    # Patch setup_releases_repo so CLI doesn't try to fetch/pull from remotes
+    # Patch setup_releases_repo so CLI doesn't try to
+    # fetch/pull from remotes
     from unittest.mock import patch as _patch
-    with _patch("packastack.cmds.import_tarballs.setup_releases_repo", return_value=releases):
-        runner = CliRunner()
-        result = runner.invoke(cli, ["--root", str(root), "import"])
-    assert result.exit_code == 0
+    with _patch(
+        "packastack.cmds.import_tarballs.setup_releases_repo",
+        return_value=releases,
+    ):
+        code, _ = run_cli(["--root", str(root), "import"])
+    assert code == 0
 
     # Basic assertions that logs directory exists and CLI log file is present
     cli_files = list(logs.glob("packastack-*.log"))

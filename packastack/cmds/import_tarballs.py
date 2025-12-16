@@ -8,15 +8,19 @@
 
 """Import command for importing upstream tarballs."""
 
+import errno
 import fnmatch
 import logging
 import threading
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import click
-from rich.console import Console
+from cliff.command import Command
+from oslo_config import cfg
+import sys
 
 from packastack.constants import (
     ERROR_LOG_FILE,
@@ -25,8 +29,6 @@ from packastack.constants import (
     UPSTREAM_BRANCH_PREFIX,
     UPSTREAM_GIT_REPOS,
 )
-from packastack.debian.control import ControlFileParser
-from packastack.debian.version import VersionConverter
 from packastack.exceptions import (
     DebianError,
     ImporterError,
@@ -48,6 +50,8 @@ from packastack.launchpad import (
     RepositoryManager,
     lpci,
 )
+from packastack.package.control import ControlFileParser
+from packastack.package.version import VersionConverter
 
 # Import type constants
 RELEASE = "release"
@@ -63,29 +67,96 @@ IMPORT_TYPES = [
 ]
 
 logger = logging.getLogger(__name__)
-console = Console()
+
+CLI_OPTS: list[cfg.Opt] = [
+    cfg.MultiStrOpt(
+        "packages",
+        positional=True,
+        default=[],
+        help="Packages to import (default: all known packages)",
+    ),
+    cfg.BoolOpt(
+        "exclude_packages",
+        default=False,
+        help="Treat listed packages as exclusions and process all others",
+    ),
+    cfg.StrOpt(
+        "type",
+        dest="import_type",
+        choices=IMPORT_TYPES + [AUTO],
+        default=AUTO,
+        help="Type of tarball to import",
+    ),
+    cfg.StrOpt(
+        "cycle",
+        default="current",
+        help="OpenStack cycle name (default: current development cycle)",
+    ),
+    cfg.IntOpt(
+        "jobs",
+        default=1,
+        help="Number of parallel jobs (default: 1 for sequential)",
+    ),
+    cfg.BoolOpt(
+        "continue_on_error",
+        default=False,
+        help="Continue processing other repos if one fails",
+    ),
+]
+
+
+class CLICommandError(Exception):
+    """Custom command error used for CLI-friendly failures."""
+
+
+class CLIConsole:
+    """Lightweight console wrapper for writing CLI output."""
+
+    def __init__(self, stream=None):
+        self.stream = stream or sys.stdout
+
+    def set_stream(self, stream) -> None:
+        """Update the target stream."""
+
+        self.stream = stream
+
+    def print(self, message: str = "") -> None:
+        """Write a message to the stream."""
+
+        self.stream.write(f"{message}\n")
+        self.stream.flush()
+
+
+console = CLIConsole()
+
+
+@dataclass(frozen=True)
+class RepositorySpec:
+    """Lightweight representation of a Launchpad repository entry."""
+
+    name: str
+    url: str
 
 
 class ImportContext:
     """Shared context for import operations."""
 
-    def __init__(self, cycle: str, import_type: str, cleanup_tarballs: bool):
+    def __init__(self, cycle: str, import_type: str):
         """Initialize import context."""
         self.cycle = cycle
         self.import_type = import_type
-        self.cleanup_tarballs = cleanup_tarballs
         self.releases_lock = threading.Lock()
         self.tarballs_lock = threading.Lock()
-        self.successes = []
-        self.failures = []
+        self.successes: list[str] = []
+        self.failures: list[tuple[str, str]] = []
         self.lock = threading.Lock()
 
-    def add_success(self, repo_name: str):
+    def add_success(self, repo_name: str) -> None:
         """Add successful import."""
         with self.lock:
             self.successes.append(repo_name)
 
-    def add_failure(self, repo_name: str, error: str):
+    def add_failure(self, repo_name: str, error: str) -> None:
         """Add failed import."""
         with self.lock:
             self.failures.append((repo_name, error))
@@ -135,21 +206,16 @@ def setup_releases_repo(releases_lock: threading.Lock, upstream_dir: Path) -> Pa
     """
     with releases_lock:
         releases_path = upstream_dir / RELEASES_DIR
+        repo_mgr = RepoManager(path=releases_path, url=RELEASES_REPO_URL)
 
         if releases_path.exists():
-            # Update existing repo
-            repo_mgr = RepoManager(path=releases_path)
             repo_mgr.fetch()
             repo_mgr.checkout("master")
             repo_mgr.pull()
         else:
-            # Clone new repo
             logger.info(
                 "Cloning releases repo %s to %s", RELEASES_REPO_URL, releases_path
             )
-            repo_mgr = RepoManager(url=RELEASES_REPO_URL)
-            # Set the clone destination path on the manager for operations
-            repo_mgr.path = releases_path
             repo_mgr.clone()
 
         return releases_path
@@ -182,7 +248,10 @@ def determine_importer_type(
         head_tags = repo_mgr.get_head_tags()
 
         if not head_tags:
-            logger.info("No tags at HEAD for %s; using snapshot importer", upstream_repo_path)
+            logger.info(
+                "No tags at HEAD for %s; using snapshot importer",
+                upstream_repo_path,
+            )
             # No tags at HEAD, use snapshot
             return SNAPSHOT, False
 
@@ -190,7 +259,11 @@ def determine_importer_type(
         for tag in head_tags:
             version_type = VersionConverter.detect_version_type(tag)
             if version_type in IMPORT_TYPES:
-                logger.info("Auto-detected import type %s for tag %s", version_type, tag)
+                logger.info(
+                    "Auto-detected import type %s for tag %s",
+                    version_type,
+                    tag,
+                )
                 return version_type, False
 
         # Tag exists but type unknown, default to snapshot
@@ -219,13 +292,10 @@ def setup_repository(
         RepositoryError: If clone/update fails
     """
     repo_path = base_dir / repo_name
+    repo_mgr = RepoManager(path=repo_path, url=repo_url)
     if repo_path.exists():
-        repo_mgr = RepoManager(path=repo_path)
         repo_mgr.fetch()
     else:
-        repo_mgr = RepoManager(url=repo_url)
-        # Ensure we set the local clone destination before cloning
-        repo_mgr.path = repo_path
         repo_mgr.clone()
 
     return repo_mgr
@@ -251,7 +321,7 @@ def parse_packaging_metadata(pkg_repo: RepoManager) -> tuple[str, str, str]:
             f" on branch {pkg_repo.get_current_branch()}"
         )
 
-    parser = ControlFileParser(str(control_path))
+    parser = ControlFileParser(control_path)
     source_name = parser.get_source_name()
     homepage = parser.get_homepage()
 
@@ -335,7 +405,12 @@ def update_gbp_and_ci_files(
 
     if commit_msg:
         pkg_mgr.commit("\n".join(commit_msg), files)
-        logger.info("Committed files %s in %s with message: %s", files, pkg_mgr.path, commit_msg)
+        logger.info(
+            "Committed files %s in %s with message: %s",
+            files,
+            pkg_mgr.path,
+            commit_msg,
+        )
 
 
 def create_upstream_branch(
@@ -393,9 +468,7 @@ def check_deliverable_exists(
     Raises:
         ImporterError: If deliverable check fails
     """
-    deliverable = get_deliverable_info(
-        str(releases_path), cycle, upstream_project_name
-    )
+    deliverable = get_deliverable_info(releases_path, cycle, upstream_project_name)
     if not deliverable and import_type in [RELEASE, CANDIDATE, BETA]:
         console.print(
             f"[yellow]Warning: No deliverable found for {repo_name}, "
@@ -442,17 +515,21 @@ def create_and_import_tarball(
     }[importer_type]
 
     importer = importer_cls(
-        str(pkg_repo_path),
-        str(upstream_repo_path),
-        str(tarballs_dir),
+        pkg_repo_path,
+        upstream_repo_path,
+        tarballs_dir,
         cycle,
-        str(releases_path),
+        releases_path,
         explicit_snapshot=explicit_snapshot,
     )
 
     # Import tarball
     debian_version = importer.import_tarball()
-    logger.info("Imported tarball for %s produced debian_version %s", source_name, debian_version)
+    logger.info(
+        "Imported tarball for %s produced debian_version %s",
+        source_name,
+        debian_version,
+    )
 
     # Get upstream version and tarball
     upstream_version = importer.get_version()
@@ -464,26 +541,6 @@ def create_and_import_tarball(
     )
 
     return debian_version, renamed_tarball
-
-
-def cleanup_tarballs(tarball_path: Path) -> None:
-    """
-    Remove tarball and signature file.
-
-    Args:
-        tarball_path: Path to tarball to remove
-
-    Note:
-        Failures are silently ignored as cleanup is non-fatal
-    """
-    try:
-        tarball_path.unlink()
-        # Also remove signature if exists
-        sig_path = tarball_path.with_suffix(tarball_path.suffix + ".asc")
-        if sig_path.exists():
-            sig_path.unlink()
-    except Exception:
-        pass  # Non-fatal
 
 
 def get_launchpad_repositories() -> list:
@@ -502,9 +559,21 @@ def get_launchpad_repositories() -> list:
     return repo_mgr.list_team_repositories()
 
 
+def to_repository_specs(repositories: Iterable) -> list[RepositorySpec]:
+    """Normalize Launchpad repository objects to RepositorySpec instances."""
+    specs: list[RepositorySpec] = []
+    for repo in repositories:
+        name = getattr(repo, "name", None)
+        url = getattr(repo, "url", None) or getattr(repo, "git_https_url", None)
+        if not name or not url:
+            raise ImporterError("Repository entry missing required attributes")
+        specs.append(RepositorySpec(name=name, url=url))
+    return specs
+
+
 def filter_repositories(
-    repositories: list, patterns: list[str], exclude: bool = False
-) -> list:
+    repositories: Iterable[RepositorySpec], patterns: list[str], exclude: bool = False
+) -> list[RepositorySpec]:
     """
     Filter the list of repository objects by name using patterns and glob support.
 
@@ -542,7 +611,7 @@ def filter_repositories(
 
 
 def process_repositories(
-    repositories: list,
+    repositories: Iterable[RepositorySpec],
     context: ImportContext,
     packaging_dir: Path,
     upstream_dir: Path,
@@ -567,12 +636,12 @@ def process_repositories(
     Raises:
         PackastackError: If processing fails and continue_on_error is False
     """
+    repo_specs = list(repositories)
     if jobs == 1:
-        # Sequential processing
-        for repo in repositories:
+        for spec in repo_specs:
             process_repository(
-                repo.name,
-                repo.url,
+                spec.name,
+                spec.url,
                 context,
                 packaging_dir,
                 upstream_dir,
@@ -580,34 +649,32 @@ def process_repositories(
                 releases_path,
                 continue_on_error,
             )
-    else:
-        # Parallel processing
-        with ThreadPoolExecutor(max_workers=jobs) as executor:
+        return
 
-            futures = {
-                executor.submit(
-                    process_repository,
-                    repo.name,
-                    repo.url,
-                    context,
-                    packaging_dir,
-                    upstream_dir,
-                    tarballs_dir,
-                    releases_path,
-                    continue_on_error,
-                ): repo
-                for repo in repositories
-            }
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = {
+            executor.submit(
+                process_repository,
+                spec.name,
+                spec.url,
+                context,
+                packaging_dir,
+                upstream_dir,
+                tarballs_dir,
+                releases_path,
+                continue_on_error,
+            ): spec
+            for spec in repo_specs
+        }
 
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception:
-                    if not continue_on_error:
-                        # Cancel remaining tasks
-                        for f in futures:
-                            f.cancel()
-                        raise
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                if not continue_on_error:
+                    for pending in futures:
+                        pending.cancel()
+                    raise
 
 
 def print_import_summary(
@@ -622,20 +689,20 @@ def print_import_summary(
         continue_on_error: Whether errors were allowed to continue
 
     Raises:
-        click.ClickException: If there were failures and continue_on_error is False
+        CLICommandError: If there were failures and continue_on_error is False
     """
-    console.print("\n[bold]Import Summary[/bold]")
-    console.print(f"[green]Successful:[/green] {len(context.successes)}")
-    console.print(f"[red]Failed:[/red] {len(context.failures)}")
+    console.print("\nImport Summary")
+    console.print(f"Successful: {len(context.successes)}")
+    console.print(f"Failed: {len(context.failures)}")
 
     if context.failures:
-        console.print(f"\n[yellow]Errors logged to:[/yellow] {error_log_path}")
+        console.print(f"\nErrors logged to: {error_log_path}")
         for repo_name, error in context.failures:
             logging.error(f"{repo_name}: {error}")
 
     # Raise exception if any failures and not continue-on-error
     if context.failures and not continue_on_error:
-        raise click.ClickException(
+        raise CLICommandError(
             f"Import failed for {len(context.failures)} repositories"
         )
 
@@ -654,8 +721,7 @@ def process_repository(
     Process a single repository.
 
     Args:
-        repo_name: Repository name
-        repo_url: Repository URL
+        repo: the repository to process
         context: Shared import context
         packaging_dir: Path to packaging directory
         upstream_dir: Path to upstream directory
@@ -725,16 +791,12 @@ def process_repository(
         gbp = GitBuildPackage(pkg_mgr.path)
         gbp.import_orig(renamed_tarball)
 
-        # 15. Cleanup tarball if requested
-        if context.cleanup_tarballs:
-            cleanup_tarballs(renamed_tarball)
-
         context.add_success(repo_name)
         console.print(f"[green]✓[/green] {repo_name}: {debian_version}")
         return True
 
     except SystemExit as e:
-        if e.code == 74:
+        if e.code == errno.EBADMSG:
             # EBADMSG - explicitly requested snapshot but HEAD is tagged
             error_msg = "Explicitly requested snapshot but HEAD is tagged"
             context.add_failure(repo_name, error_msg)
@@ -761,152 +823,100 @@ def process_repository(
         return False
 
 
-@click.command("import")
-@click.pass_context
-@click.argument("packages", nargs=-1)
-@click.option(
-    "--exclude-packages/--include-packages",
-    "exclude_packages",
-    default=False,
-    help="Exclude packages specified instead of including them",
-)
-@click.option(
-    "--type",
-    "import_type",
-    type=click.Choice(
-        [
-            AUTO,
-            RELEASE,
-            CANDIDATE,
-            BETA,
-            SNAPSHOT,
-        ]
-    ),
-    default=AUTO,
-    help="Type of tarball to import",
-)
-@click.option(
-    "--cycle",
-    default="current",
-    help="OpenStack cycle name (default: current development cycle)",
-)
-@click.option(
-    "--jobs",
-    type=int,
-    default=1,
-    help="Number of parallel jobs (default: 1 for sequential)",
-)
-@click.option(
-    "--continue-on-error/--no-continue-on-error",
-    default=False,
-    help="Continue processing other repos if one fails",
-)
-@click.option(
-    "--cleanup-tarballs/--no-cleanup-tarballs",
-    default=False,
-    help="Remove tarballs after successful import",
-)
-def import_cmd(
-    ctx,
-    packages: tuple[str, ...],
-    exclude_packages: bool,
-    import_type: str,
-    cycle: str,
-    jobs: int,
-    continue_on_error: bool,
-    cleanup_tarballs: bool,
-):
+class ImportTarballsCommand(Command):
     """Import upstream tarballs into packaging repositories."""
-    # CLI-level logging is configured by the parent `cli` group which sets
-    # the root value in click context; we can pick up any per-command root
-    # if necessary via click.get_current_context().obj
-    console.print("[bold]Starting import process...[/bold]")
-    logging.getLogger(__name__).info("Starting import process")
 
-    try:
-        # Root path is provided as global CLI option and stored in context
-        root = ctx.obj.get("root")
-        # Setup directories
-        packaging_dir, upstream_dir, tarballs_dir, logs_dir = setup_directories(root)
-        console.print("Created working directories")
-        logging.getLogger(__name__).info("Created working directories in %s", root)
+    cli_opts = CLI_OPTS
 
-        # Setup releases repo
-        console.print("Setting up releases repository...")
-        releases_lock = threading.Lock()
-        releases_path = setup_releases_repo(releases_lock, upstream_dir)
+    def get_parser(self, prog_name):
+        parser = super().get_parser(prog_name)
+        from packastack.cli import add_opts_to_parser
 
-        # Determine cycle
-        if cycle == "current":
-            actual_cycle = get_current_cycle(releases_path)
-            console.print(f"Current development cycle: [cyan]{actual_cycle}[/cyan]")
-        else:
-            actual_cycle = cycle
-            console.print(f"Using cycle: [cyan]{actual_cycle}[/cyan]")
+        add_opts_to_parser(parser, CLI_OPTS)
+        return parser
 
-        # Create import context
-        context = ImportContext(actual_cycle, import_type, cleanup_tarballs)
+    def take_action(self, parsed_args):
+        console.set_stream(self.app.stdout)
+        console.print("Starting import process...")
+        logging.getLogger(__name__).info("Starting import process")
 
-        # Get list of repositories from Launchpad
-        console.print("Fetching repository list from Launchpad...")
-        logging.getLogger(__name__).info("Fetching launchpad repositories")
-        repositories = get_launchpad_repositories()
-        console.print(f"Found [cyan]{len(repositories)}[/cyan] repositories")
+        try:
+            root_value = getattr(parsed_args, "root", None)
+            if root_value is None and hasattr(self.app, "options"):
+                root_value = getattr(self.app.options, "root", None)
 
-        # Apply package filtering if packages were specified
-        if packages:
-            repositories = filter_repositories(
-                repositories, list(packages), exclude_packages
+            root = Path(root_value) if root_value else None
+            packaging_dir, upstream_dir, tarballs_dir, logs_dir = setup_directories(root)
+            console.print("Created working directories")
+            logging.getLogger(__name__).info("Created working directories in %s", root)
+
+            console.print("Setting up releases repository...")
+            releases_lock = threading.Lock()
+            releases_path = setup_releases_repo(releases_lock, upstream_dir)
+
+            if parsed_args.cycle == "current":
+                actual_cycle = get_current_cycle(releases_path)
+                console.print(f"Current development cycle: {actual_cycle}")
+            else:
+                actual_cycle = parsed_args.cycle
+                console.print(f"Using cycle: {actual_cycle}")
+
+            context = ImportContext(actual_cycle, parsed_args.import_type)
+
+            console.print("Fetching repository list from Launchpad...")
+            logging.getLogger(__name__).info("Fetching launchpad repositories")
+            repositories = to_repository_specs(get_launchpad_repositories())
+            console.print(f"Found {len(repositories)} repositories")
+
+            if parsed_args.packages:
+                repositories = filter_repositories(
+                    repositories, list(parsed_args.packages), parsed_args.exclude_packages
+                )
+                msg = f"Processing {len(repositories)} repositories after filter"
+                console.print(msg)
+
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            base = Path(ERROR_LOG_FILE)
+            timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+            error_log_path = logs_dir / f"{base.stem}-{timestamp}{base.suffix}"
+            root_logger = logging.getLogger()
+            for handler in list(root_logger.handlers):
+                if isinstance(handler, logging.FileHandler) and getattr(
+                    handler, "packastack_error", False
+                ):
+                    root_logger.removeHandler(handler)
+
+            file_handler = logging.FileHandler(error_log_path, encoding="utf-8")
+            file_handler.setLevel(logging.ERROR)
+            file_handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+                )
             )
-            msg = (
-                f"Processing [cyan]{len(repositories)}[/cyan] "
-                "repositories after filter"
+            setattr(file_handler, "packastack_error", True)
+            root_logger.addHandler(file_handler)
+
+            process_repositories(
+                repositories,
+                context,
+                packaging_dir,
+                upstream_dir,
+                tarballs_dir,
+                releases_path,
+                parsed_args.continue_on_error,
+                parsed_args.jobs,
             )
-            console.print(msg)
 
-        # Setup error logging with per-run timestamped filename
-        # Ensure logs directory exists before configuring logging
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        base = Path(ERROR_LOG_FILE)
-        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-        error_log_path = logs_dir / f"{base.stem}-{timestamp}{base.suffix}"
-        root_logger = logging.getLogger()
-        # Remove any previous error handlers (not CLI packastack handlers)
-        for h in list(root_logger.handlers):
-            if isinstance(h, logging.FileHandler) and getattr(h, "packastack_error", False):
-                root_logger.removeHandler(h)
+            print_import_summary(
+                context, error_log_path, parsed_args.continue_on_error
+            )
 
-        fh = logging.FileHandler(error_log_path, encoding="utf-8")
-        fh.setLevel(logging.ERROR)
-        fh.setFormatter(
-            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        )
-        # Mark handler so it can be removed later if needed
-        setattr(fh, "packastack_error", True)
-        root_logger.addHandler(fh)
-
-        # Process repositories
-        process_repositories(
-            repositories,
-            context,
-            packaging_dir,
-            upstream_dir,
-            tarballs_dir,
-            releases_path,
-            continue_on_error,
-            jobs,
-        )
-
-        # Print summary
-        print_import_summary(context, error_log_path, continue_on_error)
-
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Import interrupted by user[/yellow]")
-        raise click.Abort()
-    except PackastackError as e:
-        raise click.ClickException(str(e))
-    except click.ClickException:
-        # Re-raise Click exceptions as-is
-        raise
-    except Exception as e:
-        raise click.ClickException(f"Unexpected error: {e}")
+        except KeyboardInterrupt:
+            console.print("\nImport interrupted by user")
+            raise CLICommandError("Import interrupted by user")
+        except PackastackError as exc:
+            raise CLICommandError(str(exc))
+        except CLICommandError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise CLICommandError(f"Unexpected error: {exc}")

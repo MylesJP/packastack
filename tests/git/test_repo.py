@@ -109,12 +109,20 @@ def test_clone_no_url():
         mgr.clone()
 
 
+def test_clone_no_path():
+    """Clone should require a destination path."""
+    mgr = RepoManager(url="https://github.com/test/repo")
+    with pytest.raises(ValueError, match="path must be set to clone"):
+        mgr.clone()
+
+
 @patch("packastack.git.repo.Repo.clone_from")
 def test_clone_git_error(mock_clone):
     """Test clone with GitCommandError."""
     mock_clone.side_effect = GitCommandError("clone", "error")
 
     mgr = RepoManager(url="https://github.com/test/repo")
+    mgr.path = Path("/tmp/repo")
     with pytest.raises(RepositoryError, match="Failed to clone"):
         mgr.clone()
 
@@ -138,7 +146,15 @@ def test_open_error(mock_repo_class):
     mock_repo_class.side_effect = Exception("error")
 
     mgr = RepoManager(url="https://github.com/test/repo")
+    mgr.path = Path("/tmp/test")
     with pytest.raises(RepositoryError, match="Failed to open repository"):
+        mgr.open()
+
+
+def test_open_without_path():
+    """Opening without a configured path should fail."""
+    mgr = RepoManager(url="https://github.com/test/repo")
+    with pytest.raises(RepositoryError, match="path not set"):
         mgr.open()
 
 
@@ -795,7 +811,10 @@ def test_fetch_remote_not_found():
 def test_commit_not_opened():
     """Test commit without opened repository."""
     mgr = RepoManager(path="/tmp/test")
-    with pytest.raises(RepositoryError, match="Repository not opened"):
+    with pytest.raises(
+        RepositoryError,
+        match="Repository not opened",
+    ):
         mgr.commit("msg", ["file1"])
 
 
@@ -809,7 +828,10 @@ def test_commit_missing_user_config(mock_repo):
     mgr = RepoManager(path="/tmp/test")
     mgr.repo = mock_repo
 
-    with pytest.raises(RepositoryError, match="Git user.name and user.email must be set"):
+    with pytest.raises(
+        RepositoryError,
+        match="Git user.name and user.email must be set",
+    ):
         mgr.commit("msg", ["file1"])
 
 

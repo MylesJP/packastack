@@ -198,7 +198,10 @@ def test_import_tarball(importer_paths):
     assert debian_version == "1.0.0"  # From ConcreteImporter
 
 
-@patch("packastack.importer.base.Path.write_text", side_effect=OSError("Permission denied"))
+@patch(
+    "packastack.importer.base.Path.write_text",
+    side_effect=OSError("Permission denied"),
+)
 def test_save_gpg_key_error(mock_write_text, importer_paths):
     """Test saving GPG key with error."""
 

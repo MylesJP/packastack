@@ -245,7 +245,10 @@ def test_update_gbp_conf_read_error(temp_repo):
     gbp_conf.chmod(0o644)  # Restore permissions for cleanup
 
 
-@patch("packastack.gbp.buildpackage.Path.write_text", side_effect=OSError("Permission denied"))
+@patch(
+    "packastack.gbp.buildpackage.Path.write_text",
+    side_effect=OSError("Permission denied"),
+)
 def test_update_gbp_conf_write_error(mock_write_text, temp_repo):
     """Test error when gbp.conf can't be written."""
     mgr = GitBuildPackage(str(temp_repo))
@@ -280,7 +283,8 @@ def test_update_gbp_conf_no_change(temp_repo):
 
 
 def test_import_orig_switches_branch(tmp_path):
-    """Test that import_orig switches to master and back when starting on another branch."""
+    """Test that import_orig switches to master and back
+    when starting on another branch."""
     import subprocess as _sub
     from unittest.mock import Mock
 
@@ -306,7 +310,11 @@ def test_import_orig_switches_branch(tmp_path):
     ], cwd=str(repo_path), check=True)
     # Ensure master exists and create a feature branch
     _sub.run(["git", "branch", "master"], cwd=str(repo_path), check=True)
-    _sub.run(["git", "checkout", "-b", "feature-branch"], cwd=str(repo_path), check=True)
+    _sub.run(
+        ["git", "checkout", "-b", "feature-branch"],
+        cwd=str(repo_path),
+        check=True,
+    )
 
     tarball = tmp_path / "test_1.0.orig.tar.gz"
     tarball.write_text("fake tarball")

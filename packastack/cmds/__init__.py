@@ -8,6 +8,6 @@
 
 """Commands package for packastack CLI."""
 
-from packastack.cmds.import_tarballs import import_cmd
+from packastack.cmds.import_tarballs import ImportTarballsCommand
 
-__all__ = ["import_cmd"]
+__all__ = ["ImportTarballsCommand"]
