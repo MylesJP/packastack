@@ -231,6 +231,74 @@ def load_package_index(
     return index
 
 
+def load_cloud_archive_index(
+    cache_root: Path,
+    ubuntu_series: str,
+    pocket: str,
+    components: Sequence[str] | None = None,
+) -> PackageIndex:
+    """Load package index from Ubuntu Cloud Archive cache.
+
+    Args:
+        cache_root: Path to cache root (e.g., ~/.cache/packastack)
+        ubuntu_series: Ubuntu series codename (e.g., "jammy", "noble")
+        pocket: OpenStack pocket (e.g., "caracal", "caracal-proposed")
+        components: List of components (default: ["main"])
+
+    Returns:
+        PackageIndex with all packages from the cloud archive.
+    """
+    if components is None:
+        components = ["main"]
+
+    index = PackageIndex()
+
+    # Cloud archive cache structure:
+    # cloud-archive/{ubuntu_series}/{pocket}/{component}/binary-{arch}/Packages.gz
+    ca_cache_dir = cache_root / "cloud-archive" / "indexes" / ubuntu_series
+
+    for component in components:
+        pocket_dir = ca_cache_dir / pocket / component
+        if not pocket_dir.exists():
+            continue
+
+        for arch_dir in pocket_dir.iterdir():
+            if not arch_dir.is_dir() or not arch_dir.name.startswith("binary-"):
+                continue
+
+            packages_gz = arch_dir / "Packages.gz"
+            if not packages_gz.exists():
+                continue
+
+            for pkg in iter_packages(packages_gz):
+                # Mark as from cloud-archive
+                pkg.pocket = f"cloud-archive:{pocket}"
+                index.add_package(pkg, component, f"cloud-archive:{pocket}")
+
+    return index
+
+
+def merge_package_indexes(*indexes: PackageIndex) -> PackageIndex:
+    """Merge multiple PackageIndex instances.
+
+    Later indexes take precedence for packages with the same name,
+    but only if the version is higher.
+
+    Args:
+        *indexes: PackageIndex instances to merge.
+
+    Returns:
+        Merged PackageIndex.
+    """
+    merged = PackageIndex()
+
+    for index in indexes:
+        for pkg in index.packages.values():
+            merged.add_package(pkg, pkg.component, pkg.pocket)
+
+    return merged
+
+
 if __name__ == "__main__":
     import sys
 

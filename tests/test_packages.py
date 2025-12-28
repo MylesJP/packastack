@@ -337,3 +337,130 @@ Filename: pool/main/p/pkg/pkg-updates_1.0.1_amd64.deb
             )
             assert index.find_package("pkg-release") is not None
             assert index.find_package("pkg-updates") is not None
+
+
+class TestLoadCloudArchiveIndex:
+    """Tests for load_cloud_archive_index function."""
+
+    def test_load_empty_directory(self) -> None:
+        """Test loading from non-existent directory."""
+        from packastack.packages import load_cloud_archive_index
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+            index = load_cloud_archive_index(
+                cache_dir, ubuntu_series="noble", pocket="caracal"
+            )
+            assert index.find_package("anything") is None
+
+    def test_load_cloud_archive(self) -> None:
+        """Test loading from cloud archive structure."""
+        from packastack.packages import load_cloud_archive_index
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+
+            # Create cloud archive structure
+            ca_dir = (
+                cache_dir / "cloud-archive" / "indexes" / "noble" / "caracal" / "main" / "binary-amd64"
+            )
+            ca_dir.mkdir(parents=True)
+
+            packages_content = b"""\
+Package: python3-oslo.config
+Version: 9.0.0
+Architecture: all
+Source: oslo.config
+Filename: pool/main/o/oslo.config/python3-oslo.config_9.0.0_all.deb
+"""
+            (ca_dir / "Packages.gz").write_bytes(gzip.compress(packages_content))
+
+            index = load_cloud_archive_index(
+                cache_dir, ubuntu_series="noble", pocket="caracal"
+            )
+            found = index.find_package("python3-oslo.config")
+            assert found is not None
+            assert found.name == "python3-oslo.config"
+            assert "cloud-archive" in found.pocket
+
+    def test_skip_non_binary_dirs(self) -> None:
+        """Test that non-binary-* directories are skipped."""
+        from packastack.packages import load_cloud_archive_index
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir)
+
+            # Create cloud archive structure with non-binary directory
+            ca_dir = cache_dir / "cloud-archive" / "indexes" / "noble" / "caracal" / "main"
+            ca_dir.mkdir(parents=True)
+            (ca_dir / "source").mkdir()  # Not a binary-* dir
+
+            # Also create a proper binary-amd64 dir
+            binary_dir = ca_dir / "binary-amd64"
+            binary_dir.mkdir()
+            packages_content = b"""\
+Package: test-pkg
+Version: 1.0.0
+Architecture: amd64
+Filename: pool/main/t/test/test-pkg_1.0.0_amd64.deb
+"""
+            (binary_dir / "Packages.gz").write_bytes(gzip.compress(packages_content))
+
+            index = load_cloud_archive_index(
+                cache_dir, ubuntu_series="noble", pocket="caracal"
+            )
+            # Should only have package from binary-amd64
+            assert index.find_package("test-pkg") is not None
+
+
+class TestMergePackageIndexes:
+    """Tests for merge_package_indexes function."""
+
+    def test_merge_empty(self) -> None:
+        """Test merging with no indexes."""
+        from packastack.packages import merge_package_indexes
+
+        merged = merge_package_indexes()
+        assert merged.find_package("anything") is None
+
+    def test_merge_single(self) -> None:
+        """Test merging single index."""
+        from packastack.packages import merge_package_indexes
+
+        index = PackageIndex()
+        pkg = BinaryPackage(name="test", version="1.0", architecture="amd64")
+        index.add_package(pkg, "main", "release")
+
+        merged = merge_package_indexes(index)
+        assert merged.find_package("test") is not None
+
+    def test_merge_multiple(self) -> None:
+        """Test merging multiple indexes."""
+        from packastack.packages import merge_package_indexes
+
+        index1 = PackageIndex()
+        pkg1 = BinaryPackage(name="pkg1", version="1.0", architecture="amd64")
+        index1.add_package(pkg1, "main", "release")
+
+        index2 = PackageIndex()
+        pkg2 = BinaryPackage(name="pkg2", version="2.0", architecture="amd64")
+        index2.add_package(pkg2, "main", "updates")
+
+        merged = merge_package_indexes(index1, index2)
+        assert merged.find_package("pkg1") is not None
+        assert merged.find_package("pkg2") is not None
+
+    def test_merge_higher_version_wins(self) -> None:
+        """Test that higher version wins in merge."""
+        from packastack.packages import merge_package_indexes
+
+        index1 = PackageIndex()
+        pkg1 = BinaryPackage(name="pkg", version="1.0", architecture="amd64")
+        index1.add_package(pkg1, "main", "release")
+
+        index2 = PackageIndex()
+        pkg2 = BinaryPackage(name="pkg", version="2.0", architecture="amd64")
+        index2.add_package(pkg2, "main", "updates")
+
+        merged = merge_package_indexes(index1, index2)
+        assert merged.get_version("pkg") == "2.0"

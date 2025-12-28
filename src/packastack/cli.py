@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typer import Typer
 
+from packastack.commands.build import build
 from packastack.commands.init import init
 from packastack.commands.plan import plan
 from packastack.commands.refresh import refresh
@@ -33,6 +34,7 @@ app: Typer = Typer(
 )
 
 # Register commands
+app.command(name="build")(build)
 app.command(name="init")(init)
 app.command(name="plan")(plan)
 app.command(name="refresh")(refresh)

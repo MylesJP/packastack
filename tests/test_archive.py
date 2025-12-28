@@ -281,3 +281,84 @@ class TestLoadMetadata:
         result = archive.load_metadata(dest)
 
         assert result is None
+
+
+class TestBuildCloudArchiveUrl:
+    """Tests for build_cloud_archive_url function."""
+
+    def test_default_args(self) -> None:
+        url = archive.build_cloud_archive_url("noble", "caracal")
+        assert "noble-updates" in url
+        assert "/caracal/" in url
+        assert "/main/" in url
+        assert "binary-amd64" in url
+
+    def test_with_custom_args(self) -> None:
+        url = archive.build_cloud_archive_url(
+            "jammy", "bobcat", component="universe", arch="arm64"
+        )
+        assert "jammy-updates" in url
+        assert "/bobcat/" in url
+        assert "/universe/" in url
+        assert "binary-arm64" in url
+
+
+class TestParseCloudArchivePocket:
+    """Tests for parse_cloud_archive_pocket function."""
+
+    def test_simple_pocket(self) -> None:
+        series, suffix = archive.parse_cloud_archive_pocket("caracal")
+        assert series == "caracal"
+        assert suffix == ""
+
+    def test_proposed_pocket(self) -> None:
+        series, suffix = archive.parse_cloud_archive_pocket("caracal-proposed")
+        assert series == "caracal"
+        assert suffix == "proposed"
+
+    def test_updates_pocket(self) -> None:
+        series, suffix = archive.parse_cloud_archive_pocket("caracal-updates")
+        assert series == "caracal"
+        assert suffix == "updates"
+
+    def test_unknown_suffix(self) -> None:
+        # Should not split on unknown suffixes
+        series, suffix = archive.parse_cloud_archive_pocket("some-thing-else")
+        assert series == "some-thing-else"
+        assert suffix == ""
+
+
+class TestCloudArchiveFetcher:
+    """Tests for CloudArchiveFetcher class."""
+
+    def test_build_url(self) -> None:
+        fetcher = archive.CloudArchiveFetcher()
+        url = fetcher.build_url(
+            archive.CLOUD_ARCHIVE_BASE_URL,
+            "noble",
+            "caracal",
+            "main",
+            "amd64",
+        )
+        assert "noble-updates" in url
+        assert "/caracal/" in url
+
+    @responses.activate
+    def test_fetch_cloud_archive(
+        self, temp_home: Path, sample_packages_gz: bytes
+    ) -> None:
+        url = "https://ubuntu-cloud.archive.canonical.com/ubuntu/dists/noble-updates/caracal/main/binary-amd64/Packages.gz"
+        responses.add(
+            responses.GET,
+            url,
+            body=sample_packages_gz,
+            status=200,
+            headers={"ETag": '"ca123"'},
+        )
+
+        dest = temp_home / "Packages.gz"
+        fetcher = archive.CloudArchiveFetcher()
+        result = fetcher.fetch_cloud_archive("noble", "caracal", dest)
+
+        assert result.error is None
+        assert dest.exists()

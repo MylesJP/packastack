@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 # Default base URL for ubuntu-openstack-dev repositories
-LAUNCHPAD_BASE_URL = "https://git.launchpad.net/ubuntu-openstack-dev"
+LAUNCHPAD_BASE_URL = "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source"
 
 # Lock timeout in seconds
 LOCK_TIMEOUT = 300  # 5 minutes

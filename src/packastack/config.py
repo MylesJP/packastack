@@ -47,7 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "mirrors": {
         "ubuntu_archive": "http://archive.ubuntu.com/ubuntu",
-        "ubuntu_openstack_git": "https://git.launchpad.net/ubuntu-openstack-dev",
+        "ubuntu_openstack_git": "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source",
     },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
 }

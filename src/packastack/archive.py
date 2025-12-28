@@ -195,7 +195,127 @@ def load_metadata(dest: Path) -> dict[str, Any] | None:
         return None
 
 
+# Cloud Archive support
+# The Ubuntu Cloud Archive provides newer OpenStack packages for older Ubuntu LTS releases.
+# URL pattern: https://ubuntu-cloud.archive.canonical.com/ubuntu/dists/{series}-updates/{pocket}/main/binary-{arch}/Packages.gz
+# Where pocket is like "caracal", "dalmatian", or with suffixes like "caracal-proposed", "caracal-updates"
+
+CLOUD_ARCHIVE_BASE_URL = "https://ubuntu-cloud.archive.canonical.com/ubuntu"
+
+
+def build_cloud_archive_url(
+    ubuntu_series: str,
+    pocket: str,
+    component: str = "main",
+    arch: str = "amd64",
+) -> str:
+    """Build the URL for a Cloud Archive Packages.gz file.
+
+    Cloud Archive layout:
+        dists/{ubuntu_series}-updates/{pocket}/main/binary-{arch}/Packages.gz
+
+    Args:
+        ubuntu_series: Ubuntu series codename (e.g., "jammy", "noble").
+        pocket: OpenStack pocket (e.g., "caracal", "caracal-proposed", "caracal-updates").
+        component: Repository component (usually "main").
+        arch: Architecture (e.g., "amd64").
+
+    Returns:
+        Full URL to the Packages.gz file.
+
+    Examples:
+        >>> build_cloud_archive_url("jammy", "caracal")
+        'https://ubuntu-cloud.archive.canonical.com/ubuntu/dists/jammy-updates/caracal/main/binary-amd64/Packages.gz'
+    """
+    dist = f"{ubuntu_series}-updates"
+    return f"{CLOUD_ARCHIVE_BASE_URL}/dists/{dist}/{pocket}/{component}/binary-{arch}/Packages.gz"
+
+
+def parse_cloud_archive_pocket(pocket: str) -> tuple[str, str]:
+    """Parse a cloud archive pocket into series and suffix.
+
+    Args:
+        pocket: Pocket string like "caracal", "caracal-proposed", "caracal-updates".
+
+    Returns:
+        Tuple of (openstack_series, suffix) where suffix is "", "proposed", or "updates".
+
+    Examples:
+        >>> parse_cloud_archive_pocket("caracal")
+        ('caracal', '')
+        >>> parse_cloud_archive_pocket("caracal-proposed")
+        ('caracal', 'proposed')
+    """
+    if "-" in pocket:
+        parts = pocket.rsplit("-", 1)
+        if parts[1] in ("proposed", "updates"):
+            return parts[0], parts[1]
+    return pocket, ""
+
+
+class CloudArchiveFetcher(ArchiveFetcher):
+    """Fetcher for Ubuntu Cloud Archive Packages.gz indexes."""
+
+    def __init__(
+        self,
+        base_url: str = CLOUD_ARCHIVE_BASE_URL,
+        session: requests.Session | None = None,
+        timeout: int = 30,
+    ) -> None:
+        super().__init__(session=session, timeout=timeout)
+        self.base_url = base_url.rstrip("/")
+
+    def build_url(
+        self,
+        mirror: str,
+        series: str,
+        pocket: str,
+        component: str,
+        arch: str,
+    ) -> str:
+        """Build URL for Cloud Archive Packages.gz.
+
+        For cloud archive, 'series' is the Ubuntu series (e.g., "jammy")
+        and 'pocket' is the OpenStack pocket (e.g., "caracal").
+        """
+        dist = f"{series}-updates"
+        return f"{mirror.rstrip('/')}/dists/{dist}/{pocket}/{component}/binary-{arch}/Packages.gz"
+
+    def fetch_cloud_archive(
+        self,
+        ubuntu_series: str,
+        pocket: str,
+        dest: Path,
+        component: str = "main",
+        arch: str = "amd64",
+        etag: str | None = None,
+        last_modified: str | None = None,
+        offline: bool = False,
+    ) -> FetchResult:
+        """Fetch a Cloud Archive Packages.gz file.
+
+        Args:
+            ubuntu_series: Ubuntu series (e.g., "jammy").
+            pocket: OpenStack pocket (e.g., "caracal", "caracal-proposed").
+            dest: Local path to write the file.
+            component: Repository component.
+            arch: Architecture.
+            etag: Cached ETag for conditional request.
+            last_modified: Cached Last-Modified for conditional request.
+            offline: If True, do not make network requests.
+
+        Returns:
+            FetchResult with metadata.
+        """
+        url = self.build_url(self.base_url, ubuntu_series, pocket, component, arch)
+        return self.fetch_index(url, dest, etag, last_modified, offline)
+
+
 if __name__ == "__main__":
     fetcher = ArchiveFetcher()
     url = fetcher.build_url("http://archive.ubuntu.com/ubuntu", "noble", "release", "main", "amd64")
-    print(f"URL: {url}")
+    print(f"Ubuntu Archive URL: {url}")
+
+    ca_fetcher = CloudArchiveFetcher()
+    ca_url = ca_fetcher.build_url(CLOUD_ARCHIVE_BASE_URL, "jammy", "caracal", "main", "amd64")
+    print(f"Cloud Archive URL: {ca_url}")
