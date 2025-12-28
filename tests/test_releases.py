@@ -29,22 +29,26 @@ def releases_repo(tmp_path: Path) -> Path:
     # Create deliverables directory
     (repo / "deliverables").mkdir()
 
-    # Create series info directory (note: series_status is a directory)
-    series_dir = repo / "data" / "series_status"
-    series_dir.mkdir(parents=True)
+    # Create data directory
+    data_dir = repo / "data"
+    data_dir.mkdir(parents=True)
 
-    # Create series YAML files
-    dalmatian = {
-        "status": "development",
-        "initial-release": "2024-10-02",
-    }
-    (series_dir / "2024.2.yaml").write_text(yaml.dump(dalmatian))
-
-    caracal = {
-        "status": "maintained",
-        "initial-release": "2024-04-03",
-    }
-    (series_dir / "2024.1.yaml").write_text(yaml.dump(caracal))
+    # Create series_status.yaml file (list ordered from newest to oldest)
+    series_status = [
+        {
+            "name": "2024.2",
+            "release-id": "2024.2",
+            "status": "development",
+            "initial-release": "2024-10-02",
+        },
+        {
+            "name": "2024.1",
+            "release-id": "2024.1",
+            "status": "maintained",
+            "initial-release": "2024-04-03",
+        },
+    ]
+    (data_dir / "series_status.yaml").write_text(yaml.dump(series_status))
 
     # Create a dalmatian series directory
     dalmatian_dir = repo / "deliverables" / "2024.2"
@@ -466,8 +470,23 @@ class TestGetCurrentDevelopmentSeries:
 
     def test_fallback_to_highest_numbered_series(self, releases_repo: Path) -> None:
         # When no series is marked as development, fallback to highest numbered series
-        series_dir = releases_repo / "data" / "series_status"
-        (series_dir / "2024.2.yaml").write_text(yaml.dump({"status": "maintained"}))
+        # Update series_status.yaml to have no development series
+        data_dir = releases_repo / "data"
+        series_status = [
+            {
+                "name": "2024.2",
+                "release-id": "2024.2",
+                "status": "maintained",
+                "initial-release": "2024-10-02",
+            },
+            {
+                "name": "2024.1",
+                "release-id": "2024.1",
+                "status": "maintained",
+                "initial-release": "2024-04-03",
+            },
+        ]
+        (data_dir / "series_status.yaml").write_text(yaml.dump(series_status))
 
         series = get_current_development_series(releases_repo)
         # Should fall back to the highest numbered deliverables directory
@@ -518,12 +537,36 @@ class TestListSeries:
     def test_sorts_numeric_after_named(self, releases_repo: Path) -> None:
         from packastack.releases import list_series
 
-        # Create a named series like "zed"
+        # Update series_status.yaml to include a named series
+        data_dir = releases_repo / "data"
+        series_status = [
+            {
+                "name": "2024.2",
+                "release-id": "2024.2",
+                "status": "development",
+                "initial-release": "2024-10-02",
+            },
+            {
+                "name": "2024.1",
+                "release-id": "2024.1",
+                "status": "maintained",
+                "initial-release": "2024-04-03",
+            },
+            {
+                "name": "zed",
+                "release-id": "27",
+                "status": "end of life",
+                "initial-release": "2022-03-30",
+            },
+        ]
+        (data_dir / "series_status.yaml").write_text(yaml.dump(series_status))
+        # Also create the deliverables directory for the fallback path
         (releases_repo / "deliverables" / "zed").mkdir()
 
         series = list_series(releases_repo)
-        # Check that sorting works (numeric 2024.x comes before named in reverse sort)
+        # The list should be in order as it appears in the YAML
         assert len(series) >= 3
+        assert series == ["2024.2", "2024.1", "zed"]
 
 
 class TestProjectToPackageName:
@@ -699,3 +742,183 @@ class TestLoadOpenstackPackages:
 
         # Should only have the valid project
         assert result == {"valid": "valid"}
+
+
+class TestGetPreviousSeries:
+    """Tests for get_previous_series function."""
+
+    def test_gets_previous_series(self, tmp_path: Path) -> None:
+        """Test getting previous series."""
+        from packastack.releases import get_previous_series
+
+        # Create series directories
+        deliverables = tmp_path / "deliverables"
+        (deliverables / "2024.2").mkdir(parents=True)
+        (deliverables / "2024.1").mkdir(parents=True)
+        (deliverables / "2023.2").mkdir(parents=True)
+
+        # Previous of 2024.2 should be 2024.1
+        result = get_previous_series(tmp_path, "2024.2")
+        assert result == "2024.1"
+
+    def test_no_previous_for_oldest(self, tmp_path: Path) -> None:
+        """Test that oldest series has no previous."""
+        from packastack.releases import get_previous_series
+
+        # Create just one series
+        deliverables = tmp_path / "deliverables"
+        (deliverables / "2024.1").mkdir(parents=True)
+
+        result = get_previous_series(tmp_path, "2024.1")
+        assert result is None
+
+    def test_unknown_series(self, tmp_path: Path) -> None:
+        """Test with unknown series."""
+        from packastack.releases import get_previous_series
+
+        # Create series directories
+        deliverables = tmp_path / "deliverables"
+        (deliverables / "2024.1").mkdir(parents=True)
+
+        result = get_previous_series(tmp_path, "unknown")
+        assert result is None
+
+
+class TestGetSeriesCodename:
+    """Tests for get_series_codename function."""
+
+    def test_named_series_returns_self(self, tmp_path: Path) -> None:
+        """Test that named series returns itself as codename."""
+        from packastack.releases import get_series_codename
+
+        # No need to create anything for named series
+        result = get_series_codename(tmp_path, "caracal")
+        assert result == "caracal"
+
+    def test_numeric_series_no_codename(self, tmp_path: Path) -> None:
+        """Test numeric series without codename info."""
+        from packastack.releases import get_series_codename
+
+        # Create series info without codename
+        series_dir = tmp_path / "data" / "series_status"
+        series_dir.mkdir(parents=True)
+        (series_dir / "2024.2.yaml").write_text("status: development\n")
+
+        result = get_series_codename(tmp_path, "2024.2")
+        assert result is None
+
+
+class TestLoadSeriesInfoEdgeCases:
+    """Additional edge case tests for load_series_info and load_series_status."""
+
+    def test_empty_yaml_file(self, tmp_path: Path) -> None:
+        """Test handling of empty YAML file."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "series_status.yaml").write_text("")
+
+        result = load_series_info(tmp_path)
+        assert result == {}
+
+    def test_invalid_yaml_file(self, tmp_path: Path) -> None:
+        """Test handling of invalid YAML file."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "series_status.yaml").write_text("{{{{not valid yaml")
+
+        result = load_series_info(tmp_path)
+        assert result == {}
+
+    def test_yaml_not_list(self, tmp_path: Path) -> None:
+        """Test handling of YAML file with non-list content."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "series_status.yaml").write_text(yaml.dump({"key": "value"}))
+
+        result = load_series_info(tmp_path)
+        assert result == {}
+
+    def test_list_entry_not_dict(self, tmp_path: Path) -> None:
+        """Test handling of list entries that are not dicts."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "series_status.yaml").write_text(yaml.dump(["string", 123]))
+
+        result = load_series_info(tmp_path)
+        assert result == {}
+
+    def test_entry_missing_name(self, tmp_path: Path) -> None:
+        """Test handling of entries missing the name field."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        series_status = [
+            {"status": "development"},  # Missing name
+            {"name": "2024.1", "status": "maintained"},
+        ]
+        (data_dir / "series_status.yaml").write_text(yaml.dump(series_status))
+
+        result = load_series_info(tmp_path)
+        assert "2024.1" in result
+        # Entry without name should be skipped
+        assert len(result) == 1
+
+    def test_lookup_by_release_id(self, tmp_path: Path) -> None:
+        """Test that series can be looked up by release-id."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True)
+        series_status = [
+            {
+                "name": "dalmatian",
+                "release-id": "2024.2",
+                "status": "development",
+            },
+        ]
+        (data_dir / "series_status.yaml").write_text(yaml.dump(series_status))
+
+        result = load_series_info(tmp_path)
+        # Should be accessible by both name and release-id
+        assert "dalmatian" in result
+        assert "2024.2" in result
+        assert result["dalmatian"] is result["2024.2"]
+
+
+class TestGetCurrentDevelopmentSeriesEdgeCases:
+    """Additional edge case tests for get_current_development_series."""
+
+    def test_fallback_to_named_series(self, tmp_path: Path) -> None:
+        """Test fallback when no numbered series exist."""
+        from packastack.releases import get_current_development_series
+
+        # Create only named series directories
+        deliverables = tmp_path / "deliverables"
+        (deliverables / "bobcat").mkdir(parents=True)
+        (deliverables / "caracal").mkdir(parents=True)
+
+        # No series status, so falls back to deliverables
+        result = get_current_development_series(tmp_path)
+        # Should return alphabetically last: caracal
+        assert result == "caracal"
+
+    def test_skips_hidden_and_underscore_dirs(self, tmp_path: Path) -> None:
+        """Test that hidden and underscore directories are skipped."""
+        from packastack.releases import get_current_development_series
+
+        deliverables = tmp_path / "deliverables"
+        deliverables.mkdir(parents=True)
+        (deliverables / "_templates").mkdir()
+        (deliverables / ".git").mkdir()
+        (deliverables / "2024.1").mkdir()
+
+        result = get_current_development_series(tmp_path)
+        assert result == "2024.1"
+
+    def test_prefers_numbered_over_named(self, tmp_path: Path) -> None:
+        """Test that numbered series are preferred over named series."""
+        from packastack.releases import get_current_development_series
+
+        deliverables = tmp_path / "deliverables"
+        (deliverables / "2024.1").mkdir(parents=True)
+        (deliverables / "caracal").mkdir(parents=True)
+
+        result = get_current_development_series(tmp_path)
+        assert result == "2024.1"

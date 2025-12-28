@@ -97,6 +97,51 @@ class SeriesInfo:
     name: str
     status: str = ""  # development, maintained, extended maintenance, unmaintained
     initial_release: str = ""
+    release_id: str = ""  # e.g., "2024.2" for dalmatian
+
+
+def load_series_status(releases_repo: Path) -> list[SeriesInfo]:
+    """Load the ordered list of OpenStack series from series_status.yaml.
+
+    The series_status.yaml file contains a list of all series in order
+    from newest (development) to oldest. This is the authoritative source
+    for series ordering.
+
+    Args:
+        releases_repo: Path to the openstack/releases repository.
+
+    Returns:
+        List of SeriesInfo ordered from newest to oldest.
+    """
+    status_file = releases_repo / "data" / "series_status.yaml"
+
+    if not status_file.exists():
+        return []
+
+    try:
+        with status_file.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            if not data or not isinstance(data, list):
+                return []
+
+            result: list[SeriesInfo] = []
+            for entry in data:
+                if not isinstance(entry, dict):
+                    continue
+                name = entry.get("name", "")
+                if not name:
+                    continue
+                result.append(
+                    SeriesInfo(
+                        name=name,
+                        status=entry.get("status", ""),
+                        initial_release=entry.get("initial-release", ""),
+                        release_id=entry.get("release-id", ""),
+                    )
+                )
+            return result
+    except Exception:
+        return []
 
 
 def load_series_info(releases_repo: Path) -> dict[str, SeriesInfo]:
@@ -108,27 +153,14 @@ def load_series_info(releases_repo: Path) -> dict[str, SeriesInfo]:
     Returns:
         Dict mapping series name to SeriesInfo.
     """
-    series_dir = releases_repo / "data" / "series_status"
+    series_list = load_series_status(releases_repo)
     series: dict[str, SeriesInfo] = {}
 
-    if not series_dir.exists():
-        return series
-
-    for yaml_file in series_dir.glob("*.yaml"):
-        try:
-            with yaml_file.open(encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-                if not data:
-                    continue
-
-                name = yaml_file.stem
-                series[name] = SeriesInfo(
-                    name=name,
-                    status=data.get("status", ""),
-                    initial_release=data.get("initial-release", ""),
-                )
-        except Exception:
-            continue
+    for info in series_list:
+        series[info.name] = info
+        # Also add by release-id for lookups like "2024.2"
+        if info.release_id:
+            series[info.release_id] = info
 
     return series
 
@@ -399,12 +431,20 @@ def is_snapshot_eligible(
 def list_series(releases_repo: Path) -> list[str]:
     """List all available OpenStack series.
 
+    Uses data/series_status.yaml which is ordered from newest (development)
+    to oldest series.
+
     Args:
         releases_repo: Path to the openstack/releases repository.
 
     Returns:
-        List of series names, sorted by most recent first.
+        List of series names, ordered from most recent to oldest.
     """
+    series_list = load_series_status(releases_repo)
+    if series_list:
+        return [s.name for s in series_list]
+
+    # Fallback: scan deliverables directory (less accurate ordering)
     deliverables_dir = releases_repo / "deliverables"
     if not deliverables_dir.exists():
         return []
@@ -421,6 +461,64 @@ def list_series(releases_repo: Path) -> list[str]:
         return (0, s)
 
     return sorted(series, key=sort_key, reverse=True)
+
+
+def get_previous_series(releases_repo: Path, target_series: str) -> str | None:
+    """Get the series immediately preceding the target series.
+
+    Uses the ordering from list_series() to determine the previous series.
+    For example:
+        - "2025.1" -> "2024.2"
+        - "2024.2" -> "2024.1"
+        - "caracal" -> "bobcat"
+
+    Args:
+        releases_repo: Path to the openstack/releases repository.
+        target_series: Target OpenStack series name.
+
+    Returns:
+        Previous series name, or None if target is oldest or not found.
+    """
+    all_series = list_series(releases_repo)
+
+    if target_series not in all_series:
+        return None
+
+    idx = all_series.index(target_series)
+
+    # list_series returns newest first, so previous is next in list
+    if idx + 1 < len(all_series):
+        return all_series[idx + 1]
+
+    return None
+
+
+def get_series_codename(releases_repo: Path, series: str) -> str | None:
+    """Get the codename for a series if it has one.
+
+    Some series are identified by year.release (e.g., "2024.2") but also
+    have a codename (e.g., "dalmatian"). This function returns the
+    codename if available.
+
+    Args:
+        releases_repo: Path to the openstack/releases repository.
+        series: Series identifier (numeric or codename).
+
+    Returns:
+        Codename if available, None otherwise.
+    """
+    # Check series_status for codename info
+    series_info = load_series_info(releases_repo)
+    info = series_info.get(series)
+
+    if info and hasattr(info, "codename") and info.codename:
+        return info.codename
+
+    # For named series, return the series name itself as the codename
+    if series and not series[0].isdigit():
+        return series
+
+    return None
 
 
 if __name__ == "__main__":
