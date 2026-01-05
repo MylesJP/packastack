@@ -74,6 +74,12 @@ from packastack.commands.build_helpers.tarball import (
     _fetch_release_tarball,
     _run_uscan,
 )
+from packastack.commands.build_helpers.phases import (
+    RetirementCheckResult,
+    RegistryResolutionResult,
+    check_retirement_status,
+    resolve_upstream_registry,
+)
 
 __all__ = [
     # Types
@@ -98,6 +104,11 @@ __all__ = [
     "download_pypi_tarball",
     "fetch_release_tarball",
     "run_uscan",
+    # Phase functions
+    "RetirementCheckResult",
+    "RegistryResolutionResult",
+    "check_retirement_status",
+    "resolve_upstream_registry",
     # Exit codes
     "EXIT_SUCCESS",
     "EXIT_CONFIG_ERROR",
