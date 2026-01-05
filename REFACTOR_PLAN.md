@@ -329,41 +329,58 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Create phase map
 - [x] Create duplication inventory
 - [x] Document golden behaviors
-- [ ] Commit REFACTOR_PLAN.md
+- [x] Commit REFACTOR_PLAN.md
 
 ### Commit 2: Introduce types.py with dataclasses
-- [ ] Create `src/packastack/commands/build/` directory
-- [ ] Create `types.py` with dataclasses
-- [ ] Create `errors.py` with `phase_error()` helper
-- [ ] Update imports in build.py (no behavior change)
-- [ ] Add tests for dataclass construction
-- [ ] Verify: `uv run pytest tests/commands/test_build.py -q`
+- [x] Create `src/packastack/commands/build_helpers/` directory
+- [x] Create `types.py` with dataclasses
+- [x] Create `errors.py` with `phase_error()` helper
+- [x] Add tests for dataclass construction
+- [x] Verify: `uv run pytest tests/commands/build_helpers/ -q`
 
 ### Commit 3: Extract git_helpers.py
-- [ ] Move git helper functions
-- [ ] Update imports in build.py
-- [ ] Add tests for `_shorten_path`, `_compose_commit_message`
-- [ ] Verify tests pass
+- [x] Move git helper functions
+- [x] Update imports in build.py
+- [x] Add tests for git helpers
+- [x] Verify tests pass
 
 ### Commit 4: Extract tarball.py
-- [ ] Move tarball acquisition functions
-- [ ] Update imports in build.py
-- [ ] Add tests with mocked subprocess
-- [ ] Verify tests pass
+- [x] Move tarball acquisition functions
+- [x] Update imports in build.py
+- [x] Add tests with mocked subprocess
+- [x] Verify tests pass
 
-### Commit 5: Split _run_build into phase functions
-- [ ] Create `phases.py` with phase functions
-- [ ] Create coordinator in build.py that calls phases
+### Commit 5: Wire modules into build.py
+- [x] Update build.py to use extracted modules
+- [x] Remove duplicate function definitions (~400 lines)
+- [x] Update test patches to use new module locations
+- [x] Verify tests pass (102 tests passing)
+
+### Commit 6: Create phases.py
+- [x] Create `phases.py` with phase functions
+  - [x] `check_retirement_status()` - retirement phase
+  - [x] `resolve_upstream_registry()` - registry phase
+  - [ ] `check_policy()` - policy phase
+  - [ ] `fetch_packaging()` - fetch phase
+  - [ ] `prepare_upstream()` - prepare phase
+  - [ ] Other phases...
+- [x] Add `RetirementCheckResult` and `RegistryResolutionResult` dataclasses
+- [x] Add tests for phases (15 tests)
+- [x] Verify tests pass (92 build_helpers tests)
+
+### Commit 7: Wire phases into build.py
+- [ ] Replace inline retirement code with `check_retirement_status()`
+- [ ] Replace inline registry code with `resolve_upstream_registry()`
 - [ ] Ensure all event keys preserved
 - [ ] Verify tests pass
 
-### Commit 6: Extract executor.py for build-all
+### Commit 8: Extract executor.py for build-all
 - [ ] Move executor functions
 - [ ] Update `_run_build_all` to use executor
 - [ ] Add tests for retry/resume semantics
 - [ ] Verify tests pass
 
-### Commit 7: Cleanup pass
+### Commit 9: Cleanup pass
 - [ ] Reduce deref churn (consistent aliasing)
 - [ ] Flatten nesting with guard clauses
 - [ ] Collapse repeated guard patterns
