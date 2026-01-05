@@ -50,6 +50,19 @@ from packastack.commands.build_helpers.errors import (
     phase_error,
     phase_warning,
 )
+from packastack.commands.build_helpers.git_helpers import (
+    ensure_no_merge_paths,
+    get_git_author_env,
+    maybe_disable_gpg_sign,
+    maybe_enable_sphinxdoc,
+    no_gpg_sign_enabled,
+    # Backwards compatibility aliases
+    _ensure_no_merge_paths,
+    _get_git_author_env,
+    _maybe_disable_gpg_sign,
+    _maybe_enable_sphinxdoc,
+    _no_gpg_sign_enabled,
+)
 
 __all__ = [
     # Types
@@ -63,6 +76,12 @@ __all__ = [
     # Error helpers
     "phase_error",
     "phase_warning",
+    # Git helpers
+    "ensure_no_merge_paths",
+    "get_git_author_env",
+    "maybe_disable_gpg_sign",
+    "maybe_enable_sphinxdoc",
+    "no_gpg_sign_enabled",
     # Exit codes
     "EXIT_SUCCESS",
     "EXIT_CONFIG_ERROR",
