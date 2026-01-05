@@ -138,3 +138,153 @@ def tty_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_stdout.write = lambda x: None
     mock_stdout.flush = lambda: None
     monkeypatch.setattr("sys.__stdout__", mock_stdout)
+
+
+# =============================================================================
+# Test helpers for BuildRequest, ResolvedTarget, and mock registry
+# =============================================================================
+
+
+@pytest.fixture
+def make_build_request():
+    """Factory fixture for creating BuildRequest objects with defaults.
+
+    Usage:
+        def test_example(make_build_request):
+            request = make_build_request(package="nova", force=True)
+    """
+    from packastack.core.context import BuildRequest
+
+    def _make(
+        package: str = "nova",
+        target: str = "devel",
+        ubuntu_series: str = "devel",
+        cloud_archive: str = "",
+        build_type_str: str = "release",
+        milestone: str = "",
+        force: bool = False,
+        offline: bool = False,
+        include_retired: bool = False,
+        yes: bool = False,
+        binary: bool = False,
+        builder: str = "sbuild",
+        build_deps: bool = True,
+        use_gbp_dch: bool = True,
+        no_cleanup: bool = False,
+        no_spinner: bool = True,
+        validate_plan_only: bool = False,
+        plan_upload: bool = False,
+        upload: bool = False,
+        workspace_ref=None,
+    ) -> BuildRequest:
+        return BuildRequest(
+            package=package,
+            target=target,
+            ubuntu_series=ubuntu_series,
+            cloud_archive=cloud_archive,
+            build_type_str=build_type_str,
+            milestone=milestone,
+            force=force,
+            offline=offline,
+            include_retired=include_retired,
+            yes=yes,
+            binary=binary,
+            builder=builder,
+            build_deps=build_deps,
+            use_gbp_dch=use_gbp_dch,
+            no_cleanup=no_cleanup,
+            no_spinner=no_spinner,
+            validate_plan_only=validate_plan_only,
+            plan_upload=plan_upload,
+            upload=upload,
+            workspace_ref=workspace_ref,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_resolved_target():
+    """Factory fixture for creating ResolvedTarget objects.
+
+    Usage:
+        def test_example(make_resolved_target):
+            target = make_resolved_target("nova")
+            targets = [make_resolved_target("nova"), make_resolved_target("glance")]
+    """
+    from packastack.commands.plan import ResolvedTarget
+
+    def _make(
+        source_package: str,
+        upstream_project: str | None = None,
+        resolution_source: str = "local",
+    ) -> ResolvedTarget:
+        return ResolvedTarget(
+            source_package=source_package,
+            upstream_project=upstream_project or source_package,
+            resolution_source=resolution_source,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def mock_registry():
+    """Create a mock UpstreamsRegistry for testing.
+
+    The mock is pre-configured to resolve any project to a valid
+    OpenDev-style configuration.
+
+    Usage:
+        def test_example(mock_registry):
+            result = mock_registry.resolve("nova")
+    """
+    from unittest.mock import MagicMock
+
+    from packastack.upstream.registry import (
+        ProjectConfig,
+        ReleaseSourceConfig,
+        ReleaseSourceType,
+        ResolvedUpstream,
+        ResolutionSource,
+        SignaturesConfig,
+        SignatureMode,
+        TarballConfig,
+        TarballMethod,
+        UpstreamConfig,
+        UpstreamsRegistry,
+    )
+
+    registry = MagicMock(spec=UpstreamsRegistry)
+    registry.version = 1
+    registry.override_applied = False
+    registry.override_path = ""
+    registry.warnings = []
+
+    def _resolve(project: str, **kwargs) -> ResolvedUpstream:
+        config = ProjectConfig(
+            project_key=project,
+            common_names=[project],
+            upstream=UpstreamConfig(
+                type="git",
+                host="opendev",
+                url=f"https://opendev.org/openstack/{project}.git",
+                default_branch="master",
+            ),
+            release_source=ReleaseSourceConfig(
+                type=ReleaseSourceType.OPENSTACK_RELEASES,
+                deliverable=project,
+            ),
+            tarball=TarballConfig(prefer=[TarballMethod.OFFICIAL]),
+            signatures=SignaturesConfig(mode=SignatureMode.AUTO),
+        )
+        return ResolvedUpstream(
+            project=project,
+            config=config,
+            resolution_source=ResolutionSource.REGISTRY_DEFAULTS,
+        )
+
+    registry.resolve.side_effect = _resolve
+    registry.find_projects.return_value = []
+
+    return registry

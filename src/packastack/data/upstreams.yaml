@@ -1,0 +1,171 @@
+# PackaStack Upstreams Registry
+# =============================
+#
+# This file defines upstream sources for packages that DEVIATE from the
+# standard OpenStack model. Projects not listed here are assumed to:
+#
+#   - Live on opendev.org/openstack/{project}
+#   - Be governed by openstack/releases
+#   - Have tarballs at tarballs.opendev.org
+#   - Use detached .asc signatures when available
+#
+# Only add projects here if they violate these assumptions.
+
+version: 1
+
+defaults:
+  upstream:
+    type: git
+    host: opendev
+    default_branch: master
+  release_source:
+    type: openstack_releases
+    strict: true
+  tarball:
+    prefer: [official]
+  signatures:
+    mode: auto
+  requirements:
+    files:
+      - pyproject.toml
+      - requirements.txt
+      - driver-requirements.txt
+      - setup.cfg
+
+projects:
+  # =========================================================================
+  # GNOCCHI
+  # =========================================================================
+  # Gnocchi was originally an OpenStack project but is now independently
+  # maintained under the gnocchixyz GitHub organization. It is NOT governed
+  # by openstack/releases and does not publish tarballs to opendev.org.
+  #
+  # - Upstream: GitHub (not OpenDev)
+  # - Releases: git tags (not openstack/releases)
+  # - Tarballs: GitHub Releases or PyPI (not official OpenStack tarballs)
+  # - Signatures: signed git tags where available; none for snapshots
+  #
+  gnocchi:
+    common_names: [gnocchi]
+    upstream:
+      type: git
+      host: github
+      url: https://github.com/gnocchixyz/gnocchi.git
+      default_branch: master
+    release_source:
+      type: git_tags
+      tag_regex: "^(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+      strict: false
+    tarball:
+      prefer: [github_release, pypi, git_archive]
+    signatures:
+      mode: git_tag
+    watch:
+      expect:
+        mode: github_release
+        base_url: https://github.com/gnocchixyz/gnocchi
+
+  # =========================================================================
+  # Alembic
+  # =========================================================================
+  # Alembic is a database migration tool used by multiple OpenStack projects.
+  # It is independently maintained under the SQLAlchemy GitHub organization.
+  # It is NOT governed by openstack/releases and does not publish tarballs
+  # to opendev.org.
+  # - Upstream: GitHub (not OpenDev)
+  # - Releases: git tags (not openstack/releases)
+  # - Tarballs: GitHub Releases or PyPI (not official OpenStack tarballs)
+  # - Signatures: signed git tags where available; none for snapshots
+  #
+  # Note: Alembic has been retired as an actively packaged OpenStack project.
+  # It was pulled in for a previous requirement, but is no longer needed.
+  #
+  alembic:
+    common_names: [alembic]
+    retired: true
+    upstream:
+      type: git
+      host: github
+      url:  https://github.com/sqlalchemy/alembic.git
+      default_branch: main
+    release_source:
+      type: git_tags
+      tag_regex: "^rel_(?P<version>[0-9]+_[0-9]+_[0-9]+)$"
+      strict: false
+    tarball:
+      prefer: [github_release, pypi, git_archive]
+    signatures:
+      mode: git_tag
+    watch:
+      expect:
+        mode: github_release
+        base_url: https://github.com/sqlalchemy/alembic
+
+  # =========================================================================
+  # git-review
+  # =========================================================================
+  # git-review is a tool to facilitate code reviews on Gerrit. It is
+  # independently maintained under the Opendev organization. It is NOT
+  # governed by openstack/releases and does not publish tarballs to
+  # opendev.org.
+  # - Upstream: Git (OpenDev)
+  # - Releases: git tags (not openstack/releases)
+  # - Tarballs: PyPI (not official OpenStack tarballs)
+  # - Signatures: none
+  #
+  # Note: git-review has been retired as an actively packaged OpenStack project.
+  # It is now synchronized from debian.
+  #
+  git-review:
+    common_names: [git-review]
+    retired: true
+    upstream:
+      type: git
+      host: opendev
+      url: https://opendev.org/opendev/git-review.git
+      default_branch: master
+    release_source:
+      type: git_tags
+      tag_regex: "^(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+      strict: false
+    tarball:
+      prefer: [pypi]
+    signatures:
+      mode: none
+    watch:
+      expect:
+        mode: git_tags
+        url: https://opendev.org/opendev/git-review.git
+
+  # =========================================================================
+  # rally
+  # =========================================================================
+  # Rally is an OpenStack project but is NOT governed by openstack/releases.
+  # It publishes tarballs to PyPI instead of opendev.org.
+  # - Upstream: Git (OpenDev)
+  # - Releases: git tags (not openstack/releases)
+  # - Tarballs: PyPI (not official OpenStack tarballs)
+  # - Signatures: signed git tags where available; none for snapshots
+  #
+  # Note: Rally has been retired as an actively packaged OpenStack project.
+  #
+  rally:
+    common_names: [rally]
+    retired: true
+    upstream:
+      type: git
+      host: opendev
+      url: https://opendev.org/openstack/rally.git
+      default_branch: master
+    release_source:
+      type: git_tags
+      tag_regex: "^(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+      strict: false
+    tarball:
+      prefer: [pypi, git_archive]
+    signatures:
+      mode: git_tag
+    watch:
+      expect:
+        mode: pypi
+        package_name: rally

@@ -1,0 +1,31 @@
+:orphan:
+
+First Successful Build
+======================
+
+In this tutorial you will run your first end-to-end PackaStack build, producing packages and publishing them to the local repo.
+
+Build
+-----
+
+.. code-block:: bash
+
+   packastack build nova --series noble --arch amd64
+
+What happens:
+- PackaStack ensures the schroot exists and is fresh.
+- Sources are prepared, dependencies resolved, and packages built inside the schroot.
+- Artifacts and logs are copied to the workspace output directory.
+- Packages are published to the local repo.
+
+Verify
+------
+
+Inspect the local repo and artifacts:
+
+.. code-block:: bash
+
+   tree <workspace>/output
+   tree <workspace>/localrepo
+
+Next, run :doc:`validation` to confirm tests and offline guarantees.

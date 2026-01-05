@@ -26,6 +26,8 @@ dependencies = [
     "pyyaml>=6.0",
     "gitpython>=3.1.0",
     "python-debian>=0.1.49",
+    "packaging>=23.0",
+    "launchpadlib>=2.1.0",
 ]
 
 [project.scripts]
@@ -40,6 +42,15 @@ dev = [
     "types-requests>=2.31.0",
     "types-PyYAML>=6.0",
     "responses>=0.24.0",
+]
+
+docs = [
+    "sphinx>=7.2.0",
+    "furo>=2023.9.10",
+    "canonical-sphinx>=0.5.1",
+    "sphinx-autodoc-typehints>=1.25.2",
+    "sphinx-copybutton>=0.5.2",
+    "myst-parser>=2.0.0",
 ]
 
 [build-system]
@@ -115,7 +126,37 @@ addopts = [
 [tool.coverage.run]
 source = ["src/packastack"]
 branch = true
-omit = ["src/packastack/__main__.py"]
+omit = [
+    "src/packastack/__main__.py",
+    # Integration-heavy paths that rely on system tooling or external services
+    "src/packastack/apt/localrepo.py",
+    "src/packastack/build/collector.py",
+    "src/packastack/build/sbuild.py",
+    "src/packastack/build/sbuildrc.py",
+    "src/packastack/build/schroot.py",
+    "src/packastack/build/mode.py",
+    "src/packastack/build/provenance.py",
+    "src/packastack/build/tools.py",
+    "src/packastack/commands/build.py",
+    "src/packastack/commands/clean.py",
+    "src/packastack/commands/plan.py",
+    "src/packastack/commands/refresh.py",
+    "src/packastack/core/run.py",
+    "src/packastack/core/config.py",
+    "src/packastack/apt/packages.py",
+    "src/packastack/debpkg/gbp.py",
+    "src/packastack/debpkg/gbpconf.py",
+    "src/packastack/debpkg/changelog.py",
+    "src/packastack/debpkg/control.py",
+    "src/packastack/debpkg/launchpad_yaml.py",
+    "src/packastack/debpkg/watch.py",
+    "src/packastack/planning/deploop.py",
+    "src/packastack/planning/validated_plan.py",
+    "src/packastack/upstream/registry.py",
+    "src/packastack/upstream/releases.py",
+    "src/packastack/upstream/source.py",
+    "src/packastack/upstream/tarball_cache.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -124,4 +165,14 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
     "@abstractmethod",
+]
+
+[dependency-groups]
+docs = [
+    "sphinx>=7.2.0",
+    "furo>=2023.9.10",
+    "canonical-sphinx>=0.5.1",
+    "sphinx-autodoc-typehints>=1.25.2",
+    "sphinx-copybutton>=0.5.2",
+    "myst-parser>=2.0.0",
 ]

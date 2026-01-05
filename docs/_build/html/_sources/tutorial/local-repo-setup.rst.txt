@@ -1,0 +1,32 @@
+:orphan:
+
+Local Repo Setup
+================
+
+Here you will create and verify the local APT repository that PackaStack uses to stage built packages.
+
+Initialize the Repo
+-------------------
+
+The repo is created automatically when you publish your first build. Ensure your workspace has an `output` directory where artifacts will land.
+
+Publish Artifacts
+-----------------
+
+After building (see next tutorial), artifacts are published to the local repo automatically. To inspect the layout:
+
+.. code-block:: bash
+
+   tree <workspace>/localrepo
+
+Verify Pinning
+--------------
+
+Inside a schroot:
+
+.. code-block:: bash
+
+   sudo schroot -c packastack-noble-amd64 -u root -- bash
+   grep -r Pin-Priority /etc/apt/preferences.d
+
+Move on to :doc:`first-build` to produce packages and populate the repo.

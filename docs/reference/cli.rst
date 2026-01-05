@@ -1,0 +1,118 @@
+Command-Line Reference
+======================
+
+PackaStack keeps its CLI small and direct. There are five verbs—``init``, ``plan``, ``build``, ``refresh``, and ``clean``—and everything they do is written down here. If it is not listed, it is not implemented.
+
+Usage, options, and exit codes are described per command below. Exit codes are stable contracts you can wire into CI.
+
+packastack init
+---------------
+
+**What it does**
+
+Initializes the world: writes a default config if one is missing, creates cache directories, clones or updates ``openstack/releases``, seeds the Ubuntu archive metadata files, and records the current Ubuntu development series. It is safe to run more than once; existing config is left intact.
+
+**Options**
+
+``-p``, ``--prime`` — Immediately fetch Ubuntu archive metadata (equivalent to calling ``refresh`` with TTL forced to zero). Requires network.
+
+**Exit codes**
+
+``0`` on success; any nonzero value means initialization failed.
+
+packastack plan
+---------------
+
+**What it does**
+
+Resolves a package (or prefix) into a dependency graph and emits a build order without building anything. It consults the local repo and ``openstack/releases`` to map project names to packages, and it writes a run summary you can inspect later.
+
+**Common options**
+
+- ``package`` (positional): the package name or prefix to plan.
+- ``-u``, ``--ubuntu-series``: Ubuntu series to target (default ``devel``).
+- ``-t``, ``--target``: OpenStack series to target (default ``devel``).
+- ``-f``, ``--force``: proceed when multiple matches exist.
+- ``-o``, ``--offline``: avoid network calls.
+- ``-s``, ``--skip-local``: ignore the local repo when resolving.
+- ``-p``, ``--plan`` / ``-P``, ``--plan-upload`` / ``-U``, ``--upload``: choose how much planning output to print and whether to include upload ordering.
+- ``-r``, ``--pretty``: print the dependency graph.
+
+**Exit codes**
+
+``0`` success; ``1`` configuration or usage error; ``5`` missing packages detected; ``6`` dependency cycle detected.
+
+packastack build
+-----------------
+
+**What it does**
+
+Builds an OpenStack package end-to-end: validates the plan, fetches sources, applies policy, drives sbuild or dpkg, and publishes results into the local repo. For sbuild-based binary builds, PackaStack ensures a schroot exists (creating it if missing). It upgrades ``debian/watch`` to ``version=5`` when present, enables the ``sphinxdoc`` addon in ``debian/rules``, defaults to ``gbp dch`` for changelog entries, and exports the patch queue back to ``master`` before finishing. Artifacts, logs, and a run summary are written to configured cache paths.
+
+**Common options**
+
+- ``package`` (positional): source package or OpenStack project name.
+- ``-u``, ``--ubuntu-series`` and ``-t``, ``--target``: choose Ubuntu and OpenStack targets (default ``devel`` for both).
+- ``-r/-R``, ``--release/--no-release``: build from release tarball (default on). Use ``--snapshot`` for git snapshots or ``--milestone`` for milestone tarballs.
+- ``-c``, ``--cloud-archive``: include the cloud archive index in dependency resolution (planning only).
+- ``-o``, ``--offline``: disable PackaStack network fetches; requires cached tarballs and an existing schroot.
+- ``-b/-B``, ``--binary/--no-binary``: toggle building binary packages (default on); ``--builder`` selects ``sbuild`` (default) or ``dpkg``.
+- ``-d/-D``, ``--build-deps/--no-build-deps``: auto-build missing OpenStack dependencies discovered during validation (default on).
+- ``--use-gbp-dch/--no-gbp-dch``: toggle using ``gbp dch`` for changelog entries (default on; falls back to older path only when disabled).
+- ``-v``, ``--validate-plan`` and ``-p``, ``--plan-upload``: stop after validation or show the upload plan without building.
+- ``-U``, ``--upload``: print upload commands.
+- ``-k``, ``--no-cleanup``: keep the workspace on success.
+- ``-q``, ``--no-spinner`` and ``-y``, ``--yes``: control UI noise and confirmations.
+
+**Exit codes**
+
+``0`` success; ``1`` configuration error; ``2`` required tools missing; ``3`` fetch failed; ``4`` patch failed; ``5`` missing packages; ``6`` dependency cycle; ``7`` build failed; ``8`` policy blocked; ``9`` registry error.
+
+packastack refresh
+-------------------
+
+**What it does**
+
+Fetches Ubuntu archive Packages.gz indexes with TTL and conditional requests (ETag/If-Modified-Since). Can run offline to validate cache presence, or online to refresh. Writes metadata next to each index and logs what changed.
+
+**Common options**
+
+- ``-u``, ``--ubuntu-series``: Ubuntu series to refresh (default ``devel``).
+- ``-p``, ``--pockets``: pockets such as ``release,updates,security`` (default).
+- ``-c``, ``--components``: components such as ``main,universe`` (default).
+- ``-a``, ``--arches``: comma-separated arches; ``host`` resolves to the running arch and ``all`` is filtered internally.
+- ``-m``, ``--mirror``: mirror URL (default ``http://archive.ubuntu.com/ubuntu``).
+- ``-T``, ``--ttl``: TTL for cached indexes (e.g., ``6h``, ``1d``).
+- ``-f``, ``--force``: ignore TTL and fetch anyway.
+- ``-o``, ``--offline``: do not perform network requests; report missing indexes instead.
+
+**Exit codes**
+
+``0`` success; ``1`` configuration or usage error; ``2`` partial failure while online; ``3`` offline mode with missing required files; ``4`` corrupt cache detected.
+
+packastack clean
+-----------------
+
+**What it does**
+
+Reports or removes cached data (upstream tarballs and extractions, build workspaces, local APT repo). With no flags, it prints cache status.
+
+**Common options**
+
+- ``-n``, ``--dry-run``: show what would be removed without deleting.
+- ``--expired``: remove only expired tarball extractions (based on ``--max-age``).
+- ``--tarballs``: remove cached tarballs and extractions.
+- ``--workspaces``: remove temporary build workspaces.
+- ``--apt-repo``: remove the local APT repository cache.
+- ``-a``, ``--all``: remove all caches (tarballs, workspaces, apt repo).
+- ``--max-age``: max age in days for expired-only cleanup (default 14).
+- ``-f``, ``--force``: skip confirmation prompts.
+
+**Exit codes**
+
+``0`` success; nonzero on failure.
+
+Stability
+---------
+
+These commands and exit codes are part of the contract. New flags may appear over time, but undocumented commands or options are not covered by the contract.

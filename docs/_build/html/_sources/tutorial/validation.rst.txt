@@ -1,0 +1,36 @@
+:orphan:
+
+Validation Steps
+================
+
+After your first build, validate that everything is working as intended: tests pass, artifacts are present, and offline mode is honored.
+
+Run Tests
+---------
+
+Builds run validation steps automatically. To re-run validation for your package, re-run the build:
+
+.. code-block:: bash
+
+   packastack build nova --series noble --arch amd64
+
+Check Artifacts and Repo
+------------------------
+
+.. code-block:: bash
+
+   tree <workspace>/output
+   tree <workspace>/localrepo
+
+Offline Check
+-------------
+
+Disconnect networking (or disable Wi-Fi) and run:
+
+.. code-block:: bash
+
+   packastack build nova --offline --series noble --arch amd64
+
+If the build succeeds, your environment is fully pre-seeded.
+
+If something fails, consult the how-to guides for debugging and cleanup.

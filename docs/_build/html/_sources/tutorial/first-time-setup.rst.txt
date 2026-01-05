@@ -1,0 +1,24 @@
+:orphan:
+
+First-time Setup
+================
+
+This tutorial gets you from zero to a working PackaStack environment with minimal manual steps. You will install dependencies, configure your workspace, and verify that PackaStack can create schroots and a local repository.
+
+Steps
+-----
+1. Install required system packages (schroot, sbuild, git). If unsure, see the project README for the current list.
+2. Create or select a workspace directory where PackaStack will manage schroots and the local repo.
+3. Initialize the workspace (creates config, caches, and clones openstack/releases). Run once while online:
+
+   .. code-block:: bash
+
+      packastack init --prime
+
+4. Verify PackaStack CLI is available:
+
+   .. code-block:: bash
+
+      packastack --help
+
+Next, proceed to :doc:`schroot-creation` to build and validate your first schroot.

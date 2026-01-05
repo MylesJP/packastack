@@ -1,0 +1,29 @@
+Bind Mounts Contract
+=====================
+
+PackaStack uses bind mounts to make specific host directories available inside schroots. This enables reproducible builds, efficient caching, and safe artifact extraction. The list of bind mounts is fixed and documented; if you find a writable mount that isn’t documented, please report it (and consider buying a lottery ticket).
+
++--------------------------+---------------------+-------------------+-----------------------------------+
+| Path inside schroot      | Host path           | Access            | Purpose                           |
++==========================+=====================+===================+===================================+
+| /build/source            | <workspace>/src     | read-only         | Source tree for build             |
++--------------------------+---------------------+-------------------+-----------------------------------+
+| /build/output            | <workspace>/output  | read-write        | Build artifacts and logs          |
++--------------------------+---------------------+-------------------+-----------------------------------+
+| /build/cache             | <workspace>/cache   | read-write        | Download/cache for build tools    |
++--------------------------+---------------------+-------------------+-----------------------------------+
+| /etc/apt/apt.conf.d/99ps | generated           | read-only         | Local repo pinning config         |
++--------------------------+---------------------+-------------------+-----------------------------------+
+
+Only the documented mounts are present. Any deviation is a bug. Read-only mounts prevent accidental or malicious changes to source and config. Read-write mounts are limited to output and cache; modifying these outside PackaStack is unsupported.
+
+Do not modify /build/source or /etc/apt/apt.conf.d/99ps inside the schroot. Do not write to /build/output or /build/cache from outside PackaStack. If you do, you get to keep both pieces (and possibly a stern warning).
+
+Contractual Guarantees
+----------------------
+- The list of bind mounts is fixed and documented.
+- Only the documented paths are mounted read-write; all others are read-only or not mounted.
+- Users must not modify bind-mounted paths outside the documented writable set.
+- Bind mount configuration is invariant across builds for a given workspace.
+
+See also: :doc:`schroot`, :doc:`local-repo`, :doc:`offline-mode`, :doc:`../overview/invariants`

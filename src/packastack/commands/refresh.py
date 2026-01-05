@@ -26,24 +26,25 @@ from __future__ import annotations
 
 import datetime
 import sys
+from dataclasses import dataclass
 
 import requests
 import typer
 
-from packastack.arch import resolve_arches
-from packastack.archive import (
+from packastack.target.arch import resolve_arches
+from packastack.apt.archive import (
     ArchiveFetcher,
     load_metadata,
     validate_gzip,
     write_metadata,
 )
-from packastack.commands.init import _clone_or_update_releases
-from packastack.config import load_config
-from packastack.duration import parse_duration
-from packastack.paths import resolve_paths
-from packastack.run import RunContext, activity
-from packastack.series import resolve_series
-from packastack.spinner import activity_spinner
+from packastack.commands.init import _clone_or_update_releases, _clone_or_update_project_config
+from packastack.core.config import load_config
+from packastack.core.duration import parse_duration
+from packastack.core.paths import resolve_paths
+from packastack.core.run import RunContext, activity
+from packastack.core.spinner import activity_spinner
+from packastack.target.series import resolve_series
 
 # Exit codes per spec
 EXIT_SUCCESS = 0
@@ -53,21 +54,12 @@ EXIT_OFFLINE_MISSING = 3
 EXIT_CORRUPT_CACHE = 4
 
 
-def refresh_ubuntu_archive(
-    ubuntu_series: str,
-    pockets: list[str],
-    components: list[str],
-    arches: list[str],
-    mirror: str,
-    ttl_seconds: int,
-    force: bool,
-    offline: bool,
-    run: RunContext | None = None,
-) -> int:
-    """Core refresh logic, callable from init command or CLI.
+@dataclass(frozen=True)
+class RefreshConfig:
+    """Immutable configuration for Ubuntu archive refresh.
 
-    Args:
-        ubuntu_series: Resolved series name.
+    Attributes:
+        ubuntu_series: Resolved Ubuntu series name (e.g., "noble").
         pockets: List of pockets (release, updates, security).
         components: List of components (main, universe).
         arches: List of architectures (may include 'host', 'all').
@@ -75,6 +67,50 @@ def refresh_ubuntu_archive(
         ttl_seconds: TTL in seconds for cached indexes.
         force: Ignore TTL and force fetch.
         offline: Run in offline mode (no network requests).
+    """
+
+    ubuntu_series: str
+    pockets: tuple[str, ...]
+    components: tuple[str, ...]
+    arches: tuple[str, ...]
+    mirror: str
+    ttl_seconds: int
+    force: bool = False
+    offline: bool = False
+
+    @classmethod
+    def from_lists(
+        cls,
+        ubuntu_series: str,
+        pockets: list[str],
+        components: list[str],
+        arches: list[str],
+        mirror: str,
+        ttl_seconds: int,
+        force: bool = False,
+        offline: bool = False,
+    ) -> RefreshConfig:
+        """Create RefreshConfig from list arguments (for CLI compatibility)."""
+        return cls(
+            ubuntu_series=ubuntu_series,
+            pockets=tuple(pockets),
+            components=tuple(components),
+            arches=tuple(arches),
+            mirror=mirror,
+            ttl_seconds=ttl_seconds,
+            force=force,
+            offline=offline,
+        )
+
+
+def refresh_ubuntu_archive(
+    config: RefreshConfig,
+    run: RunContext | None = None,
+) -> int:
+    """Core refresh logic, callable from init command or CLI.
+
+    Args:
+        config: RefreshConfig with all refresh parameters.
         run: Optional RunContext for logging.
 
     Returns:
@@ -88,7 +124,7 @@ def refresh_ubuntu_archive(
     # Resolve architectures (replace 'host' with actual, filter 'all')
     # Note: 'all' is not a separate binary- directory; arch-independent packages
     # are included in each architecture's Packages.gz (binary-amd64, etc.)
-    resolved_arches = [a for a in resolve_arches(arches) if a != "all"]
+    resolved_arches = [a for a in resolve_arches(list(config.arches)) if a != "all"]
 
     # Create session for connection pooling
     session = requests.Session()
@@ -99,90 +135,117 @@ def refresh_ubuntu_archive(
     offline_missing = 0
     corrupt = 0
 
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.UTC)
 
-    for pocket in pockets:
-        for component in components:
-            for arch in resolved_arches:
-                # Build destination path
-                dest_dir = indexes_dir / ubuntu_series / pocket / component / f"binary-{arch}"
-                dest_path = dest_dir / "Packages.gz"
+    from rich.console import Console
+    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
 
-                url = fetcher.build_url(mirror, ubuntu_series, pocket, component, arch)
+    targets = [
+        (pocket, component, arch)
+        for pocket in config.pockets
+        for component in config.components
+        for arch in resolved_arches
+    ]
 
-                if run:
-                    run.log_event({
-                        "event": "fetch.start",
-                        "url": url,
-                        "dest": str(dest_path),
-                        "offline": offline,
-                    })
+    console = Console(file=sys.__stdout__, force_terminal=True)
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=40),
+        TaskProgressColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("Refreshing Ubuntu package indexes", total=len(targets))
 
-                # Check TTL unless force is set
-                existing_meta = load_metadata(dest_path)
-                if existing_meta and not force:
-                    try:
-                        fetched_utc = datetime.datetime.fromisoformat(existing_meta["fetched_utc"])
-                        age_seconds = (now - fetched_utc).total_seconds()
-                        if age_seconds < ttl_seconds:
-                            activity("refresh", f"Skipping {pocket}/{component}/{arch} (within TTL)")
-                            if run:
-                                run.log_event({
-                                    "event": "fetch.skip_ttl",
-                                    "url": url,
-                                    "age_seconds": age_seconds,
-                                    "ttl_seconds": ttl_seconds,
-                                })
-                            successes += 1
-                            continue
-                    except (KeyError, ValueError):
-                        pass  # Invalid metadata, proceed with fetch
+        for pocket, component, arch in targets:
+            progress.update(task, description=f"Fetching {pocket}/{component}/{arch}")
 
-                # Fetch the index
-                with activity_spinner("refresh", f"Fetching {pocket}/{component}/{arch}"):
-                    result = fetcher.fetch_index(
-                        url=url,
-                        dest=dest_path,
-                        etag=existing_meta.get("etag") if existing_meta else None,
-                        last_modified=existing_meta.get("last_modified") if existing_meta else None,
-                        offline=offline,
-                    )
+            # Build destination path
+            dest_dir = indexes_dir / config.ubuntu_series / pocket / component / f"binary-{arch}"
+            dest_path = dest_dir / "Packages.gz"
 
-                if result.error:
-                    if offline and "not found" in result.error.lower():
-                        activity("refresh", f"Missing in offline mode: {pocket}/{component}/{arch}")
+            url = fetcher.build_url(config.mirror, config.ubuntu_series, pocket, component, arch)
+
+            if run:
+                run.log_event({
+                    "event": "fetch.start",
+                    "url": url,
+                    "dest": str(dest_path),
+                    "offline": config.offline,
+                })
+
+            # Check TTL unless force is set
+            existing_meta = load_metadata(dest_path)
+            if existing_meta and not config.force:
+                try:
+                    fetched_utc = datetime.datetime.fromisoformat(existing_meta["fetched_utc"])
+                    if fetched_utc.tzinfo is None:
+                        fetched_utc = fetched_utc.replace(tzinfo=datetime.UTC)
+                    age_seconds = (now - fetched_utc).total_seconds()
+                    if age_seconds < config.ttl_seconds:
+                        activity("refresh", f"Skipping {pocket}/{component}/{arch} (within TTL)")
                         if run:
-                            run.log_event({"event": "fetch.offline_missing", "url": url, "error": result.error})
-                        offline_missing += 1
-                    else:
-                        activity("refresh", f"Failed: {pocket}/{component}/{arch} - {result.error}")
-                        if run:
-                            run.log_event({"event": "fetch.error", "url": url, "error": result.error})
-                        failures += 1
-                    continue
+                            run.log_event({
+                                "event": "fetch.skip_ttl",
+                                "url": url,
+                                "age_seconds": age_seconds,
+                                "ttl_seconds": config.ttl_seconds,
+                            })
+                        successes += 1
+                        progress.advance(task)
+                        continue
+                except (KeyError, ValueError):
+                    pass  # Invalid metadata, proceed with fetch
 
-                # Validate gzip integrity
-                if dest_path.exists() and not validate_gzip(dest_path):
-                    activity("refresh", f"Corrupt gzip: {pocket}/{component}/{arch}")
+            # Fetch the index
+            result = fetcher.fetch_index(
+                url=url,
+                dest=dest_path,
+                etag=existing_meta.get("etag") if existing_meta else None,
+                last_modified=existing_meta.get("last_modified") if existing_meta else None,
+                offline=config.offline,
+            )
+
+            if result.error:
+                if config.offline and "not found" in result.error.lower():
+                    activity("refresh", f"Missing in offline mode: {pocket}/{component}/{arch}")
                     if run:
-                        run.log_event({"event": "fetch.corrupt", "url": url, "path": str(dest_path)})
-                    corrupt += 1
-                    continue
+                        run.log_event({"event": "fetch.offline_missing", "url": url, "error": result.error})
+                    offline_missing += 1
+                else:
+                    activity("refresh", f"Failed: {pocket}/{component}/{arch} - {result.error}")
+                    if run:
+                        run.log_event({"event": "fetch.error", "url": url, "error": result.error})
+                    failures += 1
+                progress.advance(task)
+                continue
 
-                # Write metadata
-                write_metadata(dest_path, result)
-
-                status = "cached (304)" if result.was_cached else "fetched"
-                activity("refresh", f"{status}: {pocket}/{component}/{arch}")
+            # Validate gzip integrity
+            if dest_path.exists() and not validate_gzip(dest_path):
+                activity("refresh", f"Corrupt gzip: {pocket}/{component}/{arch}")
                 if run:
-                    run.log_event({
-                        "event": "fetch.success",
-                        "url": url,
-                        "was_cached": result.was_cached,
-                        "sha256": result.sha256,
-                        "size": result.size,
-                    })
-                successes += 1
+                    run.log_event({"event": "fetch.corrupt", "url": url, "path": str(dest_path)})
+                corrupt += 1
+                progress.advance(task)
+                continue
+
+            # Write metadata
+            write_metadata(dest_path, result)
+
+            status = "cached (304)" if result.was_cached else "fetched"
+            activity("refresh", f"{status}: {pocket}/{component}/{arch}")
+            if run:
+                run.log_event({
+                    "event": "fetch.success",
+                    "url": url,
+                    "was_cached": result.was_cached,
+                    "sha256": result.sha256,
+                    "size": result.size,
+                })
+            successes += 1
+            progress.advance(task)
 
     session.close()
 
@@ -197,14 +260,14 @@ def refresh_ubuntu_archive(
 
 
 def refresh(
-    ubuntu_series: str = typer.Option("devel", help="Ubuntu series to refresh"),
-    pockets: str = typer.Option("release,updates,security", help="Comma-separated pockets"),
-    components: str = typer.Option("main,universe", help="Comma-separated components"),
-    arches: str = typer.Option("host,all", help="Comma-separated arches"),
-    mirror: str = typer.Option("http://archive.ubuntu.com/ubuntu", help="Ubuntu mirror URL"),
-    ttl: str = typer.Option("6h", help="TTL for cached indexes (e.g., 6h, 1d, 30m)"),
-    force: bool = typer.Option(False, help="Ignore TTL and force fetch"),
-    offline: bool = typer.Option(False, help="Run in offline mode (no network requests)"),
+    ubuntu_series: str = typer.Option("devel", "-u", "--ubuntu-series", help="Ubuntu series to refresh"),
+    pockets: str = typer.Option("release,updates,security", "-p", "--pockets", help="Comma-separated pockets"),
+    components: str = typer.Option("main,universe", "-c", "--components", help="Comma-separated components"),
+    arches: str = typer.Option("host,all", "-a", "--arches", help="Comma-separated arches"),
+    mirror: str = typer.Option("http://archive.ubuntu.com/ubuntu", "-m", "--mirror", help="Ubuntu mirror URL"),
+    ttl: str = typer.Option("6h", "-T", "--ttl", help="TTL for cached indexes (e.g., 6h, 1d, 30m)"),
+    force: bool = typer.Option(False, "-f", "--force", help="Ignore TTL and force fetch"),
+    offline: bool = typer.Option(False, "-o", "--offline", help="Run in offline mode (no network requests)"),
 ) -> None:
     """Refresh Ubuntu archive Packages.gz indexes.
 
@@ -245,6 +308,14 @@ def refresh(
                 activity("refresh", f"Warning: Could not update openstack-releases: {e}")
                 run.log_event({"event": "openstack_releases.warning", "error": str(e)})
 
+            # Update openstack-project-config repository
+            project_config_path = paths["openstack_project_config"]
+            try:
+                _clone_or_update_project_config(project_config_path, run, phase="refresh")
+            except Exception as e:  # pragma: no cover
+                activity("refresh", f"Warning: Could not update openstack-project-config: {e}")
+                run.log_event({"event": "openstack_project_config.warning", "error": str(e)})
+
         # Parse comma-separated lists
         pocket_list = [p.strip() for p in pockets.split(",") if p.strip()]
         component_list = [c.strip() for c in components.split(",") if c.strip()]
@@ -263,7 +334,7 @@ def refresh(
         })
 
         # Perform refresh
-        exit_code = refresh_ubuntu_archive(
+        refresh_config = RefreshConfig.from_lists(
             ubuntu_series=resolved_series,
             pockets=pocket_list,
             components=component_list,
@@ -272,8 +343,8 @@ def refresh(
             ttl_seconds=ttl_seconds,
             force=force,
             offline=offline,
-            run=run,
         )
+        exit_code = refresh_ubuntu_archive(refresh_config, run=run)
 
         # Write summary
         status_map = {

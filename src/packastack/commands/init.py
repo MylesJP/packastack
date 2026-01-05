@@ -32,16 +32,17 @@ from typing import TYPE_CHECKING
 import git
 import typer
 
-from packastack.config import ensure_config_exists, load_config
-from packastack.paths import ensure_directories
-from packastack.run import RunContext, activity
-from packastack.series import resolve_series
-from packastack.spinner import activity_spinner
+from packastack.core.config import ensure_config_exists, load_config
+from packastack.core.paths import ensure_directories
+from packastack.core.run import RunContext, activity
+from packastack.target.series import resolve_series
+from packastack.core.spinner import activity_spinner
 
 if TYPE_CHECKING:
-    from packastack.run import RunContext as RunContextType
+    from packastack.core.run import RunContext as RunContextType
 
 OPENSTACK_RELEASES_URL = "https://opendev.org/openstack/releases"
+OPENSTACK_PROJECT_CONFIG_URL = "https://opendev.org/openstack/project-config"
 
 
 def _clone_or_update_releases(path: Path, run: RunContextType, phase: str = "init") -> None:
@@ -65,6 +66,30 @@ def _clone_or_update_releases(path: Path, run: RunContextType, phase: str = "ini
                 git.Repo.clone_from(OPENSTACK_RELEASES_URL, path)
             except git.GitCommandError as e:  # pragma: no cover
                 run.log_event({"event": "openstack_releases.clone_error", "error": str(e)})
+                raise
+
+
+def _clone_or_update_project_config(path: Path, run: RunContextType, phase: str = "init") -> None:
+    """Clone or update the openstack/project-config repository."""
+    if path.exists() and (path / ".git").is_dir():
+        # Repository exists, fetch and prune
+        run.log_event({"event": "openstack_project_config.fetch", "path": str(path)})
+        with activity_spinner(phase, f"Updating openstack-project-config at {path}"):
+            try:
+                repo = git.Repo(path)
+                origin = repo.remotes.origin
+                origin.fetch(prune=True)
+            except git.GitCommandError as e:  # pragma: no cover
+                run.log_event({"event": "openstack_project_config.fetch_error", "error": str(e)})
+                raise
+    else:
+        # Clone fresh
+        run.log_event({"event": "openstack_project_config.clone", "url": OPENSTACK_PROJECT_CONFIG_URL, "path": str(path)})
+        with activity_spinner(phase, f"Cloning openstack-project-config to {path}"):
+            try:
+                git.Repo.clone_from(OPENSTACK_PROJECT_CONFIG_URL, path)
+            except git.GitCommandError as e:  # pragma: no cover
+                run.log_event({"event": "openstack_project_config.clone_error", "error": str(e)})
                 raise
 
 
@@ -104,7 +129,7 @@ Use `packastack refresh ubuntu-archive` to update these indexes.
 
 
 def init(
-    prime: bool = typer.Option(False, help="Prime minimal Ubuntu archive metadata after init"),
+    prime: bool = typer.Option(False, "-p", "--prime", help="Prime minimal Ubuntu archive metadata after init"),
 ) -> None:
     """Initialize Packastack configuration and cache directories.
 
@@ -137,29 +162,38 @@ def init(
             activity("init", f"Warning: Could not clone/update openstack-releases: {e}")
             run.log_event({"event": "openstack_releases.warning", "error": str(e)})
 
-        # Step 4: Create ubuntu-archive README and config
+        # Step 4: Clone or update openstack-project-config
+        project_config_path = paths["openstack_project_config"]
+        try:
+            _clone_or_update_project_config(project_config_path, run)
+            steps_completed.append("openstack_project_config_ready")
+        except Exception as e:  # pragma: no cover
+            activity("init", f"Warning: Could not clone/update openstack-project-config: {e}")
+            run.log_event({"event": "openstack_project_config.warning", "error": str(e)})
+
+        # Step 5: Create ubuntu-archive README and config
         ubuntu_cache = paths["ubuntu_archive_cache"]
         with activity_spinner("init", "Creating ubuntu-archive metadata"):
             _create_ubuntu_archive_files(ubuntu_cache)
             steps_completed.append("ubuntu_archive_files_created")
             run.log_event({"event": "ubuntu_archive.files_created"})
 
-        # Step 5: Resolve devel series
+        # Step 6: Resolve devel series
         with activity_spinner("init", "Resolving Ubuntu development series"):
             devel_series = resolve_series("devel")
             run.log_event({"event": "series.resolved", "devel": devel_series})
             steps_completed.append("series_resolved")
         activity("init", f"Development series: {devel_series}")
 
-        # Step 6: Optionally prime minimal metadata
+        # Step 7: Optionally prime minimal metadata
         if prime:  # pragma: no cover - integration test path
             activity("init", "Priming minimal Ubuntu archive metadata")
             run.log_event({"event": "prime.start"})
             # Import refresh logic here to avoid circular imports
-            from packastack.commands.refresh import refresh_ubuntu_archive
+            from packastack.commands.refresh import refresh_ubuntu_archive, RefreshConfig
 
             try:
-                refresh_ubuntu_archive(
+                refresh_config = RefreshConfig.from_lists(
                     ubuntu_series=devel_series,
                     pockets=["release", "updates", "security"],
                     components=["main", "universe"],
@@ -168,8 +202,8 @@ def init(
                     ttl_seconds=0,  # Force fetch
                     force=True,
                     offline=False,
-                    run=run,
                 )
+                refresh_ubuntu_archive(refresh_config, run=run)
                 steps_completed.append("metadata_primed")
                 run.log_event({"event": "prime.complete"})
             except Exception as e:

@@ -1,0 +1,6 @@
+:orphan:
+
+Schroot Creation (superseded)
+==============================
+
+This legacy tutorial has been superseded by the quickstart. PackaStack now creates and refreshes schroots automatically during builds; there is no ``packastack schroot`` command yet. If you suspect a broken schroot, remove it with your system schroot tools and rerun a build—PackaStack will recreate it. See :doc:`../howto/refresh-schroots` for the current workaround.

@@ -1,0 +1,54 @@
+CLI Contract Matrix
+===================
+
+Small CLI, big promises. This table declares what each command touches, whether it needs a network, and which exit codes you can rely on. If it’s not here, it’s not a contract.
+
+.. list-table::
+	 :header-rows: 1
+
+	 * - Command
+		 - Purpose
+		 - Schroot touches
+		 - Local repo touches
+		 - Offline support
+		 - Network required
+		 - Exit codes (stable)
+		 - Stability
+	 * - init
+		 - Bootstrap config, caches, and ``openstack/releases``
+		 - No (sets up metadata only)
+		 - No
+		 - N/A
+		 - Yes unless already primed
+		 - 0 success; nonzero on failure
+		 - Stable
+	 * - plan
+		 - Resolve dependency graph without building
+		 - Reads existing schroots (no mutation)
+		 - Reads local repo (no mutation)
+		 - Yes (``--offline``)
+		 - No unless pulling fresh refs
+		 - 0 ok; 1 usage; 5 missing pkgs; 6 dep cycle
+		 - Stable
+	 * - build
+		 - Build package end-to-end and publish to repo
+		 - Creates/refreshes as needed
+		 - Publishes artifacts, updates indexes
+		 - Yes (``--offline`` blocks schroot network)
+		 - Yes unless fully pre-seeded
+		 - 0 ok; 1 config; 2 tools; 3 fetch; 4 patch; 5 missing; 6 cycle; 7 build; 8 policy; 9 registry
+		 - Stable
+	 * - refresh
+		 - Fetch/validate archive indexes with TTL/ETag
+		 - No
+		 - No
+		 - Yes (``--offline`` validates cache presence)
+		 - Yes for fresh fetch; no when using cached indexes
+		 - 0 ok; 1 usage; 2 partial online failure; 3 offline missing; 4 corrupt cache
+		 - Stable
+
+Notes
+-----
+- Offline support means the command can run with ``--offline``; builds then refuse all network inside schroot and require pre-seeded caches.
+- Stability refers to intent: options may grow, but existing behaviors and exit codes remain unless the contract table is updated.
+- Missing CLI verbs? They’re not implemented. Roadmap ideas (auto-init, schroot/admin helpers) will appear here only when real.

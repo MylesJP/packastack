@@ -1,0 +1,30 @@
+Schroot Environment Contract
+=============================
+
+A schroot is a lightweight, chroot-based container used by PackaStack to provide a deterministic, isolated build and test environment for Ubuntu packages. Schroots are the backbone of PackaStack's reproducibility and are managed entirely by the tool unless you choose to intervene (in which case, you get to keep both pieces).
+
+Schroots are created automatically for each target Ubuntu series and architecture. The naming convention is always ``packastack-<series>-<arch>`` (e.g., ``packastack-noble-amd64``). If a schroot with the required name exists and matches the expected configuration, it is reused. Otherwise, it is refreshed or recreated. Schroots are refreshed when the base image or configuration changes, or when explicitly requested via the CLI. Destruction is idempotent and leaves no residual state (PackaStack does not believe in ghosts).
+
+There are two main types of schroots:
+
+- **Distribution schroots**: Created from the official Ubuntu base images for a given series and architecture.
+- **Cloud archive schroots**: Created from Ubuntu Cloud Archive images, used for OpenStack backports and testing.
+
+If schroot creation fails, PackaStack will emit a clear error and halt the build. Common causes include missing base images, network issues (in online mode), or insufficient disk space. If a schroot becomes corrupted (e.g., due to manual modification or disk errors), PackaStack will attempt to refresh or recreate it on the next run.
+
+To inspect a schroot manually, use:
+
+.. code-block:: bash
+
+   sudo schroot -c packastack-noble-amd64 -u root -- bash
+
+This drops you into the schroot as root. Be careful: changes here may affect future builds and are not supported by the contract.
+
+Contractual Guarantees
+----------------------
+- Schroot names are deterministic and documented.
+- Schroots are created, refreshed, and destroyed only by PackaStack unless you intervene.
+- Schroot environments are isolated except for documented bind mounts.
+- Schroot destruction is idempotent and leaves no residual state.
+
+See also: :doc:`bind-mounts`, :doc:`local-repo`, :doc:`offline-mode`, :doc:`../overview/invariants`
