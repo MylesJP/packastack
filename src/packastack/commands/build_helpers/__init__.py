@@ -63,6 +63,17 @@ from packastack.commands.build_helpers.git_helpers import (
     _maybe_enable_sphinxdoc,
     _no_gpg_sign_enabled,
 )
+from packastack.commands.build_helpers.tarball import (
+    download_github_release_tarball,
+    download_pypi_tarball,
+    fetch_release_tarball,
+    run_uscan,
+    # Backwards compatibility aliases
+    _download_github_release_tarball,
+    _download_pypi_tarball,
+    _fetch_release_tarball,
+    _run_uscan,
+)
 
 __all__ = [
     # Types
@@ -82,6 +93,11 @@ __all__ = [
     "maybe_disable_gpg_sign",
     "maybe_enable_sphinxdoc",
     "no_gpg_sign_enabled",
+    # Tarball helpers
+    "download_github_release_tarball",
+    "download_pypi_tarball",
+    "fetch_release_tarball",
+    "run_uscan",
     # Exit codes
     "EXIT_SUCCESS",
     "EXIT_CONFIG_ERROR",
