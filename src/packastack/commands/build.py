@@ -146,6 +146,37 @@ from packastack.debpkg.manpages import apply_man_pages_support
 from packastack.debpkg.control import fix_priority_extra, ensure_misc_pre_depends
 from packastack.debpkg.rules import add_doctree_cleanup
 
+# Build helpers (refactored modules)
+from packastack.commands.build_helpers import (
+    # Git helpers
+    _ensure_no_merge_paths,
+    _get_git_author_env,
+    _maybe_disable_gpg_sign,
+    _maybe_enable_sphinxdoc,
+    _no_gpg_sign_enabled,
+    # Tarball helpers
+    _download_github_release_tarball,
+    _download_pypi_tarball,
+    _fetch_release_tarball,
+    _run_uscan,
+    # Exit codes
+    EXIT_ALL_BUILD_FAILED,
+    EXIT_BUILD_FAILED,
+    EXIT_CONFIG_ERROR,
+    EXIT_CYCLE_DETECTED,
+    EXIT_DISCOVERY_FAILED,
+    EXIT_FETCH_FAILED,
+    EXIT_GRAPH_ERROR,
+    EXIT_MISSING_PACKAGES,
+    EXIT_PATCH_FAILED,
+    EXIT_POLICY_BLOCKED,
+    EXIT_REGISTRY_ERROR,
+    EXIT_RESUME_ERROR,
+    EXIT_RETIRED_PROJECT,
+    EXIT_SUCCESS,
+    EXIT_TOOL_MISSING,
+)
+
 # Build-all imports
 import concurrent.futures
 import contextlib
@@ -180,105 +211,6 @@ from packastack.reports.plan_graph import PlanGraph, render_waves
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
 
-
-def _maybe_enable_sphinxdoc(pkg_repo: Path) -> None:
-    """Ensure dh runs with sphinxdoc addon to avoid embedded doc assets warnings."""
-
-    rules_path = pkg_repo / "debian" / "rules"
-    if not rules_path.exists():
-        return
-
-    try:
-        content = rules_path.read_text()
-    except OSError:
-        return
-
-    if "sphinxdoc" in content:
-        return
-
-    replaced = content
-    if "--with python3" in content:
-        replaced = content.replace("--with python3", "--with python3,sphinxdoc", 1)
-    elif "dh $@" in content:
-        replaced = content.replace("dh $@", "dh $@ --with sphinxdoc", 1)
-    else:
-        return
-
-    if replaced != content:
-        try:
-            rules_path.write_text(replaced)
-        except OSError:
-            return
-
-
-def _no_gpg_sign_enabled() -> bool:
-    """Whether git commit signing should be disabled for automation."""
-
-    return os.environ.get("PACKASTACK_NO_GPG_SIGN", "").lower() in {"1", "true", "yes"}
-
-
-def _maybe_disable_gpg_sign(cmd: list[str]) -> list[str]:
-    """Inject --no-gpg-sign into git commit when opt-out flag is set."""
-
-    if _no_gpg_sign_enabled() and len(cmd) >= 2 and cmd[0] == "git" and cmd[1] == "commit":
-        return [cmd[0], cmd[1], "--no-gpg-sign", *cmd[2:]]
-    return cmd
-
-
-def _get_git_author_env() -> dict[str, str]:
-    """Get environment variables for git commit author based on DEBFULLNAME/DEBEMAIL.
-    
-    This ensures that git commits made by packastack are attributed to the
-    correct user (from Debian maintainer environment) rather than the system's
-    git config.
-    
-    Returns:
-        Dict with GIT_AUTHOR_NAME and GIT_AUTHOR_EMAIL if DEBFULLNAME/DEBEMAIL
-        are set, otherwise empty dict.
-    """
-    import sys
-    env: dict[str, str] = {}
-    
-    name = os.environ.get("DEBFULLNAME") or os.environ.get("NAME")
-    email = os.environ.get("DEBEMAIL") or os.environ.get("EMAIL")
-    
-    # Debug logging to stderr so it shows up in build output
-    print(f"[git-author-debug] DEBFULLNAME={os.environ.get('DEBFULLNAME')}", file=sys.stderr)
-    print(f"[git-author-debug] DEBEMAIL={os.environ.get('DEBEMAIL')}", file=sys.stderr)
-    print(f"[git-author-debug] NAME={os.environ.get('NAME')}", file=sys.stderr)
-    print(f"[git-author-debug] EMAIL={os.environ.get('EMAIL')}", file=sys.stderr)
-    print(f"[git-author-debug] Resolved name={name}, email={email}", file=sys.stderr)
-    
-    if name:
-        env["GIT_AUTHOR_NAME"] = name
-        env["GIT_COMMITTER_NAME"] = name
-    if email:
-        env["GIT_AUTHOR_EMAIL"] = email
-        env["GIT_COMMITTER_EMAIL"] = email
-    
-    print(f"[git-author-debug] Setting git env: {env}", file=sys.stderr)
-    
-    return env
-
-
-# Exit codes
-EXIT_SUCCESS = 0
-EXIT_CONFIG_ERROR = 1
-EXIT_TOOL_MISSING = 2
-EXIT_FETCH_FAILED = 3
-EXIT_PATCH_FAILED = 4
-EXIT_MISSING_PACKAGES = 5
-EXIT_CYCLE_DETECTED = 6
-EXIT_BUILD_FAILED = 7
-EXIT_POLICY_BLOCKED = 8
-EXIT_REGISTRY_ERROR = 9
-EXIT_RETIRED_PROJECT = 10
-
-# Build-all specific exit codes
-EXIT_DISCOVERY_FAILED = 11
-EXIT_GRAPH_ERROR = 12
-EXIT_ALL_BUILD_FAILED = 13  # Renamed to avoid conflict with EXIT_BUILD_FAILED
-EXIT_RESUME_ERROR = 14
 
 # Valid build type values for CLI
 VALID_BUILD_TYPES = {"auto", "release", "snapshot", "milestone"}
@@ -1763,335 +1695,6 @@ def _refresh_local_repo_indexes(
         run.log_event({"event": f"{phase}.source_index_failed", "error": source_index_result.error})
 
     return index_result, source_index_result
-
-
-def _ensure_no_merge_paths(repo_path: Path, paths: list[str]) -> None:
-    """Ensure specified paths use merge=ours in .gitattributes.
-
-    This protects packaging-only files (e.g., launchpad.yaml) from being
-    deleted when merging upstream content that lacks them.
-    """
-    gitattributes = repo_path / ".gitattributes"
-    existing: list[str] = []
-    if gitattributes.exists():
-        existing = gitattributes.read_text(encoding="utf-8").splitlines()
-
-    existing_set = {line.strip() for line in existing if line.strip()}
-    updated = False
-
-    # Always protect the .gitattributes file itself to avoid it being
-    # overwritten or removed during merges.
-    full_paths = list(paths) + [".gitattributes"]
-
-    for path in full_paths:
-        entry = f"{path} merge=ours"
-        if entry not in existing_set:
-            existing.append(entry)
-            existing_set.add(entry)
-            updated = True
-
-    if updated:
-        gitattributes.write_text("\n".join(existing) + "\n", encoding="utf-8")
-
-
-def _run_uscan(repo_path: Path, version: str | None = None) -> tuple[bool, Path | None, str]:
-    """Run uscan to fetch the upstream tarball.
-
-    Args:
-        repo_path: Path to the repository to run uscan in
-        version: Ignored, kept for compatibility
-
-    Returns (success, tarball_path, error_message).
-    """
-    uscan_cmd = [
-        "uscan",
-        "--download",
-        "--rename",
-    ]
-    
-    try:
-        exit_code, stdout, stderr = run_command(uscan_cmd, cwd=repo_path)
-        if exit_code != 0:
-            output = stdout + stderr
-            return False, None, output
-
-        # Find the newest tarball produced by uscan in repo root
-        candidates = sorted(
-            (p for p in repo_path.glob("*.tar.*") if p.is_file()),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-        if candidates:
-            return True, candidates[0], ""
-        return False, None, "uscan completed but no tarball found"
-    except FileNotFoundError:
-        return False, None, "uscan not installed"
-    except Exception as e:
-        return False, None, str(e)
-
-
-def _fetch_release_tarball(
-    upstream: UpstreamSource | None,
-    upstream_config,
-    pkg_repo: Path,
-    workspace: Path,
-    provenance: BuildProvenance,
-    offline: bool,
-    project_key: str,
-    package_name: str,
-    build_type: BuildType,
-    cache_base: Path,
-    force: bool,
-    run: RunContextType,
-) -> tuple[Path | None, bool, str]:
-    """Fetch release/milestone tarball with uscan-first strategy.
-
-    Order:
-    1) uscan in packaging repo
-    2) official tarball URL (OpenDev)
-    3) fallback methods from registry tarball preferences (pypi, github_release, git_archive)
-
-    Returns (tarball_path, signature_verified, signature_warning)
-    and updates provenance accordingly.
-    """
-
-    def record(method: str, path: Path | None, url: str = "", sig_verified: bool = False, sig_warning: str = ""):
-        provenance.tarball.method = method
-        if url:
-            provenance.tarball.url = url
-        if path:
-            provenance.tarball.path = str(path)
-        if sig_warning:
-            provenance.verification.result = "not_applicable"
-        elif sig_verified:
-            provenance.verification.result = "verified"
-        else:
-            provenance.verification.result = "not_applicable"
-
-    if offline:
-        if not upstream or not upstream.version:
-            return None, False, "Offline mode requires a cached tarball"
-        cached_path, cached_meta = find_cached_tarball(
-            project=project_key,
-            version=upstream.version,
-            build_type=build_type.value,
-            cache_base=cache_base,
-        )
-        if cached_path and cached_meta:
-            activity("prepare", f"Using cached tarball: {cached_path.name}")
-            record(
-                "cache",
-                cached_path,
-                cached_meta.source_url,
-                cached_meta.signature_verified,
-                cached_meta.signature_warning,
-            )
-            provenance.verification.mode = upstream_config.signatures.mode.value
-            return cached_path, cached_meta.signature_verified, cached_meta.signature_warning
-        return None, False, f"Offline mode missing cached tarball for {project_key} {upstream.version}"
-
-    # 1) uscan
-    success, path, err = _run_uscan(pkg_repo, upstream.version)
-    if success and path:
-        activity("prepare", f"Fetched tarball via uscan: {path.name}")
-        activity("prepare", "Tarball selected: uscan")
-        record("uscan", path)
-        provenance.verification.mode = upstream_config.signatures.mode.value
-        provenance.verification.result = "not_applicable"
-        if upstream and upstream.version:
-            cache_tarball(
-                tarball_path=path,
-                entry=TarballCacheEntry(
-                    project=project_key,
-                    package_name=package_name,
-                    version=upstream.version,
-                    build_type=build_type.value,
-                    source_method="uscan",
-                ),
-                cache_base=cache_base,
-            )
-        return path, False, ""
-    elif err:
-        activity("prepare", f"uscan not used: {err}")
-
-    last_error = ""
-
-    # 2) official tarball (if available)
-    if upstream and upstream.tarball_url:
-        activity("prepare", f"Downloading official tarball: {upstream.tarball_url}")
-        tarball_result = download_and_verify_tarball(upstream, workspace)
-        if tarball_result.success:
-            activity("prepare", "Tarball selected: official")
-            record("official", tarball_result.path, upstream.tarball_url, tarball_result.signature_verified, tarball_result.signature_warning)
-            provenance.upstream.ref = upstream.version
-            provenance.release_source.resolved_version = upstream.version
-            provenance.verification.mode = upstream_config.signatures.mode.value
-            if tarball_result.signature_verified:
-                activity("prepare", "Upstream signature verified")
-            elif tarball_result.signature_warning:
-                activity("prepare", f"Signature warning: {tarball_result.signature_warning}")
-            if tarball_result.path:
-                cache_tarball(
-                    tarball_path=tarball_result.path,
-                    entry=TarballCacheEntry(
-                        project=project_key,
-                        package_name=package_name,
-                        version=upstream.version,
-                        build_type=build_type.value,
-                        source_method="official",
-                        source_url=upstream.tarball_url,
-                        signature_verified=tarball_result.signature_verified,
-                        signature_warning=tarball_result.signature_warning,
-                    ),
-                    cache_base=cache_base,
-                )
-            return tarball_result.path, tarball_result.signature_verified, tarball_result.signature_warning
-        activity("prepare", f"Official tarball download failed: {tarball_result.error}")
-        last_error = tarball_result.error or "official download failed"
-
-    # 3) registry fallback methods
-    methods = getattr(upstream_config.tarball, "prefer", []) or []
-    for method in methods:
-        name = method.value if hasattr(method, "value") else str(method)
-        if name == "official":
-            continue  # already tried
-
-        if name == "pypi":
-            project = upstream_config.release_source.project or upstream_config.project_key if hasattr(upstream_config, "project_key") else ""
-            if upstream:
-                version = upstream.version
-            else:
-                version = ""
-            ok, path, err = _download_pypi_tarball(project, version, workspace)
-            if ok and path:
-                activity("prepare", f"Fetched PyPI tarball: {path.name}")
-                activity("prepare", "Tarball selected: pypi")
-                record("pypi", path)
-                provenance.verification.mode = upstream_config.signatures.mode.value
-                provenance.verification.result = "not_applicable"
-                if upstream and upstream.version:
-                    cache_tarball(
-                        tarball_path=path,
-                        entry=TarballCacheEntry(
-                            project=project_key,
-                            package_name=package_name,
-                            version=upstream.version,
-                            build_type=build_type.value,
-                            source_method="pypi",
-                        ),
-                        cache_base=cache_base,
-                    )
-                return path, False, ""
-            activity("prepare", f"PyPI tarball download failed: {err}")
-            last_error = err or last_error
-
-        elif name == "github_release":
-            url = upstream_config.upstream.url
-            version = upstream.version if upstream else ""
-            ok, path, err = _download_github_release_tarball(url, version, workspace)
-            if ok and path:
-                activity("prepare", f"Fetched GitHub release archive: {path.name}")
-                activity("prepare", "Tarball selected: github_release")
-                record("github_release", path, url)
-                provenance.verification.mode = upstream_config.signatures.mode.value
-                provenance.verification.result = "not_applicable"
-                if upstream and upstream.version:
-                    cache_tarball(
-                        tarball_path=path,
-                        entry=TarballCacheEntry(
-                            project=project_key,
-                            package_name=package_name,
-                            version=upstream.version,
-                            build_type=build_type.value,
-                            source_method="github_release",
-                            source_url=url,
-                        ),
-                        cache_base=cache_base,
-                    )
-                return path, False, ""
-            activity("prepare", f"GitHub release download failed: {err}")
-            last_error = err or last_error
-
-        elif name == "git_archive":
-            project = upstream_config.release_source.project or getattr(upstream_config, "project_key", "")
-            ref = upstream.version if upstream else upstream_config.upstream.default_branch or "HEAD"
-            repo_dir = workspace / "git-archive"
-            if repo_dir.exists():
-                shutil.rmtree(repo_dir)
-
-            clone_cmd = [
-                "git",
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                ref,
-                upstream_config.upstream.url,
-                str(repo_dir),
-            ]
-            clone_result = run_command(clone_cmd)
-            if getattr(clone_result, "returncode", 1) != 0:
-                err = getattr(clone_result, "output", "git clone failed")
-                activity("prepare", f"git archive clone failed: {err}")
-                last_error = err or last_error
-                continue
-
-            tar_result = generate_snapshot_tarball(
-                repo_path=repo_dir,
-                ref=ref,
-                package=project,
-                version=ref,
-                output_dir=workspace,
-            )
-            if tar_result.success and tar_result.path:
-                activity("prepare", f"Fetched git archive: {tar_result.path.name}")
-                activity("prepare", "Tarball selected: git_archive")
-                record("git_archive", tar_result.path)
-                provenance.verification.mode = "none"
-                provenance.verification.result = "not_applicable"
-                if upstream and upstream.version:
-                    cache_tarball(
-                        tarball_path=tar_result.path,
-                        entry=TarballCacheEntry(
-                            project=project_key,
-                            package_name=package_name,
-                            version=upstream.version,
-                            build_type=build_type.value,
-                            source_method="git_archive",
-                            source_url=upstream_config.upstream.url,
-                        ),
-                        cache_base=cache_base,
-                    )
-                return tar_result.path, False, ""
-
-            activity("prepare", f"git archive failed: {tar_result.error}")
-            last_error = tar_result.error or last_error
-
-    return None, False, last_error or "No tarball could be fetched"
-
-
-def _download_pypi_tarball(project: str, version: str, dest_dir: Path) -> tuple[bool, Path | None, str]:
-    """Attempt to download PyPI sdist tarball using the simple URL pattern."""
-    proj = project.replace("/", "-")
-    proj_lower = proj.lower()
-    first = proj_lower[0]
-    url = f"https://files.pythonhosted.org/packages/source/{first}/{proj_lower}/{proj}-{version}.tar.gz"
-    filename = url.split("/")[-1]
-    dest = dest_dir / filename
-    ok, err = download_file(url, dest)
-    return ok, dest if ok else None, err
-
-
-def _download_github_release_tarball(upstream_url: str, version: str, dest_dir: Path) -> tuple[bool, Path | None, str]:
-    """Download GitHub release/tag archive from upstream git URL."""
-    url = upstream_url
-    if url.endswith(".git"):
-        url = url[:-4]
-    tar_url = f"{url}/archive/refs/tags/{version}.tar.gz"
-    filename = tar_url.split("/")[-1]
-    dest = dest_dir / filename
-    ok, err = download_file(tar_url, dest)
-    return ok, dest if ok else None, err
 
 
 def _run_build(

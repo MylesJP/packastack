@@ -394,9 +394,9 @@ def fetch_release_tarball(
                 upstream_config.upstream.url,
                 str(repo_dir),
             ]
-            clone_result = run_command(clone_cmd)
-            if getattr(clone_result, "returncode", 1) != 0:
-                err = getattr(clone_result, "output", "git clone failed")
+            clone_exit_code, clone_stdout, clone_stderr = run_command(clone_cmd)
+            if clone_exit_code != 0:
+                err = clone_stderr or clone_stdout or "git clone failed"
                 activity("prepare", f"git archive clone failed: {err}")
                 last_error = err or last_error
                 continue
