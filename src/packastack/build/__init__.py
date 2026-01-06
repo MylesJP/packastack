@@ -84,9 +84,15 @@ from packastack.build.tarball import (
 
 # Phase functions
 from packastack.build.phases import (
-    RetirementCheckResult,
+    PackageIndexes,
+    PolicyCheckResult,
     RegistryResolutionResult,
+    RetirementCheckResult,
+    ToolCheckResult,
+    check_policy,
     check_retirement_status,
+    check_tools,
+    load_package_indexes,
     resolve_upstream_registry,
 )
 
@@ -114,9 +120,15 @@ __all__ = [
     "fetch_release_tarball",
     "run_uscan",
     # Phase functions
-    "RetirementCheckResult",
+    "PackageIndexes",
+    "PolicyCheckResult",
     "RegistryResolutionResult",
+    "RetirementCheckResult",
+    "ToolCheckResult",
+    "check_policy",
     "check_retirement_status",
+    "check_tools",
+    "load_package_indexes",
     "resolve_upstream_registry",
     # Exit codes
     "EXIT_SUCCESS",
@@ -135,3 +147,4 @@ __all__ = [
     "EXIT_ALL_BUILD_FAILED",
     "EXIT_RESUME_ERROR",
 ]
+

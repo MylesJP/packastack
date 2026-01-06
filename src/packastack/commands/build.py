@@ -158,6 +158,8 @@ from packastack.build import (
     _run_uscan,
     # Phase functions
     check_retirement_status,
+    check_tools,
+    load_package_indexes,
     resolve_upstream_registry,
     # Exit codes
     EXIT_ALL_BUILD_FAILED,
@@ -1948,33 +1950,26 @@ def _run_build(
         # PHASE: plan
         # =========================================================================
 
-        # Load Ubuntu index
+        # Load package indexes (Ubuntu, Cloud Archive, local repo)
         pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
         components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
-        ubuntu_cache = paths["ubuntu_archive_cache"]
-        with activity_spinner("plan", "Loading package indexes"):
-            ubuntu_index = load_package_index(ubuntu_cache, resolved_ubuntu, pockets, components)
-        activity("plan", f"Ubuntu index: {len(ubuntu_index.packages)} packages")
-        run.log_event({"event": "plan.ubuntu_index", "count": len(ubuntu_index.packages)})
-
-        # Load cloud archive index if specified
-        ca_index: PackageIndex | None = None
-        if cloud_archive:
-            cache_root = paths["cache_root"]
-            with activity_spinner("plan", "Loading cloud archive index"):
-                ca_index = load_cloud_archive_index(cache_root, resolved_ubuntu, cloud_archive)
-            activity("plan", f"Cloud archive index: {len(ca_index.packages)} packages")
-            run.log_event({"event": "plan.cloud_archive_index", "count": len(ca_index.packages)})
-
-        # Load local repository index
-        local_index: PackageIndex | None = None
-        local_repo_root = paths.get("local_apt_repo")
-        if local_repo_root and local_repo_root.exists():
-            host_arch = get_host_arch()
-            local_index = load_local_repo_index(local_repo_root, arch=host_arch)
-            if local_index.packages:
-                activity("plan", f"Local repo index: {len(local_index.packages)} packages")
-                run.log_event({"event": "plan.local_repo_index", "count": len(local_index.packages)})
+        result, indexes = load_package_indexes(
+            ubuntu_cache=paths["ubuntu_archive_cache"],
+            resolved_ubuntu=resolved_ubuntu,
+            ubuntu_pockets=pockets,
+            ubuntu_components=components,
+            cloud_archive=cloud_archive,
+            cache_root=paths["cache_root"],
+            local_repo_root=paths.get("local_apt_repo"),
+            arch=get_host_arch(),
+            run=run,
+        )
+        if not result.success:
+            return result.exit_code
+        
+        ubuntu_index = indexes.ubuntu
+        ca_index = indexes.cloud_archive
+        local_index = indexes.local_repo
 
         # Build preliminary graph
         openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
@@ -1988,17 +1983,9 @@ def _run_build(
         run.log_event({"event": "plan.build_order", "order": build_order})
 
         # Validate tools before proceeding
-        activity("plan", "Checking required tools")
-        tool_check = check_required_tools(need_sbuild=binary)
-        if not tool_check.is_complete():
-            msg = get_missing_tools_message(tool_check.missing)
-            activity("plan", "Missing required tools:")
-            for line in msg.split("\n"):
-                activity("plan", f"  {line}")
-            run.write_summary(status="failed", error="Missing required tools", exit_code=EXIT_TOOL_MISSING)
-            return EXIT_TOOL_MISSING
-
-        activity("plan", "All required tools available")
+        result, _ = check_tools(need_sbuild=binary, run=run)
+        if not result.success:
+            return result.exit_code
 
         # Stop here if validate-plan-only
         if validate_plan_only or plan_upload:

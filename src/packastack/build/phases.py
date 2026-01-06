@@ -310,3 +310,254 @@ def resolve_upstream_registry(
         return PhaseResult.fail(EXIT_REGISTRY_ERROR, str(e)), None
     
     return PhaseResult.ok(), result
+
+
+@dataclass
+class PolicyCheckResult:
+    """Result of policy check phase.
+    
+    Attributes:
+        snapshot_eligible: Whether snapshot build is allowed
+        snapshot_reason: Reason for eligibility decision
+        preferred_version: Preferred version if snapshot blocked
+        forced: Whether --force was used to override
+    """
+    snapshot_eligible: bool = True
+    snapshot_reason: str = ""
+    preferred_version: str = ""
+    forced: bool = False
+
+
+def check_policy(
+    build_type: "BuildType",
+    package: str,
+    releases_repo: Path,
+    openstack_target: str,
+    force: bool,
+    run: "RunContextType",
+) -> tuple[PhaseResult, PolicyCheckResult]:
+    """Check build policy constraints.
+    
+    This phase validates that the build type is allowed by policy.
+    For snapshot builds, checks if there's a released version available
+    that should be used instead.
+    
+    Args:
+        build_type: The requested build type (release, snapshot, etc.)
+        package: Project name
+        releases_repo: Path to openstack/releases repo
+        openstack_target: Target OpenStack series
+        force: If True, allow policy overrides
+        run: RunContext for logging
+        
+    Returns:
+        Tuple of (PhaseResult, PolicyCheckResult).
+        PhaseResult.success is False if policy blocks the build.
+        
+    Side Effects:
+        - Logs policy check status via activity()
+        - Logs events to run context
+    """
+    from packastack.planning.type_selection import BuildType
+    from packastack.upstream.releases import is_snapshot_eligible
+    from packastack.build.errors import EXIT_POLICY_BLOCKED
+    
+    result = PolicyCheckResult()
+    
+    activity("policy", "Checking snapshot eligibility")
+    
+    if build_type == BuildType.SNAPSHOT:
+        eligible, reason, preferred = is_snapshot_eligible(
+            releases_repo, openstack_target, package
+        )
+        result.snapshot_eligible = eligible
+        result.snapshot_reason = reason
+        result.preferred_version = preferred or ""
+        
+        if not eligible:
+            activity("policy", f"Blocked: {reason}")
+            if preferred:
+                activity("policy", f"Preferred version: {preferred}")
+            if not force:
+                run.write_summary(
+                    status="failed",
+                    error=f"Snapshot build blocked: {reason}",
+                    exit_code=EXIT_POLICY_BLOCKED,
+                )
+                return PhaseResult.fail(EXIT_POLICY_BLOCKED, reason), result
+            activity("policy", "Continuing with --force")
+            result.forced = True
+        elif "Warning" in reason:
+            activity("policy", f"Warning: {reason}")
+        
+        run.log_event({
+            "event": "policy.snapshot",
+            "eligible": eligible,
+            "reason": reason,
+        })
+    
+    activity("policy", "Policy check: OK")
+    return PhaseResult.ok(), result
+
+
+@dataclass
+class PackageIndexes:
+    """Collection of loaded package indexes.
+    
+    Attributes:
+        ubuntu: Package index from Ubuntu archive
+        cloud_archive: Package index from Cloud Archive (optional)
+        local_repo: Package index from local repository (optional)
+    """
+    ubuntu: "PackageIndex"
+    cloud_archive: "PackageIndex | None" = None
+    local_repo: "PackageIndex | None" = None
+    
+    @property
+    def all_indexes(self) -> list["PackageIndex"]:
+        """Return list of all available indexes."""
+        indexes = [self.ubuntu]
+        if self.cloud_archive:
+            indexes.append(self.cloud_archive)
+        if self.local_repo:
+            indexes.append(self.local_repo)
+        return indexes
+
+
+def load_package_indexes(
+    ubuntu_cache: Path,
+    resolved_ubuntu: str,
+    ubuntu_pockets: list[str],
+    ubuntu_components: list[str],
+    cloud_archive: str | None,
+    cache_root: Path,
+    local_repo_root: Path | None,
+    arch: str,
+    run: "RunContextType",
+) -> tuple[PhaseResult, PackageIndexes | None]:
+    """Load package indexes from Ubuntu, Cloud Archive, and local repository.
+    
+    This phase loads package indexes needed for dependency resolution.
+    Indexes are loaded from cached data on disk.
+    
+    Args:
+        ubuntu_cache: Path to Ubuntu archive cache
+        resolved_ubuntu: Ubuntu series codename (e.g., 'noble')
+        ubuntu_pockets: Ubuntu pockets to load (e.g., ['release', 'updates'])
+        ubuntu_components: Ubuntu components to load (e.g., ['main', 'universe'])
+        cloud_archive: Cloud Archive series name (optional)
+        cache_root: Root cache directory
+        local_repo_root: Path to local apt repository (optional)
+        arch: Host architecture for local repo indexing
+        run: RunContext for logging
+        
+    Returns:
+        Tuple of (PhaseResult, PackageIndexes).
+        PhaseResult.success is False if critical index loading fails.
+        
+    Side Effects:
+        - Loads package indexes from disk
+        - Logs index sizes via activity()
+        - Logs events to run context
+    """
+    from packastack.apt.packages import (
+        PackageIndex,
+        load_cloud_archive_index,
+        load_local_repo_index,
+        load_package_index,
+    )
+    
+    # Load Ubuntu index
+    with activity_spinner("plan", "Loading package indexes"):
+        ubuntu_index = load_package_index(ubuntu_cache, resolved_ubuntu, ubuntu_pockets, ubuntu_components)
+    activity("plan", f"Ubuntu index: {len(ubuntu_index.packages)} packages")
+    run.log_event({"event": "plan.ubuntu_index", "count": len(ubuntu_index.packages)})
+    
+    # Load cloud archive index if specified
+    ca_index: PackageIndex | None = None
+    if cloud_archive:
+        with activity_spinner("plan", "Loading cloud archive index"):
+            ca_index = load_cloud_archive_index(cache_root, resolved_ubuntu, cloud_archive)
+        activity("plan", f"Cloud archive index: {len(ca_index.packages)} packages")
+        run.log_event({"event": "plan.cloud_archive_index", "count": len(ca_index.packages)})
+    
+    # Load local repository index
+    local_index: PackageIndex | None = None
+    if local_repo_root and local_repo_root.exists():
+        local_index = load_local_repo_index(local_repo_root, arch=arch)
+        if local_index.packages:
+            activity("plan", f"Local repo index: {len(local_index.packages)} packages")
+            run.log_event({"event": "plan.local_repo_index", "count": len(local_index.packages)})
+    
+    indexes = PackageIndexes(
+        ubuntu=ubuntu_index,
+        cloud_archive=ca_index,
+        local_repo=local_index,
+    )
+    
+    return PhaseResult.ok(), indexes
+
+
+@dataclass
+class ToolCheckResult:
+    """Result of required tools check.
+    
+    Attributes:
+        is_complete: True if all required tools are available
+        missing_tools: List of missing tool names
+        error_message: Formatted message about missing tools
+    """
+    is_complete: bool = True
+    missing_tools: list[str] | None = None
+    error_message: str = ""
+
+
+def check_tools(
+    need_sbuild: bool,
+    run: "RunContextType",
+) -> tuple[PhaseResult, ToolCheckResult]:
+    """Check that all required build tools are available.
+    
+    This phase validates that git, gbp, and optionally sbuild
+    are available in the system PATH.
+    
+    Args:
+        need_sbuild: Whether sbuild is required (for binary builds)
+        run: RunContext for logging
+        
+    Returns:
+        Tuple of (PhaseResult, ToolCheckResult).
+        PhaseResult.success is False if required tools are missing.
+        
+    Side Effects:
+        - Logs tool check status via activity()
+        - Writes summary on failure
+    """
+    from packastack.build.tools import check_required_tools, get_missing_tools_message
+    from packastack.build.errors import EXIT_TOOL_MISSING
+    
+    activity("plan", "Checking required tools")
+    
+    tool_check = check_required_tools(need_sbuild=need_sbuild)
+    
+    if not tool_check.is_complete():
+        msg = get_missing_tools_message(tool_check.missing)
+        activity("plan", "Missing required tools:")
+        for line in msg.split("\n"):
+            activity("plan", f"  {line}")
+        
+        result = ToolCheckResult(
+            is_complete=False,
+            missing_tools=tool_check.missing,
+            error_message=msg,
+        )
+        
+        run.write_summary(
+            status="failed",
+            error="Missing required tools",
+            exit_code=EXIT_TOOL_MISSING,
+        )
+        return PhaseResult.fail(EXIT_TOOL_MISSING, "Missing required tools"), result
+    
+    activity("plan", "All required tools available")
+    return PhaseResult.ok(), ToolCheckResult(is_complete=True)

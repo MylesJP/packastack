@@ -392,8 +392,8 @@ class TestRunBuildPhases:
             patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)),
             patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
             patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}),
-            patch.object(build, "check_required_tools", return_value=mock_tool_result),
-            patch.object(build, "get_missing_tools_message", return_value="Missing: gbp"),
+            patch("packastack.build.tools.check_required_tools", return_value=mock_tool_result),
+            patch("packastack.build.tools.get_missing_tools_message", return_value="Missing: gbp"),
         ):
             result = _call_run_build(
                 run=mock_run,
