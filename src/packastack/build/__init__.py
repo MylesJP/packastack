@@ -104,6 +104,7 @@ from packastack.build.single_build import (
     FetchResult,
     PhaseResult as SinglePhaseResult,
     PrepareResult,
+    SetupInputs,
     SingleBuildContext,
     SingleBuildOutcome,
     ValidateDepsResult,
@@ -112,6 +113,7 @@ from packastack.build.single_build import (
     fetch_packaging_repo,
     import_and_patch,
     prepare_upstream_source,
+    setup_build_context,
     validate_and_build_deps,
     verify_and_publish,
 )
@@ -153,6 +155,7 @@ __all__ = [
     "load_package_indexes",
     "resolve_upstream_registry",
     # Single build phases
+    "SetupInputs",
     "SingleBuildContext",
     "SingleBuildResult",
     "SinglePhaseResult",
@@ -167,6 +170,7 @@ __all__ = [
     "build_packages",
     "verify_and_publish",
     "build_single_package",
+    "setup_build_context",
     # Exit codes
     "EXIT_SUCCESS",
     "EXIT_CONFIG_ERROR",

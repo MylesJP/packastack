@@ -44,6 +44,7 @@ from packastack.build.errors import (
     EXIT_FETCH_FAILED,
     EXIT_MISSING_PACKAGES,
     EXIT_PATCH_FAILED,
+    EXIT_POLICY_BLOCKED,
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
 )
@@ -197,6 +198,305 @@ class SingleBuildContext:
 
     # Provenance
     provenance: BuildProvenance | None = None
+
+
+# =============================================================================
+# Setup: Create and populate SingleBuildContext
+# =============================================================================
+
+
+@dataclass
+class SetupInputs:
+    """Inputs for setting up a single package build context.
+    
+    These are the values available at the start of the per-package loop,
+    before any package-specific resolution has been done.
+    """
+    
+    # Package identity
+    pkg_name: str
+    
+    # Request values
+    target: str
+    ubuntu_series: str
+    cloud_archive: str
+    build_type_str: str
+    milestone: str
+    binary: bool
+    builder: str
+    force: bool
+    offline: bool
+    use_gbp_dch: bool
+    skip_repo_regen: bool
+    no_spinner: bool
+    build_deps: bool
+    include_retired: bool
+    
+    # Resolved values from planning
+    resolved_build_type_str: str
+    milestone_from_cli: str
+    
+    # Paths and config
+    paths: dict[str, Path]
+    cfg: dict[str, Any]
+    
+    # Run context
+    run: Any  # RunContext
+
+
+def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildContext | None]:
+    """Set up the build context by running pre-build phases.
+    
+    This function runs phases 1-6:
+    1. Retirement check
+    2. Registry resolution  
+    3. Policy check
+    4. Load package indexes
+    5. Check tools
+    6. Ensure schroot ready
+    
+    If any phase fails, returns (failure_result, None).
+    On success, returns (ok_result, populated_context).
+    
+    Args:
+        inputs: Setup inputs with request values and paths.
+        
+    Returns:
+        Tuple of (PhaseResult, SingleBuildContext or None).
+    """
+    from packastack.build.phases import (
+        check_retirement_status,
+        check_tools,
+        ensure_schroot_ready,
+        load_package_indexes,
+        resolve_upstream_registry,
+    )
+    from packastack.build.provenance import create_provenance
+    from packastack.commands.build import (
+        _build_type_from_string,
+        get_previous_series,
+        is_snapshot_eligible,
+        load_openstack_packages,
+        select_upstream_source,
+    )
+    from packastack.core.context import resolve_series
+    from packastack.debpkg.arch import get_host_arch
+    from packastack.planning.type_selection import BuildType
+    from packastack.upstream.releases import get_current_development_series
+    
+    run = inputs.run
+    paths = inputs.paths
+    cfg = inputs.cfg
+    pkg_name = inputs.pkg_name
+    
+    # Derive project name from package name
+    if pkg_name.startswith("python-"):
+        package = pkg_name[7:]
+    else:
+        package = pkg_name
+    
+    # Resolve series
+    resolved_ubuntu = resolve_series(inputs.ubuntu_series)
+    releases_repo = paths["openstack_releases_repo"]
+    if inputs.target == "devel":
+        openstack_target = get_current_development_series(releases_repo) or inputs.target
+    else:
+        openstack_target = inputs.target
+    local_repo = paths["local_apt_repo"]
+    
+    activity("resolve", f"Package: {pkg_name}")
+    run.log_event({"event": "resolve.package", "name": pkg_name})
+    
+    # -------------------------------------------------------------------------
+    # Phase 1: Retirement check
+    # -------------------------------------------------------------------------
+    project_config_path = paths.get("openstack_project_config")
+    retirement_result, retirement_info = check_retirement_status(
+        pkg_name=pkg_name,
+        package=package,
+        project_config_path=project_config_path,
+        releases_repo=releases_repo,
+        openstack_target=openstack_target,
+        include_retired=inputs.include_retired,
+        offline=inputs.offline,
+        run=run,
+    )
+    if not retirement_result.success:
+        return retirement_result, None
+    
+    # -------------------------------------------------------------------------
+    # Phase 2: Registry resolution
+    # -------------------------------------------------------------------------
+    registry_result, registry_info = resolve_upstream_registry(
+        package=package,
+        pkg_name=pkg_name,
+        releases_repo=releases_repo,
+        openstack_target=openstack_target,
+        run=run,
+    )
+    if not registry_result.success:
+        return registry_result, None
+    
+    # Extract values from registry resolution result
+    registry = registry_info.registry
+    resolved_upstream = registry_info.resolved
+    upstream_config = resolved_upstream.config
+    resolution_source = resolved_upstream.resolution_source
+    
+    # Build type already resolved before planning
+    build_type = _build_type_from_string(inputs.resolved_build_type_str)
+    milestone_str = inputs.milestone_from_cli
+    
+    run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
+    
+    # Get previous series
+    prev_series = get_previous_series(releases_repo, openstack_target)
+    if prev_series:
+        activity("resolve", f"Previous series: {prev_series}")
+    run.log_event({"event": "resolve.prev_series", "prev": prev_series, "target": openstack_target})
+    
+    # Initialize provenance
+    provenance = create_provenance(pkg_name, run.run_id)
+    provenance.registry_version = registry.version
+    provenance.resolution_source = resolution_source.value
+    provenance.project_key = resolved_upstream.project
+    provenance.build_type = build_type.value
+    provenance.upstream.url = upstream_config.upstream.url
+    provenance.upstream.branch = upstream_config.upstream.default_branch
+    provenance.release_source.type = upstream_config.release_source.type.value
+    provenance.release_source.deliverable = upstream_config.release_source.deliverable
+    if registry.override_applied:
+        provenance.registry_override_path = registry.override_path
+    
+    # -------------------------------------------------------------------------
+    # Phase 3: Policy check
+    # -------------------------------------------------------------------------
+    activity("policy", "Checking snapshot eligibility")
+    
+    if build_type == BuildType.SNAPSHOT:
+        eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, package)
+        if not eligible:
+            activity("policy", f"Blocked: {reason}")
+            if preferred:
+                activity("policy", f"Preferred version: {preferred}")
+            if not inputs.force:
+                run.write_summary(
+                    status="failed",
+                    error=f"Snapshot build blocked: {reason}",
+                    exit_code=EXIT_POLICY_BLOCKED,
+                )
+                return PhaseResult.fail(EXIT_POLICY_BLOCKED, f"Snapshot build blocked: {reason}"), None
+            activity("policy", "Continuing with --force")
+        elif "Warning" in reason:
+            activity("policy", f"Warning: {reason}")
+        run.log_event({"event": "policy.snapshot", "eligible": eligible, "reason": reason})
+    
+    activity("policy", "Policy check: OK")
+    
+    # -------------------------------------------------------------------------
+    # Phase 4: Load package indexes
+    # -------------------------------------------------------------------------
+    pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
+    components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
+    result, indexes = load_package_indexes(
+        ubuntu_cache=paths["ubuntu_archive_cache"],
+        resolved_ubuntu=resolved_ubuntu,
+        ubuntu_pockets=pockets,
+        ubuntu_components=components,
+        cloud_archive=inputs.cloud_archive,
+        cache_root=paths["cache_root"],
+        local_repo_root=paths.get("local_apt_repo"),
+        arch=get_host_arch(),
+        run=run,
+    )
+    if not result.success:
+        return result, None
+    
+    ubuntu_index = indexes.ubuntu
+    ca_index = indexes.cloud_archive
+    local_index = indexes.local_repo
+    
+    # Load OpenStack packages
+    openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
+    activity("plan", f"OpenStack packages: {len(openstack_pkgs)} in {openstack_target}")
+    
+    # -------------------------------------------------------------------------
+    # Phase 5: Check tools
+    # -------------------------------------------------------------------------
+    result, _ = check_tools(need_sbuild=inputs.binary, run=run)
+    if not result.success:
+        return result, None
+    
+    # -------------------------------------------------------------------------
+    # Phase 6: Ensure schroot ready
+    # -------------------------------------------------------------------------
+    mirror = cfg.get("mirrors", {}).get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu")
+    result, schroot_info = ensure_schroot_ready(
+        binary=inputs.binary,
+        builder=inputs.builder,
+        resolved_ubuntu=resolved_ubuntu,
+        mirror=mirror,
+        components=components,
+        offline=inputs.offline,
+        run=run,
+    )
+    if not result.success:
+        return result, None
+    schroot_name = schroot_info.schroot_name
+    
+    # Select upstream source
+    upstream = select_upstream_source(
+        releases_repo,
+        openstack_target,
+        package,
+        build_type,
+        milestone_str,
+    )
+    
+    # Calculate tarball cache base
+    tarball_cache_base = paths.get("upstream_tarballs")
+    if tarball_cache_base is None:
+        tarball_cache_base = paths["cache_root"] / "upstream-tarballs"
+    
+    # -------------------------------------------------------------------------
+    # Build the context
+    # -------------------------------------------------------------------------
+    ctx = SingleBuildContext(
+        pkg_name=pkg_name,
+        package=package,
+        run=run,
+        target=inputs.target,
+        openstack_target=openstack_target,
+        ubuntu_series=inputs.ubuntu_series,
+        resolved_ubuntu=resolved_ubuntu,
+        cloud_archive=inputs.cloud_archive,
+        build_type=build_type,
+        build_type_str=build_type.value,
+        milestone=milestone_str,
+        binary=inputs.binary,
+        builder=inputs.builder,
+        force=inputs.force,
+        offline=inputs.offline,
+        use_gbp_dch=inputs.use_gbp_dch,
+        skip_repo_regen=inputs.skip_repo_regen,
+        no_spinner=inputs.no_spinner,
+        build_deps=inputs.build_deps,
+        paths=paths,
+        local_repo=local_repo,
+        tarball_cache_base=tarball_cache_base,
+        upstream_config=upstream_config,
+        upstream=upstream,
+        resolution_source=resolution_source,
+        prev_series=prev_series,
+        ubuntu_index=ubuntu_index,
+        ca_index=ca_index,
+        local_index=local_index,
+        openstack_pkgs=openstack_pkgs,
+        schroot_name=schroot_name,
+        provenance=provenance,
+    )
+    
+    return PhaseResult.ok(), ctx
 
 
 # =============================================================================
