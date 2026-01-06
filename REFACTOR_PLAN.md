@@ -7,6 +7,7 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
 | build.py lines | 3,873 | 2,766 | -1,107 (-29%) |
+| packastack.build/ lines | 0 | ~6,450 | New package |
 | tests passing | 269 | 1,432 | ✓ |
 
 ### Extracted Modules in `packastack.build/`:
@@ -21,6 +22,17 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 | `all_reports.py` | 245 | Build-all report generation (JSON + Markdown) |
 | `type_resolution.py` | 145 | CLI build type parsing and auto-resolution |
 | `all_helpers.py` | ~300 | Build-all helpers (graph, versions, retire filter, batches, run_single_build) |
+| `single_build.py` | 1,471 | **NEW** Single package build phase functions |
+
+### Phase Functions in `single_build.py` (NEW):
+- `SingleBuildContext` - Collects all resolved values for phase execution
+- `PhaseResult` - Standard result type for phases
+- `fetch_packaging_repo()` → FetchResult - Clone packaging repo, protect files, update watch
+- `prepare_upstream_source()` → PrepareResult - Fetch/generate upstream tarball
+- `validate_and_build_deps()` → ValidateDepsResult - Validate deps, auto-build missing
+- `import_and_patch()` → PhaseResult - Import tarball, apply patches with gbp pq
+- `build_packages()` → BuildResult - Build source and optionally binary packages
+- `verify_and_publish()` → PhaseResult - Publish to local APT repo
 
 ### Phase Functions in `phases.py`:
 - `check_retirement_status()` → RetirementCheckResult
