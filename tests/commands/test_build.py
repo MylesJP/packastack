@@ -521,10 +521,6 @@ class TestRunBuildPhases:
         pkg_dir.mkdir(parents=True)
         (pkg_dir / "control").touch()
 
-        mock_index = MagicMock()
-        mock_index.packages = {}
-        mock_tool_result = MagicMock()
-        mock_tool_result.is_complete.return_value = True
         mock_registry = _create_mock_registry("nova")
 
         with (
@@ -535,9 +531,9 @@ class TestRunBuildPhases:
             patch.object(build, "get_previous_series", return_value="bobcat"),
             patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
             patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}),
-            patch.object(build, "is_snapshot_eligible", return_value=(False, "Release exists", "1.0.0")),
-            patch.object(build, "load_package_index", return_value=mock_index),
-            patch.object(build, "check_required_tools", return_value=mock_tool_result),
+            # Patch at the source locations used by phase functions
+            patch("packastack.upstream.releases.is_snapshot_eligible", return_value=(False, "Release exists", "1.0.0")),
+            patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)),
         ):
             result = _call_run_build(
                 run=mock_run,

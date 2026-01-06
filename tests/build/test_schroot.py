@@ -29,13 +29,17 @@ def test_create_schroot_uses_sudo_when_not_root(monkeypatch, tmp_path: Path) -> 
 
     monkeypatch.setattr(schroot.subprocess, "run", capture_run)
 
-    ok, err = schroot._create_schroot(
-        name="packastack-noble-amd64",
+    config = schroot.SchrootConfig(
         series="noble",
         arch="amd64",
         mirror="http://archive.ubuntu.com/ubuntu",
         components=["main"],
-        extra_repos=None,
+        extra_repos=[],
+    )
+
+    ok, err = schroot._create_schroot(
+        name="packastack-noble-amd64",
+        config=config,
     )
 
     assert ok is True
