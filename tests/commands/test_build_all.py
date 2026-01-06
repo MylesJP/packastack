@@ -73,12 +73,21 @@ def _call_run_build_all(
     
     This bridges the old kwarg-style test calls to the new BuildAllRequest-based API.
     """
+    # Convert old-style release/snapshot bools to new build_type string
+    if milestone:
+        build_type = "milestone"
+    elif snapshot:
+        build_type = "snapshot"
+    elif release:
+        build_type = "release"
+    else:
+        build_type = "auto"
+
     request = BuildAllRequest(
         target=target,
         ubuntu_series=ubuntu_series,
         cloud_archive=cloud_archive,
-        release=release,
-        snapshot=snapshot,
+        build_type=build_type,
         milestone=milestone,
         binary=binary,
         keep_going=keep_going,
@@ -830,7 +839,10 @@ class TestRunSingleBuild:
         assert log_path.endswith("build.log")
         cmd = captured["cmd"]
         assert "--cloud-archive" in cmd
-        assert "--snapshot" in cmd
+        # Build type is passed via --type flag
+        assert "--type" in cmd
+        idx = cmd.index("--type")
+        assert cmd[idx + 1] == "snapshot"
         assert "--no-binary" in cmd
         assert "--force" in cmd
         assert captured["env"]["PACKASTACK_BUILD_DEPTH"] == "10"
@@ -980,7 +992,8 @@ class TestRunSequentialBuilds:
             build_type="release",
             binary=True,
             force=False,
-            run=SimpleNamespace(),
+            local_repo=tmp_path / "repo",
+            run=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
         )
 
         assert exit_code == EXIT_ALL_BUILD_FAILED
@@ -1032,7 +1045,8 @@ class TestRunParallelBuilds:
             binary=True,
             force=False,
             parallel=2,
-            run=SimpleNamespace(),
+            local_repo=tmp_path / "repo",
+            run=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
         )
 
         assert exit_code == EXIT_ALL_BUILD_FAILED
@@ -1617,8 +1631,7 @@ class TestBuildAllCli:
             target="devel",
             ubuntu_series="devel",
             cloud_archive="",
-            release=True,
-            snapshot=False,
+            build_type="release",
             milestone="",
             binary=True,
             keep_going=True,
