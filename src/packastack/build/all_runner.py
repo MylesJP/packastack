@@ -28,7 +28,7 @@ import concurrent.futures
 import contextlib
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -445,7 +445,7 @@ def _run_build_all(
         )
 
     # Mark completion
-    state.completed_at = datetime.utcnow().isoformat()
+    state.completed_at = datetime.now(timezone.utc).isoformat()
     save_state(state, state_dir)
 
     # Generate reports
