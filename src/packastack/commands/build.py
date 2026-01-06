@@ -159,6 +159,7 @@ from packastack.build import (
     # Phase functions
     check_retirement_status,
     check_tools,
+    ensure_schroot_ready,
     load_package_indexes,
     resolve_upstream_registry,
     # Exit codes
@@ -2001,34 +2002,20 @@ def _run_build(
             return EXIT_SUCCESS
 
         # Ensure schroot exists for sbuild-based binary builds
-        schroot_name = ""
-        if binary and builder == "sbuild":
-            schroot_name = get_schroot_name(resolved_ubuntu, get_host_arch())
-            mirror = cfg.get("mirrors", {}).get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu")
-            components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
-            schroot_config = SchrootConfig.from_lists(
-                series=resolved_ubuntu,
-                arch=get_host_arch(),
-                mirror=mirror,
-                components=components,
-            )
-            schroot_result = ensure_schroot(config=schroot_config, offline=offline)
-            if not schroot_result.exists:
-                activity("plan", f"Schroot error: {schroot_result.error}")
-                exit_code = EXIT_TOOL_MISSING if "not found" in schroot_result.error else EXIT_CONFIG_ERROR
-                run.write_summary(
-                    status="failed",
-                    error=schroot_result.error,
-                    exit_code=exit_code,
-                )
-                return exit_code
-            if schroot_result.created:
-                activity("plan", f"Created schroot: {schroot_result.name}")
-            run.log_event({
-                "event": "schroot.ready",
-                "name": schroot_result.name,
-                "created": schroot_result.created,
-            })
+        mirror = cfg.get("mirrors", {}).get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu")
+        components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
+        result, schroot_info = ensure_schroot_ready(
+            binary=binary,
+            builder=builder,
+            resolved_ubuntu=resolved_ubuntu,
+            mirror=mirror,
+            components=components,
+            offline=offline,
+            run=run,
+        )
+        if not result.success:
+            return result.exit_code
+        schroot_name = schroot_info.schroot_name
 
         # =========================================================================
         # PHASE: fetch

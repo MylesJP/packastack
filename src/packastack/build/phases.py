@@ -561,3 +561,95 @@ def check_tools(
     
     activity("plan", "All required tools available")
     return PhaseResult.ok(), ToolCheckResult(is_complete=True)
+
+
+@dataclass
+class SchrootSetupResult:
+    """Result of schroot setup phase.
+    
+    Attributes:
+        schroot_name: Name of the schroot (empty if not needed)
+        created: True if schroot was created during this run
+        skipped: True if schroot setup was skipped (not needed)
+    """
+    schroot_name: str = ""
+    created: bool = False
+    skipped: bool = False
+
+
+def ensure_schroot_ready(
+    binary: bool,
+    builder: str,
+    resolved_ubuntu: str,
+    mirror: str,
+    components: list[str],
+    offline: bool,
+    run: "RunContextType",
+) -> tuple[PhaseResult, SchrootSetupResult]:
+    """Ensure schroot exists for sbuild-based binary builds.
+    
+    This phase checks if an sbuild schroot is needed for binary builds,
+    and if so, ensures it exists or creates it.
+    
+    Args:
+        binary: Whether binary builds are requested
+        builder: Build tool to use ('sbuild' or other)
+        resolved_ubuntu: Ubuntu series codename (e.g., 'noble')
+        mirror: Ubuntu mirror URL
+        components: Ubuntu components (e.g., ['main', 'universe'])
+        offline: If True, don't create schroot if missing
+        run: RunContext for logging
+        
+    Returns:
+        Tuple of (PhaseResult, SchrootSetupResult).
+        PhaseResult.success is False if schroot is needed but can't be created.
+        
+    Side Effects:
+        - May create a new schroot
+        - Logs schroot status via activity()
+        - Logs events to run context
+    """
+    from packastack.build.schroot import SchrootConfig, ensure_schroot, get_schroot_name
+    from packastack.target.arch import get_host_arch
+    from packastack.build.errors import EXIT_TOOL_MISSING, EXIT_CONFIG_ERROR
+    
+    result = SchrootSetupResult()
+    
+    # Only needed for sbuild binary builds
+    if not binary or builder != "sbuild":
+        result.skipped = True
+        return PhaseResult.ok(), result
+    
+    schroot_name = get_schroot_name(resolved_ubuntu, get_host_arch())
+    result.schroot_name = schroot_name
+    
+    schroot_config = SchrootConfig.from_lists(
+        series=resolved_ubuntu,
+        arch=get_host_arch(),
+        mirror=mirror,
+        components=components,
+    )
+    
+    schroot_result = ensure_schroot(config=schroot_config, offline=offline)
+    
+    if not schroot_result.exists:
+        activity("plan", f"Schroot error: {schroot_result.error}")
+        exit_code = EXIT_TOOL_MISSING if "not found" in schroot_result.error else EXIT_CONFIG_ERROR
+        run.write_summary(
+            status="failed",
+            error=schroot_result.error,
+            exit_code=exit_code,
+        )
+        return PhaseResult.fail(exit_code, schroot_result.error), result
+    
+    if schroot_result.created:
+        activity("plan", f"Created schroot: {schroot_result.name}")
+        result.created = True
+    
+    run.log_event({
+        "event": "schroot.ready",
+        "name": schroot_result.name,
+        "created": schroot_result.created,
+    })
+    
+    return PhaseResult.ok(), result
