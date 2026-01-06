@@ -722,7 +722,13 @@ def prepare_upstream_source(
     Returns:
         Tuple of (PhaseResult, PrepareResult).
     """
-    from packastack.debpkg.changelog import get_current_version, increment_upstream_version, parse_version
+    from packastack.debpkg.changelog import (
+        generate_milestone_version,
+        generate_release_version,
+        get_current_version,
+        increment_upstream_version,
+        parse_version,
+    )
     from packastack.debpkg.launchpad_yaml import update_launchpad_yaml_series
     from packastack.planning.type_selection import BuildType
     from packastack.upstream.releases import load_series_info
@@ -972,6 +978,48 @@ def prepare_upstream_source(
     result.git_sha = git_sha
     result.git_date = git_date
     result.snapshot_result = snapshot_result
+
+    # Compute the new version based on build type and upstream source
+    current_version = get_current_version(debian_dir / "changelog")
+    if current_version:
+        parsed = parse_version(current_version)
+        activity("prepare", f"Current version: {current_version}")
+    else:
+        parsed = None
+
+    if ctx.build_type == BuildType.RELEASE and ctx.upstream:
+        new_version = generate_release_version(
+            ctx.upstream.version, epoch=parsed.epoch if parsed else 0
+        )
+    elif ctx.build_type == BuildType.MILESTONE and ctx.upstream:
+        milestone_str = ctx.milestone or ""
+        new_version = generate_milestone_version(
+            ctx.upstream.version, milestone_str, epoch=parsed.epoch if parsed else 0
+        )
+    elif ctx.build_type == BuildType.SNAPSHOT:
+        # Use the version computed by acquire_upstream_snapshot using git describe
+        if snapshot_result and snapshot_result.upstream_version:
+            upstream_ver = snapshot_result.upstream_version
+        else:
+            # Fallback for forced builds or errors
+            if parsed:
+                next_upstream = increment_upstream_version(parsed.upstream)
+            else:
+                next_upstream = "0.0.0"
+            upstream_ver = f"{next_upstream}~git{git_date}.{git_sha[:7]}"
+
+        # Apply epoch and debian revision
+        epoch = parsed.epoch if parsed else 0
+        if epoch:
+            new_version = f"{epoch}:{upstream_ver}-0ubuntu1"
+        else:
+            new_version = f"{upstream_ver}-0ubuntu1"
+    else:
+        new_version = current_version or "0.0.0-0ubuntu1"
+
+    activity("prepare", f"New version: {new_version}")
+    run.log_event({"event": "prepare.version", "current": current_version, "new": new_version})
+    result.new_version = new_version
 
     return PhaseResult.ok(), result
 
@@ -1282,6 +1330,7 @@ def import_and_patch(
     ctx: SingleBuildContext,
     upstream_tarball: Path | None,
     snapshot_result: SnapshotAcquisitionResult | None,
+    new_version: str,
 ) -> PhaseResult:
     """Import upstream tarball and apply patches.
 
@@ -1290,11 +1339,13 @@ def import_and_patch(
     2. Imports upstream tarball with gbp import-orig
     3. Applies patches with gbp pq
     4. Exports refreshed patches
+    5. Updates debian/changelog with new version
 
     Args:
         ctx: Build context.
         upstream_tarball: Path to upstream tarball.
         snapshot_result: Snapshot result (for version info).
+        new_version: The computed new version string.
 
     Returns:
         PhaseResult indicating success or failure.
@@ -1499,6 +1550,57 @@ def import_and_patch(
                 )
     else:
         activity("patches", "Skipping patch export/checkout (not a git repo)")
+
+    # -------------------------------------------------------------------------
+    # Update debian/changelog with the new version
+    # -------------------------------------------------------------------------
+    from packastack.debpkg.changelog import generate_changelog_message, update_changelog
+
+    debian_dir = pkg_repo / "debian"
+    git_sha = snapshot_result.git_sha if snapshot_result else ""
+    signature_verified = False  # Will be updated from ctx if available
+
+    changes = generate_changelog_message(
+        ctx.build_type.value if ctx.build_type else "release",
+        ctx.upstream.version if ctx.upstream else "",
+        git_sha,
+        signature_verified,
+        "",  # signature_warning
+    )
+
+    if update_changelog(
+        debian_dir / "changelog",
+        ctx.pkg_name,
+        new_version,
+        ctx.resolved_ubuntu,
+        changes,
+        prefer_gbp=ctx.use_gbp_dch,
+    ):
+        activity("changelog", "Updated debian/changelog")
+        run.log_event({
+            "event": "changelog.updated",
+            "version": new_version,
+        })
+
+        # Commit the changelog update
+        if (pkg_repo / ".git").exists():
+            run_command(["git", "add", "debian/changelog"], cwd=pkg_repo)
+            commit_cmd = _maybe_disable_gpg_sign(
+                ["git", "commit", "-m", f"Update changelog for {new_version}"]
+            )
+            commit_rc, commit_out, commit_err = run_command(
+                commit_cmd, cwd=pkg_repo, env=_get_git_author_env()
+            )
+            if commit_rc == 0:
+                activity("changelog", "Committed changelog update")
+            else:
+                activity(
+                    "changelog",
+                    f"Changelog commit skipped: {commit_err or commit_out or 'no changes'}",
+                )
+    else:
+        activity("changelog", "Warning: failed to update changelog")
+        run.log_event({"event": "changelog.update_failed"})
 
     return PhaseResult.ok()
 
@@ -1857,6 +1959,7 @@ def build_single_package(
         ctx,
         upstream_tarball=prepare_data.upstream_tarball,
         snapshot_result=prepare_data.snapshot_result,
+        new_version=prepare_data.new_version,
     )
     if not import_result_phase.success:
         outcome.exit_code = import_result_phase.exit_code
