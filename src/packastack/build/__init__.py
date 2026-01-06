@@ -98,6 +98,12 @@ from packastack.build.phases import (
     resolve_upstream_registry,
 )
 
+# Local repo helpers
+from packastack.build.localrepo_helpers import (
+    refresh_local_repo_indexes,
+    _refresh_local_repo_indexes,
+)
+
 # Single build phases
 from packastack.build.single_build import (
     BuildResult as SingleBuildResult,
@@ -154,6 +160,8 @@ __all__ = [
     "ensure_schroot_ready",
     "load_package_indexes",
     "resolve_upstream_registry",
+    # Local repo helpers
+    "refresh_local_repo_indexes",
     # Single build phases
     "SetupInputs",
     "SingleBuildContext",

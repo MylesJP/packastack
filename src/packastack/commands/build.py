@@ -59,26 +59,6 @@ from packastack.build.provenance import (
 )
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.build.tools import check_required_tools
-from packastack.upstream.source import select_upstream_source, apply_signature_policy
-
-# Re-exports for test compatibility - these are used by single_build.py
-from packastack.upstream.gitfetch import GitFetcher
-from packastack.debpkg.launchpad_yaml import update_launchpad_yaml_series
-from packastack.debpkg.gbp import (
-    ensure_upstream_branch,
-    import_orig,
-    run_command,
-    pq_import,
-    check_upstreamed_patches,
-    build_source,
-)
-from packastack.debpkg.changelog import (
-    get_current_version,
-    generate_changelog_message,
-    update_changelog,
-    generate_release_version,
-    parse_version,
-)
 
 # Build helpers (refactored modules)
 from packastack.build import (
@@ -1138,48 +1118,10 @@ def _set_workspace(w: Path, local_vars: dict) -> None:
     local_vars["workspace"] = w
 
 
-def _refresh_local_repo_indexes(
-    local_repo: Path,
-    arch: str,
-    run: RunContextType,
-    phase: str = "verify",
-) -> tuple[localrepo.IndexResult, localrepo.SourceIndexResult]:
-    """Regenerate binary and source indexes for the local APT repository.
-
-    Ensures `Packages`/`Packages.gz` and `Sources`/`Sources.gz` exist even when
-    no artifacts were published, avoiding confusing missing-metadata errors.
-    """
-    index_result = localrepo.regenerate_indexes(local_repo, arch=arch)
-    if index_result.success:
-        activity(phase, f"Regenerated Packages index ({index_result.package_count} packages)")
-        run.log_event(
-            {
-                "event": f"{phase}.index",
-                "package_count": index_result.package_count,
-                "packages_file": str(index_result.packages_file) if index_result.packages_file else None,
-            }
-        )
-    else:
-        activity(phase, f"Warning: Failed to regenerate binary indexes: {index_result.error}")
-        run.log_event({"event": f"{phase}.index_failed", "error": index_result.error})
-
-    source_index_result = localrepo.regenerate_source_indexes(local_repo)
-    if source_index_result.success:
-        activity(phase, f"Regenerated Sources index ({source_index_result.source_count} sources)")
-        run.log_event(
-            {
-                "event": f"{phase}.source_index",
-                "source_count": source_index_result.source_count,
-                "sources_file": str(source_index_result.sources_file)
-                if source_index_result.sources_file
-                else None,
-            }
-        )
-    else:
-        activity(phase, f"Warning: Failed to regenerate source indexes: {source_index_result.error}")
-        run.log_event({"event": f"{phase}.source_index_failed", "error": source_index_result.error})
-
-    return index_result, source_index_result
+# Import from extracted module - re-exported for backwards compatibility
+from packastack.build.localrepo_helpers import (
+    refresh_local_repo_indexes as _refresh_local_repo_indexes,
+)
 
 
 def _run_build(

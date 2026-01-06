@@ -272,17 +272,17 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         resolve_upstream_registry,
     )
     from packastack.build.provenance import create_provenance
-    from packastack.commands.build import (
-        _build_type_from_string,
+    from packastack.build.type_resolution import build_type_from_string as _build_type_from_string
+    from packastack.upstream.releases import (
         get_previous_series,
         is_snapshot_eligible,
         load_openstack_packages,
-        select_upstream_source,
+        get_current_development_series,
     )
+    from packastack.upstream.source import select_upstream_source
     from packastack.target.series import resolve_series
     from packastack.target.arch import get_host_arch
     from packastack.planning.type_selection import BuildType
-    from packastack.upstream.releases import get_current_development_series
     
     run = inputs.run
     paths = inputs.paths
@@ -1576,8 +1576,8 @@ def build_packages(
             else:
                 # Ensure local repo has indexes before sbuild
                 if not ctx.skip_repo_regen:
-                    from packastack.commands.build import _refresh_local_repo_indexes
-                    _refresh_local_repo_indexes(ctx.local_repo, host_arch, run, phase="build")
+                    from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+                    refresh_local_repo_indexes(ctx.local_repo, host_arch, run, phase="build")
 
                 sbuild_config = SbuildConfig(
                     dsc_path=source_result.dsc_file,
@@ -1753,19 +1753,19 @@ def verify_and_publish(
             )
 
             if not ctx.skip_repo_regen:
-                from packastack.commands.build import _refresh_local_repo_indexes
-                _refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
+                from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+                refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
         else:
             activity("verify", f"Warning: Failed to publish artifacts: {publish_result.error}")
             run.log_event({"event": "verify.publish_failed", "error": publish_result.error})
             if not ctx.skip_repo_regen:
-                from packastack.commands.build import _refresh_local_repo_indexes
-                _refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
+                from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+                refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
     else:
         activity("verify", "No build artifacts to publish; ensuring local repo metadata exists")
         if not ctx.skip_repo_regen:
-            from packastack.commands.build import _refresh_local_repo_indexes
-            _refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
+            from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+            refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
 
     activity("verify", "Verification complete")
     return PhaseResult.ok()
