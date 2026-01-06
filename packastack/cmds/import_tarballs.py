@@ -379,11 +379,14 @@ def setup_upstream_repository(
     return upstream_mgr
 
 
-def update_gbp_and_ci_files(
+def update_gbp_and_ci_files_pre_import(
     pkg_mgr: RepoManager, upstream_branch: str, cycle: str
 ) -> None:
     """
     Update debian/gbp.conf and .launchpad.yaml with upstream branch.
+
+    This is called before the tarball import. Changelog is updated separately
+    after import when we have the debian version.
 
     Args:
         pkg_mgr: Package repository manager
@@ -414,6 +417,96 @@ def update_gbp_and_ci_files(
             pkg_mgr.path,
             commit_msg,
         )
+
+
+def update_changelog_with_new_version(
+    pkg_mgr: RepoManager,
+    cycle: str,
+    debian_version: str,
+    source_name: str,
+) -> None:
+    """
+    Create changelog entry for new upstream version.
+
+    Args:
+        pkg_mgr: Package repository manager
+        cycle: OpenStack cycle name
+        debian_version: Debian version string for changelog (without epoch)
+        source_name: Source package name
+
+    Raises:
+        DebianError: If dch fails
+    """
+    import re
+    import subprocess
+
+    from packastack.config import PackastackConfig
+
+    # Make sure we're on master branch
+    pkg_mgr.checkout("master")
+
+    # Check if existing changelog has an epoch and preserve it
+    changelog_path = pkg_mgr.path / "debian" / "changelog"
+    if changelog_path.exists():
+        first_line = changelog_path.read_text().split("\n")[0]
+        # Extract version from first line: package (VERSION) distribution
+        version_match = re.search(r"\(([^)]+)\)", first_line)
+        if version_match:
+            existing_version = version_match.group(1)
+            # Check for epoch (e.g., "2:31.0.0-0ubuntu2")
+            epoch_match = re.match(r"^(\d+):", existing_version)
+            if epoch_match:
+                epoch = epoch_match.group(1)
+                debian_version = f"{epoch}:{debian_version}"
+                logger.info(
+                    "Preserving epoch %s for %s: %s", epoch, source_name,
+                    debian_version
+                )
+
+    # Get LP bug from config
+    config = PackastackConfig()
+    packaging_round = config.get_packaging_round()
+    ubuntu_release = config.get_ubuntu_release()
+    lp_bug = config.get_lp_bug(packaging_round) if packaging_round else None
+
+    # Use configured Ubuntu release or default to UNRELEASED
+    distribution = ubuntu_release if ubuntu_release else "UNRELEASED"
+
+    if lp_bug:
+        changelog_msg = (
+            f"New upstream release for OpenStack {cycle.capitalize()}. "
+            f"(LP: #{lp_bug})"
+        )
+    else:
+        changelog_msg = f"New upstream release for OpenStack {cycle.capitalize()}."
+
+    # Use dch to create proper changelog entry
+    try:
+        subprocess.run(
+            [
+                "dch",
+                "--newversion",
+                debian_version,
+                "--distribution",
+                distribution,
+                changelog_msg,
+            ],
+            cwd=pkg_mgr.path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        pkg_mgr.commit(
+            changelog_msg,
+            ["debian/changelog"]
+        )
+        logger.info("Created changelog entry for %s: %s", source_name, changelog_msg)
+    except subprocess.CalledProcessError as e:
+        logger.warning("Failed to create changelog entry: %s", e.stderr)
+        raise DebianError(f"dch failed: {e.stderr}")
+    except FileNotFoundError:
+        logger.warning("dch command not found - is devscripts installed?")
+        raise DebianError("dch command not found - is devscripts installed?")
 
 
 def create_upstream_branch(
@@ -804,8 +897,8 @@ def process_repository(
         upstream_branch = f"{UPSTREAM_BRANCH_PREFIX}-{context.cycle}"
         create_upstream_branch(pkg_mgr, upstream_branch, releases_path)
 
-        # 7. Update debian/gbp.conf and launchpad ci files.
-        update_gbp_and_ci_files(pkg_mgr, upstream_branch, context.cycle)
+        # 7. Update debian/gbp.conf and launchpad ci files (without changelog yet).
+        update_gbp_and_ci_files_pre_import(pkg_mgr, upstream_branch, context.cycle)
 
         # 8. Check if deliverable exists
         if not check_deliverable_exists(
@@ -837,6 +930,11 @@ def process_repository(
         # 14. Run gbp import-orig
         gbp = GitBuildPackage(pkg_mgr.path)
         gbp.import_orig(renamed_tarball)
+
+        # 15. Update changelog with new version
+        update_changelog_with_new_version(
+            pkg_mgr, context.cycle, debian_version, source_name
+        )
 
         context.add_success(repo_name)
         console.print(f"[green]✓[/green] {repo_name}: {debian_version}")
@@ -891,7 +989,21 @@ class ImportTarballsCommand(Command):
         return parser
 
     def take_action(self, parsed_args):
+        from packastack.config import PackastackConfig
+
         console.set_stream(self.app.stdout)
+
+        # Check configuration and warn if not set
+        config = PackastackConfig()
+        if not config.is_configured():
+            console.print("\n" + "=" * 70)
+            console.print("WARNING: Packaging configuration not set!")
+            console.print("=" * 70)
+            console.print(
+                "Please run 'packastack configure' to set packaging round and LP bugs."
+            )
+            console.print("=" * 70 + "\n")
+
         console.print("Starting import process...")
         logging.getLogger(__name__).info("Starting import process")
 
@@ -964,6 +1076,30 @@ class ImportTarballsCommand(Command):
             console.print("\n" + "=" * 70)
             console.print(f"PREVIEW: Will process {len(repositories)} packages")
             console.print("=" * 70)
+
+            # Show configuration details
+            packaging_round = config.get_packaging_round()
+            if packaging_round:
+                console.print(f"Packaging Round: {packaging_round}")
+            else:
+                console.print("Packaging Round: Not configured")
+
+            ubuntu_release = config.get_ubuntu_release()
+            if ubuntu_release:
+                console.print(f"Ubuntu Release: {ubuntu_release}")
+            else:
+                console.print("Ubuntu Release: Not configured (will use UNRELEASED)")
+
+            lp_bugs = config.get_all_lp_bugs()
+            if lp_bugs:
+                console.print("LP Bugs:")
+                for milestone, bug in sorted(lp_bugs.items()):
+                    console.print(f"  {milestone}: LP: #{bug}")
+            else:
+                console.print("LP Bugs: None registered")
+
+            console.print("=" * 70)
+            console.print("Packages:")
             for i, repo in enumerate(repositories, 1):
                 console.print(f"  {i:3d}. {repo.name}")
             console.print("=" * 70 + "\n")

@@ -745,16 +745,16 @@ def test_setup_upstream_repository_new(mock_repo_mgr, tmp_path):
 
 @patch("packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
-def test_update_gbp_and_ci_files(mock_gbp, mock_update_ci, tmp_path):
+def test_update_gbp_and_ci_files_pre_import(mock_gbp, mock_update_ci, tmp_path):
     """Test update_gbp_configuration."""
-    from packastack.cmds.import_tarballs import update_gbp_and_ci_files
+    from packastack.cmds.import_tarballs import update_gbp_and_ci_files_pre_import
 
     mock_mgr = MagicMock()
     mock_gbp.return_value = mock_mgr
     mock_gbp.return_value.update_gbp_conf.return_value = False
     mock_update_ci.return_value = False
 
-    update_gbp_and_ci_files(mock_mgr, "upstream/dalmatian", "dalmatian")
+    update_gbp_and_ci_files_pre_import(mock_mgr, "upstream/dalmatian", "dalmatian")
 
     mock_gbp.assert_called_once_with(mock_mgr.path)
     mock_mgr.update_gbp_conf.assert_called_once_with("upstream/dalmatian")
@@ -764,16 +764,16 @@ def test_update_gbp_and_ci_files(mock_gbp, mock_update_ci, tmp_path):
 
 @patch("packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
-def test_update_gbp_and_ci_files_commit(mock_gbp, mock_update_ci, tmp_path):
-    """Test update_gbp_and_ci_files triggers commit when files changed."""
-    from packastack.cmds.import_tarballs import update_gbp_and_ci_files
+def test_update_gbp_and_ci_files_pre_import_commit(mock_gbp, mock_update_ci, tmp_path):
+    """Test update_gbp_and_ci_files_pre_import triggers commit when files changed."""
+    from packastack.cmds.import_tarballs import update_gbp_and_ci_files_pre_import
 
     mock_mgr = MagicMock()
     mock_gbp.return_value = mock_mgr
     mock_gbp.return_value.update_gbp_conf.return_value = True
     mock_update_ci.return_value = True
 
-    update_gbp_and_ci_files(mock_mgr, "upstream/dalmatian", "dalmatian")
+    update_gbp_and_ci_files_pre_import(mock_mgr, "upstream/dalmatian", "dalmatian")
 
     mock_gbp.assert_called_once_with(mock_mgr.path)
     # Should commit both files
@@ -784,16 +784,20 @@ def test_update_gbp_and_ci_files_commit(mock_gbp, mock_update_ci, tmp_path):
 
 @patch("packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
-def test_update_gbp_and_ci_files_commit_gbp_only(mock_gbp, mock_update_ci, tmp_path):
-    """Test update_gbp_and_ci_files triggers commit when gbp.conf changed only."""
-    from packastack.cmds.import_tarballs import update_gbp_and_ci_files
+def test_update_gbp_and_ci_files_pre_import_commit_gbp_only(
+    mock_gbp, mock_update_ci, tmp_path
+):
+    """Test update_gbp_and_ci_files_pre_import triggers commit when
+    gbp.conf changed only.
+    """
+    from packastack.cmds.import_tarballs import update_gbp_and_ci_files_pre_import
 
     mock_mgr = MagicMock()
     mock_gbp.return_value = mock_mgr
     mock_gbp.return_value.update_gbp_conf.return_value = True
     mock_update_ci.return_value = False
 
-    update_gbp_and_ci_files(mock_mgr, "upstream/dalmatian", "dalmatian")
+    update_gbp_and_ci_files_pre_import(mock_mgr, "upstream/dalmatian", "dalmatian")
 
     mock_gbp.assert_called_once_with(mock_mgr.path)
     mock_mgr.commit.assert_called_once()
@@ -807,22 +811,22 @@ def test_update_gbp_and_ci_files_commit_gbp_only(mock_gbp, mock_update_ci, tmp_p
 @patch(
     "packastack.cmds.import_tarballs.GitBuildPackage",
 )
-def test_update_gbp_and_ci_files_commit_ci_only(
+def test_update_gbp_and_ci_files_pre_import_commit_ci_only(
     mock_gbp,
     mock_update_ci,
     tmp_path,
 ):
-    """Test update_gbp_and_ci_files triggers commit when
+    """Test update_gbp_and_ci_files_pre_import triggers commit when
     .launchpad.yaml changed only.
     """
-    from packastack.cmds.import_tarballs import update_gbp_and_ci_files
+    from packastack.cmds.import_tarballs import update_gbp_and_ci_files_pre_import
 
     mock_mgr = MagicMock()
     mock_gbp.return_value = mock_mgr
     mock_gbp.return_value.update_gbp_conf.return_value = False
     mock_update_ci.return_value = True
 
-    update_gbp_and_ci_files(mock_mgr, "upstream/dalmatian", "dalmatian")
+    update_gbp_and_ci_files_pre_import(mock_mgr, "upstream/dalmatian", "dalmatian")
 
     mock_gbp.assert_called_once_with(mock_mgr.path)
     mock_mgr.commit.assert_called_once()
@@ -832,9 +836,13 @@ def test_update_gbp_and_ci_files_commit_ci_only(
 
 @patch("packastack.cmds.import_tarballs.lpci.update_launchpad_ci_file")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
-def test_update_gbp_and_ci_files_commit_raises(mock_gbp, mock_update_ci, tmp_path):
-    """Test update_gbp_and_ci_files surfaces RepositoryError from commit."""
-    from packastack.cmds.import_tarballs import update_gbp_and_ci_files
+def test_update_gbp_and_ci_files_pre_import_commit_raises(
+    mock_gbp, mock_update_ci, tmp_path
+):
+    """Test update_gbp_and_ci_files_pre_import surfaces RepositoryError
+    from commit.
+    """
+    from packastack.cmds.import_tarballs import update_gbp_and_ci_files_pre_import
     from packastack.exceptions import RepositoryError
 
     mock_mgr = MagicMock()
@@ -844,7 +852,7 @@ def test_update_gbp_and_ci_files_commit_raises(mock_gbp, mock_update_ci, tmp_pat
     mock_mgr.commit.side_effect = RepositoryError("commit failed")
 
     with pytest.raises(RepositoryError, match="commit failed"):
-        update_gbp_and_ci_files(mock_mgr, "upstream/dalmatian", "dalmatian")
+        update_gbp_and_ci_files_pre_import(mock_mgr, "upstream/dalmatian", "dalmatian")
 
 
 @patch("packastack.cmds.import_tarballs.get_previous_cycle")
@@ -990,12 +998,13 @@ def test_create_and_import_tarball_release(tmp_path):
         assert tarball == tarballs_dir / "nova_27.0.0-1ubuntu0.orig.tar.gz"
 
 
+@patch("packastack.cmds.import_tarballs.update_changelog_with_new_version")
 @patch("packastack.cmds.import_tarballs.GitBuildPackage")
 @patch("packastack.cmds.import_tarballs.create_and_import_tarball")
 @patch("packastack.cmds.import_tarballs.determine_importer_type")
 @patch("packastack.cmds.import_tarballs.check_deliverable_exists")
 @patch("packastack.cmds.import_tarballs.create_upstream_branch")
-@patch("packastack.cmds.import_tarballs.update_gbp_and_ci_files")
+@patch("packastack.cmds.import_tarballs.update_gbp_and_ci_files_pre_import")
 @patch("packastack.cmds.import_tarballs.setup_upstream_repository")
 @patch("packastack.cmds.import_tarballs.parse_packaging_metadata")
 @patch("packastack.cmds.import_tarballs.setup_repository")
@@ -1011,6 +1020,7 @@ def test_process_repository_success(
     mock_determine_type,
     mock_create_import,
     mock_gbp,
+    mock_update_changelog,
     tmp_path,
 ):
     """Test process_repository successful flow."""
@@ -1050,7 +1060,7 @@ def test_process_repository_success(
 
 @patch("packastack.cmds.import_tarballs.check_deliverable_exists")
 @patch("packastack.cmds.import_tarballs.create_upstream_branch")
-@patch("packastack.cmds.import_tarballs.update_gbp_and_ci_files")
+@patch("packastack.cmds.import_tarballs.update_gbp_and_ci_files_pre_import")
 @patch("packastack.cmds.import_tarballs.setup_upstream_repository")
 @patch("packastack.cmds.import_tarballs.parse_packaging_metadata")
 @patch("packastack.cmds.import_tarballs.setup_repository")

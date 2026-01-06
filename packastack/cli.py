@@ -29,8 +29,10 @@ class PackastackCommandManager(CommandManager):
     def __init__(self) -> None:
         super().__init__(namespace="packastack.commands")
         # Import commands lazily to avoid import cycles
+        from packastack.cmds.configure import ConfigureCommand
         from packastack.cmds.import_tarballs import ImportTarballsCommand
 
+        self.add_command("configure", ConfigureCommand)
         self.add_command("import", ImportTarballsCommand)
 
 

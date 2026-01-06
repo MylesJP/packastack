@@ -9,6 +9,7 @@ wheels/
 .coverage
 .*_cache
 output/
+packastack/config.json
 
 # Virtual environments
 .venv
