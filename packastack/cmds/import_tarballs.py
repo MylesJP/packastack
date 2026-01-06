@@ -13,6 +13,7 @@ import fnmatch
 import logging
 import sys
 import threading
+import urllib.request
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ from packastack.constants import (
     LOGS_DIR,
     OUTPUT_DIR,
     PACKAGING_DIR,
+    PKG_SCRIPTS_CURRENT_PROJECTS_URL,
+    PKG_SCRIPTS_DEPENDENCIES_URL,
     RELEASES_DIR,
     RELEASES_REPO_URL,
     TARBALLS_DIR,
@@ -559,6 +562,50 @@ def get_launchpad_repositories() -> list:
     return repo_mgr.list_team_repositories()
 
 
+def get_pkg_scripts_package_list() -> list[str]:
+    """
+    Fetch package list from pkg-scripts repository.
+
+    Returns dependencies first (with python-openstacksdk and
+    python-openstackclient at the front), followed by current-projects.
+
+    Returns:
+        Ordered list of package names
+
+    Raises:
+        ImporterError: If fetching fails
+    """
+    try:
+        # Fetch dependencies
+        with urllib.request.urlopen(PKG_SCRIPTS_DEPENDENCIES_URL) as response:
+            deps_content = response.read().decode("utf-8")
+        dependencies = [
+            line.strip() for line in deps_content.splitlines() if line.strip()
+        ]
+
+        # Fetch current-projects
+        with urllib.request.urlopen(PKG_SCRIPTS_CURRENT_PROJECTS_URL) as response:
+            projects_content = response.read().decode("utf-8")
+        projects = [
+            line.strip() for line in projects_content.splitlines() if line.strip()
+        ]
+
+        # Order dependencies: python-openstacksdk and python-openstackclient first
+        priority_deps = ["python-openstacksdk", "python-openstackclient"]
+        ordered_deps = []
+
+        for dep in priority_deps:
+            if dep in dependencies:
+                ordered_deps.append(dep)
+                dependencies.remove(dep)
+
+        # Add remaining dependencies, then projects
+        return ordered_deps + dependencies + projects
+
+    except Exception as e:
+        raise ImporterError(f"Failed to fetch pkg-scripts package list: {e}") from e
+
+
 def to_repository_specs(repositories: Iterable) -> list[RepositorySpec]:
     """Normalize Launchpad repository objects to RepositorySpec instances."""
     specs: list[RepositorySpec] = []
@@ -873,10 +920,36 @@ class ImportTarballsCommand(Command):
 
             context = ImportContext(actual_cycle, parsed_args.import_type)
 
+            console.print("Fetching package list from pkg-scripts...")
+            logging.getLogger(__name__).info("Fetching pkg-scripts package list")
+            pkg_list = get_pkg_scripts_package_list()
+            console.print(
+                f"Fetched {len(pkg_list)} packages from pkg-scripts "
+                f"(dependencies first)"
+            )
+
             console.print("Fetching repository list from Launchpad...")
             logging.getLogger(__name__).info("Fetching launchpad repositories")
-            repositories = to_repository_specs(get_launchpad_repositories())
-            console.print(f"Found {len(repositories)} repositories")
+            all_repos = to_repository_specs(get_launchpad_repositories())
+
+            # Create lookup dict for quick access
+            repo_dict = {repo.name: repo for repo in all_repos}
+
+            # Build ordered list matching pkg-scripts order
+            repositories = []
+            for pkg_name in pkg_list:
+                if pkg_name in repo_dict:
+                    repositories.append(repo_dict[pkg_name])
+                else:
+                    logger.warning(
+                        f"Package {pkg_name} from pkg-scripts not found "
+                        f"in Launchpad"
+                    )
+
+            console.print(
+                f"Matched {len(repositories)}/{len(pkg_list)} packages "
+                f"to Launchpad repositories"
+            )
 
             if parsed_args.packages:
                 repositories = filter_repositories(
@@ -886,6 +959,14 @@ class ImportTarballsCommand(Command):
                 )
                 msg = f"Processing {len(repositories)} repositories after filter"
                 console.print(msg)
+
+            # Show preview of packages to be processed
+            console.print("\n" + "=" * 70)
+            console.print(f"PREVIEW: Will process {len(repositories)} packages")
+            console.print("=" * 70)
+            for i, repo in enumerate(repositories, 1):
+                console.print(f"  {i:3d}. {repo.name}")
+            console.print("=" * 70 + "\n")
 
             logs_dir.mkdir(parents=True, exist_ok=True)
             base = Path(ERROR_LOG_FILE)

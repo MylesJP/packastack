@@ -20,6 +20,13 @@ GITHUB_BASE_URL = "https://github.com"
 # Launchpad
 LAUNCHPAD_TEAM = "~ubuntu-openstack-dev"
 
+# Package lists
+PKG_SCRIPTS_BASE_URL = (
+    "https://git.launchpad.net/~ubuntu-cloud-archive/+git/pkg-scripts/plain"
+)
+PKG_SCRIPTS_CURRENT_PROJECTS_URL = f"{PKG_SCRIPTS_BASE_URL}/current-projects"
+PKG_SCRIPTS_DEPENDENCIES_URL = f"{PKG_SCRIPTS_BASE_URL}/dependencies"
+
 # Directory names
 OUTPUT_DIR = "output"
 PACKAGING_DIR = "packaging"

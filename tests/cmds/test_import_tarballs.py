@@ -38,6 +38,7 @@ def run_cli(args):
     return code, stdout.getvalue()
 
 
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list", return_value=[])
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories", return_value=[])
 @patch("packastack.cmds.import_tarballs.process_repositories", return_value=None)
 @patch("packastack.cmds.import_tarballs.get_current_cycle", return_value="gazpacho")
@@ -45,6 +46,7 @@ def test_import_cmd_creates_timestamped_log(
     mock_get_current_cycle,
     mock_process_repositories,
     mock_get_launchpad_repos,
+    mock_get_pkg_scripts,
     tmp_path,
 ):
     """Ensure import command creates timestamped error log.
@@ -94,11 +96,13 @@ def test_import_cmd_creates_timestamped_log(
 
 
 @patch("packastack.logging_setup._setup_cli_logging", side_effect=Exception("nope"))
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list", return_value=[])
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories", return_value=[])
 @patch("packastack.cmds.import_tarballs.process_repositories", return_value=None)
 def test_import_cmd_setup_cli_logging_fails(
     mock_process_repo,
     mock_get_repos,
+    mock_get_pkg_scripts,
     mock_setup_logging,
     tmp_path,
 ):
@@ -1247,6 +1251,52 @@ def test_get_launchpad_repositories(mock_lp_client_cls, mock_repo_mgr_cls):
     mock_repo_mgr.list_team_repositories.assert_called_once()
 
 
+@patch("packastack.cmds.import_tarballs.urllib.request.urlopen")
+def test_get_pkg_scripts_package_list(mock_urlopen):
+    """Test fetching package list from pkg-scripts."""
+    from packastack.cmds.import_tarballs import get_pkg_scripts_package_list
+
+    # Mock response for dependencies file
+    # (missing python-openstacksdk to test that branch)
+    deps_content = (
+        "python-aodhclient\n"
+        "python-openstackclient\n"
+        "python-keystoneclient\n"
+    )
+    # Mock response for current-projects file
+    projects_content = "nova\nneutron\nkeystone\n"
+
+    mock_responses = [
+        MagicMock(__enter__=lambda s: s, read=lambda: deps_content.encode("utf-8")),
+        MagicMock(__enter__=lambda s: s, read=lambda: projects_content.encode("utf-8")),
+    ]
+    mock_urlopen.side_effect = mock_responses
+
+    result = get_pkg_scripts_package_list()
+
+    # Verify order: openstackclient first (sdk not present),
+    # then other deps, then projects
+    assert result[0] == "python-openstackclient"
+    assert "python-aodhclient" in result[1:4]
+    assert "python-keystoneclient" in result[1:4]
+    assert result[-3:] == ["nova", "neutron", "keystone"]
+    assert len(result) == 6  # 3 deps + 3 projects
+    # Verify python-openstacksdk not in list (was missing from deps)
+    assert "python-openstacksdk" not in result
+
+
+@patch("packastack.cmds.import_tarballs.urllib.request.urlopen")
+def test_get_pkg_scripts_package_list_fetch_error(mock_urlopen):
+    """Test error handling when fetching pkg-scripts fails."""
+    from packastack.cmds.import_tarballs import get_pkg_scripts_package_list
+    from packastack.exceptions import ImporterError
+
+    mock_urlopen.side_effect = Exception("Network error")
+
+    with pytest.raises(ImporterError, match="Failed to fetch pkg-scripts"):
+        get_pkg_scripts_package_list()
+
+
 def test_to_repository_specs_missing_attributes():
     """Repositories must supply both name and URL fields."""
     from packastack.exceptions import ImporterError
@@ -1513,6 +1563,7 @@ def test_print_import_summary_with_failures_no_continue(mock_console, mock_loggi
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
 @patch("packastack.cmds.import_tarballs.process_repositories")
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list")
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories")
 @patch("packastack.cmds.import_tarballs.get_current_cycle")
 @patch("packastack.cmds.import_tarballs.setup_releases_repo")
@@ -1524,6 +1575,7 @@ def test_import_cmd_current_cycle_sequential(
     mock_setup_releases,
     mock_get_cycle,
     mock_get_repos,
+    mock_get_pkg_scripts,
     mock_process,
     mock_print_summary,
 ):
@@ -1536,6 +1588,7 @@ def test_import_cmd_current_cycle_sequential(
     )
     mock_setup_releases.return_value = Path("/tmp/releases")
     mock_get_cycle.return_value = "dalmatian"
+    mock_get_pkg_scripts.return_value = ["nova", "neutron"]
     mock_get_repos.return_value = []
 
     # Test include packages via positional argument (only 'nova' should be processed)
@@ -1562,6 +1615,7 @@ def test_import_cmd_current_cycle_sequential(
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
 @patch("packastack.cmds.import_tarballs.process_repositories")
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list")
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories")
 @patch("packastack.cmds.import_tarballs.setup_releases_repo")
 @patch("packastack.cmds.import_tarballs.setup_directories")
@@ -1571,6 +1625,7 @@ def test_import_cmd_specific_cycle_parallel(
     mock_setup_dirs,
     mock_setup_releases,
     mock_get_repos,
+    mock_get_pkg_scripts,
     mock_process,
     mock_print_summary,
 ):
@@ -1582,6 +1637,7 @@ def test_import_cmd_specific_cycle_parallel(
         Path("/tmp/logs"),
     )
     mock_setup_releases.return_value = Path("/tmp/releases")
+    mock_get_pkg_scripts.return_value = ["nova", "neutron"]
     mock_get_repos.return_value = []
 
     mock_get_repos.return_value = [
@@ -1650,6 +1706,7 @@ def test_import_cmd_unexpected_error(mock_console, mock_setup_dirs):
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
 @patch("packastack.cmds.import_tarballs.process_repositories")
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list")
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories")
 @patch("packastack.cmds.import_tarballs.setup_releases_repo")
 @patch("packastack.cmds.import_tarballs.setup_directories")
@@ -1659,6 +1716,7 @@ def test_import_cmd_click_exception_reraise(
     mock_setup_dirs,
     mock_setup_releases,
     mock_get_repos,
+    mock_get_pkg_scripts,
     mock_process,
     mock_print_summary,
 ):
@@ -1672,6 +1730,7 @@ def test_import_cmd_click_exception_reraise(
         Path("/tmp/logs"),
     )
     mock_setup_releases.return_value = Path("/tmp/releases")
+    mock_get_pkg_scripts.return_value = []
     mock_get_repos.return_value = []
     mock_print_summary.side_effect = CLICommandError("Test click error")
 
@@ -1683,6 +1742,7 @@ def test_import_cmd_click_exception_reraise(
 
 @patch("packastack.cmds.import_tarballs.print_import_summary")
 @patch("packastack.cmds.import_tarballs.process_repositories")
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list")
 @patch("packastack.cmds.import_tarballs.get_launchpad_repositories")
 @patch("packastack.cmds.import_tarballs.setup_releases_repo")
 @patch("packastack.cmds.import_tarballs.setup_directories")
@@ -1692,6 +1752,7 @@ def test_import_cmd_with_root_option(
     mock_setup_dirs,
     mock_setup_releases,
     mock_get_repos,
+    mock_get_pkg_scripts,
     mock_process,
     mock_print_summary,
     tmp_path,
@@ -1704,6 +1765,7 @@ def test_import_cmd_with_root_option(
         tmp_path / "logs",
     )
     mock_setup_releases.return_value = tmp_path / "releases"
+    mock_get_pkg_scripts.return_value = []
     mock_get_repos.return_value = []
 
     code, _ = run_cli(["--root", str(tmp_path), "import", "--cycle", "caracal"])
@@ -1711,3 +1773,86 @@ def test_import_cmd_with_root_option(
     assert code == 0
     # Verify setup_directories was called with root parameter
     mock_setup_dirs.assert_called_once_with(Path(str(tmp_path)))
+
+
+@patch("packastack.cmds.import_tarballs.print_import_summary")
+@patch("packastack.cmds.import_tarballs.process_repositories")
+@patch("packastack.cmds.import_tarballs.get_current_cycle")
+@patch("packastack.cmds.import_tarballs.get_pkg_scripts_package_list")
+@patch("packastack.cmds.import_tarballs.get_launchpad_repositories")
+@patch("packastack.cmds.import_tarballs.setup_releases_repo")
+@patch("packastack.cmds.import_tarballs.setup_directories")
+def test_import_cmd_pkg_scripts_ordering(
+    mock_setup_dirs,
+    mock_setup_releases,
+    mock_get_lp_repos,
+    mock_get_pkg_scripts,
+    mock_get_current_cycle,
+    mock_process,
+    mock_print_summary,
+    tmp_path,
+):
+    """Test import command uses pkg-scripts ordering."""
+    mock_setup_dirs.return_value = (
+        tmp_path / "packaging",
+        tmp_path / "upstream",
+        tmp_path / "tarballs",
+        tmp_path / "logs",
+    )
+    mock_setup_releases.return_value = tmp_path / "releases"
+    mock_get_current_cycle.return_value = "gazpacho"
+
+    # Mock pkg-scripts returning ordered list
+    mock_get_pkg_scripts.return_value = [
+        "python-openstacksdk",
+        "python-openstackclient",
+        "python-keystoneclient",
+        "nova",
+        "neutron",
+    ]
+
+    # Mock Launchpad repos (unordered)
+    mock_lp_repo1 = Mock()
+    mock_lp_repo1.name = "nova"
+    mock_lp_repo1.url = "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
+
+    mock_lp_repo2 = Mock()
+    mock_lp_repo2.name = "python-openstacksdk"
+    mock_lp_repo2.url = "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/python-openstacksdk"
+
+    mock_lp_repo3 = Mock()
+    mock_lp_repo3.name = "neutron"
+    mock_lp_repo3.url = "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/neutron"
+
+    mock_lp_repo4 = Mock()
+    mock_lp_repo4.name = "python-openstackclient"
+    mock_lp_repo4.url = "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/python-openstackclient"
+
+    mock_get_lp_repos.return_value = [
+        mock_lp_repo1,
+        mock_lp_repo2,
+        mock_lp_repo3,
+        mock_lp_repo4,
+    ]
+
+    code, output = run_cli(["import"])
+
+    # Debug output if failed
+    if code != 0:
+        print(f"CLI output: {output}")
+
+    assert code == 0
+    mock_get_pkg_scripts.assert_called_once()
+    mock_get_lp_repos.assert_called_once()
+
+    # Verify process_repositories was called with ordered list
+    call_args = mock_process.call_args[0]
+    repos_arg = call_args[0]
+
+    # Check that repositories are in correct order (matching pkg-scripts order)
+    assert len(repos_arg) == 4
+    assert repos_arg[0].name == "python-openstacksdk"
+    assert repos_arg[1].name == "python-openstackclient"
+    # python-keystoneclient not in Launchpad list, so skipped
+    assert repos_arg[2].name == "nova"
+    assert repos_arg[3].name == "neutron"
