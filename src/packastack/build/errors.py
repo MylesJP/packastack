@@ -33,6 +33,42 @@ if TYPE_CHECKING:
     from packastack.core.run import RunContext
 
 
+def log_phase_event(
+    run: RunContext,
+    phase: str,
+    message: str,
+    event_key: str,
+    **event_data: Any,
+) -> None:
+    """Log a phase activity message and structured event together.
+
+    This helper centralizes the repeated logging pattern where every phase
+    action logs both a human-readable activity message and a structured
+    event for machine consumption.
+
+    Args:
+        run: RunContext for structured logging.
+        phase: Phase name for activity logging (e.g., "fetch", "build").
+        message: Human-readable message for activity output.
+        event_key: Event key for structured logging (e.g., "fetch.clone").
+        **event_data: Additional data to include in the log event.
+
+    Example:
+        log_phase_event(
+            run, "fetch", f"Cloned to: {pkg_repo}",
+            "fetch.clone",
+            path=str(pkg_repo),
+            branches=branches,
+        )
+    """
+    activity(phase, message)
+    event = {
+        "event": event_key,
+        **event_data,
+    }
+    run.log_event(event)
+
+
 def phase_error(
     run: RunContext,
     phase: str,

@@ -218,9 +218,69 @@ def maybe_enable_sphinxdoc(pkg_repo: Path) -> bool:
     return False
 
 
+def git_commit(
+    repo_path: Path,
+    message: str,
+    *,
+    extra_lines: list[str] | None = None,
+    add_all: bool = False,
+    debug: bool = False,
+) -> "CommandResult":
+    """Execute a git commit with standardized options.
+
+    This helper combines common git commit patterns:
+    - Optional GPG signing disable via PACKASTACK_NO_GPG_SIGN
+    - Author/committer environment from Debian maintainer variables
+    - Optional staged-all (-a flag)
+    - Multi-line commit messages
+
+    Args:
+        repo_path: Path to the git repository.
+        message: Primary commit message line.
+        extra_lines: Additional lines to append to commit message.
+        add_all: If True, use -a flag to stage all modified files.
+        debug: If True, print git author environment debug info.
+
+    Returns:
+        CommandResult with success status, output, and return code.
+
+    Example:
+        result = git_commit(
+            pkg_repo,
+            "Update debian/watch for new upstream release",
+            extra_lines=["Co-authored-by: packastack"],
+            add_all=True,
+        )
+        if result.success:
+            print("Committed successfully")
+    """
+    from packastack.debpkg.gbp import run_command, CommandResult
+
+    # Build full message with extra lines
+    full_message = message
+    if extra_lines:
+        full_message = message + "\n\n" + "\n".join(extra_lines)
+
+    # Build command
+    cmd = ["git", "commit"]
+    if add_all:
+        cmd.append("-a")
+    cmd.extend(["-m", full_message])
+
+    # Apply GPG signing option
+    cmd = maybe_disable_gpg_sign(cmd)
+
+    # Get author environment
+    env = get_git_author_env(debug=debug)
+
+    # Execute
+    return run_command(cmd, cwd=repo_path, env=env)
+
+
 # Backwards compatibility aliases (private names used in build.py)
 _no_gpg_sign_enabled = no_gpg_sign_enabled
 _maybe_disable_gpg_sign = maybe_disable_gpg_sign
 _get_git_author_env = get_git_author_env
 _ensure_no_merge_paths = ensure_no_merge_paths
 _maybe_enable_sphinxdoc = maybe_enable_sphinxdoc
+

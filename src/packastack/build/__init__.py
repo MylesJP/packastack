@@ -50,6 +50,7 @@ from packastack.build.errors import (
     EXIT_RETIRED_PROJECT,
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
+    log_phase_event,
     phase_error,
     phase_warning,
 )
@@ -58,6 +59,7 @@ from packastack.build.errors import (
 from packastack.build.git_helpers import (
     ensure_no_merge_paths,
     get_git_author_env,
+    git_commit,
     maybe_disable_gpg_sign,
     maybe_enable_sphinxdoc,
     no_gpg_sign_enabled,
@@ -134,11 +136,13 @@ __all__ = [
     "TarballAcquisitionResult",
     "WorkspacePaths",
     # Error helpers
+    "log_phase_event",
     "phase_error",
     "phase_warning",
     # Git helpers
     "ensure_no_merge_paths",
     "get_git_author_env",
+    "git_commit",
     "maybe_disable_gpg_sign",
     "maybe_enable_sphinxdoc",
     "no_gpg_sign_enabled",
