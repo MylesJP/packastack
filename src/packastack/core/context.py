@@ -94,7 +94,6 @@ class BuildRequest:
         binary: --binary flag.
         builder: Builder for binary packages.
         build_deps: --build-deps flag.
-        use_gbp_dch: --use-gbp-dch flag.
         no_cleanup: --no-cleanup flag.
         no_spinner: --no-spinner flag.
         validate_plan_only: --validate-plan flag.
@@ -117,7 +116,6 @@ class BuildRequest:
     binary: bool = True
     builder: str = "sbuild"
     build_deps: bool = True
-    use_gbp_dch: bool = True
     no_cleanup: bool = False
     no_spinner: bool = False
     validate_plan_only: bool = False
@@ -234,7 +232,6 @@ class BuildOptions:
         binary: Whether to build binary packages.
         builder: Builder for binary packages ("sbuild" or "dpkg").
         build_deps: Whether to auto-build missing dependencies.
-        use_gbp_dch: Use gbp dch for changelog updates.
         no_cleanup: Don't cleanup workspace on success.
         no_spinner: Disable spinner output.
         validate_plan_only: Stop after validating the build plan.
@@ -247,7 +244,6 @@ class BuildOptions:
     binary: bool = True
     builder: str = "sbuild"
     build_deps: bool = True
-    use_gbp_dch: bool = True
     no_cleanup: bool = False
     no_spinner: bool = False
     validate_plan_only: bool = False
@@ -339,7 +335,6 @@ class BuildContext:
         binary: bool = True,
         builder: str = "sbuild",
         build_deps: bool = True,
-        use_gbp_dch: bool = True,
         no_cleanup: bool = False,
         no_spinner: bool = False,
         validate_plan_only: bool = False,
@@ -370,7 +365,6 @@ class BuildContext:
             binary: --binary flag.
             builder: --builder value.
             build_deps: --build-deps flag.
-            use_gbp_dch: --use-gbp-dch flag.
             no_cleanup: --no-cleanup flag.
             no_spinner: --no-spinner flag.
             validate_plan_only: --validate-plan flag.
@@ -404,7 +398,6 @@ class BuildContext:
             binary=binary,
             builder=builder,
             build_deps=build_deps,
-            use_gbp_dch=use_gbp_dch,
             no_cleanup=no_cleanup,
             no_spinner=no_spinner,
             validate_plan_only=validate_plan_only,

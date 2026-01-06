@@ -136,7 +136,6 @@ def _call_run_build(
     yes: bool = False,
     workspace_ref=None,
     include_retired: bool = False,
-    use_gbp_dch: bool = True,
     no_cleanup: bool = False,
 ) -> int:
     """Helper to call _run_build with a BuildRequest.
@@ -159,7 +158,6 @@ def _call_run_build(
         binary=binary,
         builder=builder,
         build_deps=build_deps,
-        use_gbp_dch=use_gbp_dch,
         no_cleanup=no_cleanup,
         no_spinner=no_spinner,
         validate_plan_only=validate_plan_only,

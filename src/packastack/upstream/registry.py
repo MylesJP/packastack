@@ -42,7 +42,7 @@ import yaml
 
 
 # Registry schema version
-REGISTRY_VERSION = 1
+REGISTRY_VERSION = 2
 
 # OpenDev base URLs for URL derivation
 OPENDEV_GIT_BASE = "https://opendev.org/openstack"
@@ -103,6 +103,13 @@ class UpstreamConfig:
     host: str = "opendev"
     url: str = ""
     default_branch: str = "master"
+
+
+@dataclass
+class Provenance:
+    canonical: str
+    aliases: list[str]
+    inferred: bool
 
 
 @dataclass
@@ -181,6 +188,9 @@ class ProjectConfig:
     signatures: SignaturesConfig = field(default_factory=SignaturesConfig)
     requirements: RequirementsConfig = field(default_factory=RequirementsConfig)
     watch: WatchConfig = field(default_factory=WatchConfig)
+    provenance: Provenance = field(
+        default_factory=lambda: Provenance(canonical="", aliases=[], inferred=False)
+    )
 
 
 @dataclass
@@ -457,14 +467,20 @@ def _apply_defaults_to_project(
     # Merge defaults with project data
     merged = _merge_dicts(defaults, project_data)
 
-    # Parse common_names
-    common_names = merged.get("common_names", [project_key])
-    if not common_names:
-        common_names = [project_key]
+    # Parse common_names and aliases (aliases mirror common_names today)
+    common_names = merged.get("common_names", [project_key]) or [project_key]
+    aliases = merged.get("aliases", common_names)
 
     # Parse upstream config
     upstream_data = merged.get("upstream", {})
     upstream = _parse_upstream_config(upstream_data)
+
+    # Canonical upstream ID
+    canonical_upstream = merged.get("canonical", "")
+    inferred_canonical = False
+    if not canonical_upstream:
+        canonical_upstream = f"openstack/{project_key}"
+        inferred_canonical = True
 
     # Derive URL if not explicitly set and host is opendev
     if not upstream.url and upstream.host == "opendev":
@@ -490,6 +506,12 @@ def _apply_defaults_to_project(
     # Retired flag
     retired = bool(merged.get("retired", False))
 
+    provenance = Provenance(
+        canonical=canonical_upstream,
+        aliases=aliases,
+        inferred=inferred_canonical,
+    )
+
     return ProjectConfig(
         project_key=project_key,
         common_names=common_names,
@@ -501,6 +523,7 @@ def _apply_defaults_to_project(
         signatures=signatures,
         requirements=requirements,
         watch=watch,
+        provenance=provenance,
     )
 
 

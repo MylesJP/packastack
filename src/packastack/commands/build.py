@@ -269,7 +269,6 @@ def build(
     no_cleanup: bool = typer.Option(False, "-k", "--no-cleanup", help="Don't cleanup workspace on success (keep)"),
     no_spinner: bool = typer.Option(False, "-q", "--no-spinner", help="Disable spinner output (quiet)"),
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmations"),
-    use_gbp_dch: bool = typer.Option(True, "--use-gbp-dch/--no-gbp-dch", help="Use gbp dch for changelog updates (default on)"),
     include_retired: bool = typer.Option(False, "--include-retired", help="Build retired upstream projects (default: refuse)"),
     skip_repo_regen: bool = typer.Option(False, "--skip-repo-regen", hidden=True, help="Skip local repo regeneration (internal use)"),
     # --all mode options
@@ -356,7 +355,6 @@ def build(
             no_cleanup=no_cleanup,
             no_spinner=no_spinner,
             yes=yes,
-            use_gbp_dch=use_gbp_dch,
             include_retired=include_retired,
             skip_repo_regen=skip_repo_regen,
         )
@@ -380,7 +378,6 @@ def _build_single_mode(
     no_cleanup: bool,
     no_spinner: bool,
     yes: bool,
-    use_gbp_dch: bool,
     include_retired: bool,
     skip_repo_regen: bool = False,
 ) -> None:
@@ -405,7 +402,6 @@ def _build_single_mode(
                 binary=binary,
                 builder=builder,
                 build_deps=build_deps,
-                use_gbp_dch=use_gbp_dch,
                 no_cleanup=no_cleanup,
                 no_spinner=no_spinner,
                 validate_plan_only=validate_plan_only,
@@ -621,7 +617,6 @@ def _run_build(
             builder=request.builder,
             force=request.force,
             offline=request.offline,
-            use_gbp_dch=request.use_gbp_dch,
             skip_repo_regen=request.skip_repo_regen,
             no_spinner=request.no_spinner,
             build_deps=request.build_deps,

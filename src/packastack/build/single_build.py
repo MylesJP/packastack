@@ -169,7 +169,6 @@ class SingleBuildContext:
     builder: str
     force: bool
     offline: bool
-    use_gbp_dch: bool
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
@@ -226,7 +225,6 @@ class SetupInputs:
     builder: str
     force: bool
     offline: bool
-    use_gbp_dch: bool
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
@@ -477,7 +475,6 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         builder=inputs.builder,
         force=inputs.force,
         offline=inputs.offline,
-        use_gbp_dch=inputs.use_gbp_dch,
         skip_repo_regen=inputs.skip_repo_regen,
         no_spinner=inputs.no_spinner,
         build_deps=inputs.build_deps,
@@ -1574,7 +1571,7 @@ def import_and_patch(
         new_version,
         ctx.resolved_ubuntu,
         changes,
-        prefer_gbp=ctx.use_gbp_dch,
+        prefer_gbp=True,
     ):
         activity("changelog", "Updated debian/changelog")
         run.log_event({
