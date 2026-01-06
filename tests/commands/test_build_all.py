@@ -290,9 +290,9 @@ Architecture: all
             encoding="utf-8",
         )
 
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_helpers as all_helpers_module
 
-        monkeypatch.setattr(build_all_module, "extract_upstream_version", lambda _ver: "")
+        monkeypatch.setattr(all_helpers_module, "extract_upstream_version", lambda _ver: "")
 
         versions = _build_upstream_versions_from_packaging(["nova"], tmp_path)
 
@@ -745,7 +745,7 @@ class TestFilterRetiredPackages:
 
     def test_filters_retired_packages(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should filter out retired and possibly retired packages."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_helpers as all_helpers_module
 
         project_config_path = tmp_path / "project-config"
         project_config_path.mkdir()
@@ -760,7 +760,7 @@ class TestFilterRetiredPackages:
             def get_possibly_retired_packages(self, _packages: list[str]) -> list[str]:
                 return ["b"]
 
-        monkeypatch.setattr(build_all_module, "RetirementChecker", FakeChecker)
+        monkeypatch.setattr(all_helpers_module, "RetirementChecker", FakeChecker)
 
         filtered, retired, possibly = _filter_retired_packages(
             packages=["a", "b", "c"],
@@ -777,7 +777,7 @@ class TestFilterRetiredPackages:
 
     def test_keeps_all_when_no_retired(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should keep all packages when none are retired."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_helpers as all_helpers_module
 
         project_config_path = tmp_path / "project-config"
         project_config_path.mkdir()
@@ -792,7 +792,7 @@ class TestFilterRetiredPackages:
             def get_possibly_retired_packages(self, _packages: list[str]) -> list[str]:
                 return []
 
-        monkeypatch.setattr(build_all_module, "RetirementChecker", FakeChecker)
+        monkeypatch.setattr(all_helpers_module, "RetirementChecker", FakeChecker)
 
         filtered, retired, possibly = _filter_retired_packages(
             packages=["a", "b"],

@@ -185,6 +185,12 @@ from packastack.build.type_resolution import (
     resolve_build_type_auto,
     resolve_build_type_from_cli,
 )
+from packastack.build.all_helpers import (
+    build_dependency_graph,
+    build_upstream_versions_from_packaging,
+    filter_retired_packages,
+    get_parallel_batches,
+)
 
 # Build-all imports
 import concurrent.futures
@@ -229,53 +235,10 @@ OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
 # Build-all functions (migrated from build_all.py)
 # =============================================================================
 
-
-def _build_dependency_graph(
-    packages: list[str],
-    cache_dir: Path,
-    pkg_index: PackageIndex,
-) -> tuple[DependencyGraph, dict[str, list[str]]]:
-    """Build dependency graph from debian/control files.
-
-    This is a simplified wrapper around graph_builder.build_graph_from_control
-    for use in build-all mode.
-
-    Args:
-        packages: List of source package names to include in graph.
-        cache_dir: Path to directory containing packaging repos.
-        pkg_index: Package index for resolving binary dependencies.
-
-    Returns:
-        Tuple of (DependencyGraph, missing_deps_dict).
-    """
-    from packastack.planning.graph_builder import build_graph_from_control
-
-    result = build_graph_from_control(
-        packages=packages,
-        packaging_repos_path=cache_dir,
-        package_index=pkg_index,
-    )
-
-    return result.graph, result.missing_deps
-
-
-def _build_upstream_versions_from_packaging(
-    packages: list[str],
-    packaging_root: Path,
-) -> dict[str, str]:
-    """Derive upstream versions from debian/changelog entries."""
-    versions: dict[str, str] = {}
-    for pkg in packages:
-        changelog_path = packaging_root / pkg / "debian" / "changelog"
-        if not changelog_path.exists():
-            continue
-        debian_version = get_changelog_version(changelog_path)
-        if not debian_version:
-            continue
-        upstream_version = extract_upstream_version(debian_version)
-        if upstream_version:
-            versions[pkg] = upstream_version
-    return versions
+# Delegate to packastack.build.all_helpers
+_build_dependency_graph = build_dependency_graph
+_build_upstream_versions_from_packaging = build_upstream_versions_from_packaging
+_get_parallel_batches = get_parallel_batches
 
 
 def _filter_retired_packages(
@@ -287,84 +250,15 @@ def _filter_retired_packages(
     run: RunContext,
 ) -> tuple[list[str], list[str], list[str]]:
     """Filter retired packages using openstack/project-config and releases inference."""
-    if not packages:
-        return packages, [], []
-
-    if project_config_path and not project_config_path.exists() and not offline:
-        activity("all", "Cloning openstack/project-config for retirement checks")
-        _clone_or_update_project_config(project_config_path, run)
-
-    if project_config_path is None or not project_config_path.exists():
-        return packages, [], []
-
-    retirement_checker = RetirementChecker(
+    return filter_retired_packages(
+        packages=packages,
         project_config_path=project_config_path,
-        releases_path=releases_repo,
-        target_series=openstack_target,
+        releases_repo=releases_repo,
+        openstack_target=openstack_target,
+        offline=offline,
+        run=run,
+        clone_project_config_fn=_clone_or_update_project_config,
     )
-
-    retired = retirement_checker.get_retired_packages(packages)
-    possibly_retired = retirement_checker.get_possibly_retired_packages(packages)
-    exclude = set(retired) | set(possibly_retired)
-    if not exclude:
-        return packages, retired, possibly_retired
-
-    filtered = [pkg for pkg in packages if pkg not in exclude]
-    return filtered, retired, possibly_retired
-
-
-def _get_parallel_batches(
-    graph: DependencyGraph,
-    state: BuildAllState,
-) -> list[list[str]]:
-    """Compute parallel build batches from dependency graph.
-
-    Returns packages grouped by dependency level:
-    - Batch 0: packages with no dependencies
-    - Batch 1: packages depending only on batch 0
-    - etc.
-
-    Args:
-        graph: Dependency graph.
-        state: Current build state.
-
-    Returns:
-        List of batches, each batch is a list of package names.
-    """
-    # Get remaining packages to build
-    remaining = {
-        name for name, pkg_state in state.packages.items()
-        if pkg_state.status == PackageStatus.PENDING
-    }
-
-    # Get already built packages
-    built = {
-        name for name, pkg_state in state.packages.items()
-        if pkg_state.status == PackageStatus.SUCCESS
-    }
-
-    batches: list[list[str]] = []
-    processed: set[str] = set(built)
-
-    while remaining:
-        # Find packages whose dependencies are all processed
-        ready = []
-        for pkg in remaining:
-            deps = graph.get_dependencies(pkg)
-            # A package is ready if all its deps are processed or not in our graph
-            deps_in_graph = deps & set(graph.nodes.keys())
-            if deps_in_graph <= processed:
-                ready.append(pkg)
-
-        if not ready:
-            # Remaining packages have unmet deps (cycles or blocked)
-            break
-
-        batches.append(sorted(ready))
-        processed.update(ready)
-        remaining -= set(ready)
-
-    return batches
 
 
 def _run_single_build(
