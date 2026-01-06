@@ -6,7 +6,7 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
-| build.py lines | 3,873 | 703 | -3,170 (-82%) |
+| build.py lines | 3,873 | 680 | -3,193 (-82%) |
 | packastack.build/ lines | 0 | ~8,100 | New package |
 | tests passing | 269 | 1,237 | ✓ |
 
@@ -506,12 +506,14 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] build.py reduced to 703 lines (-82% from original 3,873)
 - [x] All 1,237 tests pass
 
-### Commit 13: Cleanup pass (OPTIONAL)
-- [ ] Reduce deref churn (consistent aliasing)
-- [ ] Flatten nesting with guard clauses
-- [ ] Collapse repeated guard patterns
-- [ ] Remove dead code after wiring
-- [ ] Final test verification
+### Commit 13: Cleanup pass (DONE)
+- [x] Consolidate all imports at top of build.py
+- [x] Remove duplicate backwards-compatibility aliases  
+- [x] Remove duplicate TYPE_CHECKING block
+- [x] Organize imports by source (stdlib, core, planning, build)
+- [x] Fix deprecated datetime.utcnow() in all_runner.py
+- [x] build.py reduced to 680 lines
+- [x] All 1,237 tests pass
 
 ---
 
