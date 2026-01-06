@@ -6,22 +6,44 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
-| build.py lines | 3,873 | 3,220 | -653 (-16.9%) |
-| phases.py lines | 0 | 655 | +655 |
-| Tests passing | 269 | 269 | ✓ |
+| build.py lines | 3,873 | 2,864 | -1,009 (-26%) |
+| tests passing | 269 | 1,429 | ✓ |
 
 ### Extracted Modules in `packastack.build/`:
-- `types.py` - 7 dataclasses (BuildInputs, PhaseResult, etc.)
-- `errors.py` - Exit codes + phase_error/phase_warning helpers
-- `git_helpers.py` - 5 git functions
-- `tarball.py` - 4 tarball acquisition functions
-- `phases.py` - 6 phase functions:
-  - `check_retirement_status()` → RetirementCheckResult
-  - `resolve_upstream_registry()` → RegistryResolutionResult
-  - `check_policy()` → PolicyCheckResult
-  - `load_package_indexes()` → PackageIndexes
-  - `check_tools()` → ToolCheckResult
-  - `ensure_schroot_ready()` → SchrootSetupResult
+
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `types.py` | 219 | 7 dataclasses (BuildInputs, PhaseResult, etc.) |
+| `errors.py` | 143 | Exit codes + phase_error/phase_warning helpers |
+| `git_helpers.py` | 226 | 5 git helper functions |
+| `tarball.py` | 446 | 4 tarball acquisition functions |
+| `phases.py` | 655 | 6 phase functions (retirement, registry, policy, indexes, tools, schroot) |
+| `all_reports.py` | 245 | Build-all report generation (JSON + Markdown) |
+| `type_resolution.py` | 145 | CLI build type parsing and auto-resolution |
+| `all_helpers.py` | 195 | Build-all helpers (graph, versions, retire filter, batches) |
+
+### Phase Functions in `phases.py`:
+- `check_retirement_status()` → RetirementCheckResult
+- `resolve_upstream_registry()` → RegistryResolutionResult
+- `check_policy()` → PolicyCheckResult
+- `load_package_indexes()` → PackageIndexes
+- `check_tools()` → ToolCheckResult
+- `ensure_schroot_ready()` → SchrootSetupResult
+
+### Functions in `type_resolution.py`:
+- `VALID_BUILD_TYPES` - constant
+- `resolve_build_type_from_cli()` - parse CLI options
+- `resolve_build_type_auto()` - auto-select based on releases data
+- `build_type_from_string()` - convert string to BuildType enum
+
+### Functions in `all_helpers.py`:
+- `build_dependency_graph()` - wrapper for graph_builder
+- `build_upstream_versions_from_packaging()` - extract versions from changelogs
+- `filter_retired_packages()` - filter retired packages using project-config
+- `get_parallel_batches()` - compute parallel build batches
+
+### Functions in `all_reports.py`:
+- `generate_build_all_reports()` - generate JSON and Markdown summary reports
 
 ## Phase Map
 
