@@ -21,6 +21,7 @@ GITHUB_BASE_URL = "https://github.com"
 LAUNCHPAD_TEAM = "~ubuntu-openstack-dev"
 
 # Directory names
+OUTPUT_DIR = "output"
 PACKAGING_DIR = "packaging"
 UPSTREAM_DIR = "upstream"
 TARBALLS_DIR = "tarballs"

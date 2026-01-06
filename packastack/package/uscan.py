@@ -474,7 +474,8 @@ class Uscan:
     def _apply_single_mangle(value: str, mangle: str) -> str:
         """Apply a single sed-style substitution.
 
-        Mangling follows ``sed`` syntax ``s<delim>pattern<delim>replacement<delim>flags``.
+        Mangling follows ``sed`` syntax with the format
+        ``s<delim>pattern<delim>replacement<delim>flags``.
         Delimiters are arbitrary and escaped delimiters are honoured.  The
         function normalises Perl-style regex fragments, respects ``i`` and ``g``
         flags for case-insensitivity and global substitution, and leaves values
@@ -550,7 +551,8 @@ class Uscan:
         if changelog_path.exists():
             lines = changelog_path.read_text(encoding="utf-8").splitlines()
             if lines:
-                header_match = re.match(r"^(?P<name>[^\s]+) \((?P<version>[^)]+)\)", lines[0])
+                header_pattern = r"^(?P<name>[^\s]+) \((?P<version>[^)]+)\)"
+                header_match = re.match(header_pattern, lines[0])
                 if header_match:
                     package_name = header_match.group("name")
                     packaged_version = header_match.group("version")
@@ -582,8 +584,8 @@ class Uscan:
 
         ``uscan`` patterns and mangles may contain Perl-specific escapes that
         Python's regex engine does not understand.  This helper translates
-        ``\Q...\E`` literal sections into escaped text and converts Perl
-        backreferences (``$1`` or ``\1``) into Python's ``\g<1>`` form so compiled
+        ``\\Q...\\E`` literal sections into escaped text and converts Perl
+        backreferences (``$1`` or ``\1``) into Python's ``\\g<1>`` form so compiled
         patterns and replacement strings behave as users expect.
         """
 

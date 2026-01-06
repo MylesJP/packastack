@@ -16,19 +16,20 @@ def run_cli(args):
 def test_cli_end_to_end(mock_get_repos, tmp_path):
     """Run CLI with a real releases repo and ensure logs are created.
 
-    This test avoids network calls by ensuring the upstream/releases repo
-    is a local git repository and patching get_launchpad_repositories.
+    This test avoids network calls by ensuring the output/upstream/releases
+    repo is a local git repository and patching get_launchpad_repositories.
     """
-    # Create required directories under root
+    # Create required directories under root/output
     root = tmp_path
-    packaging = root / "packaging"
-    upstream = root / "upstream"
-    tarballs = root / "tarballs"
-    logs = root / "logs"
-    packaging.mkdir()
-    upstream.mkdir()
-    tarballs.mkdir()
-    logs.mkdir()
+    output = root / "output"
+    packaging = output / "packaging"
+    upstream = output / "upstream"
+    tarballs = output / "tarballs"
+    logs = output / "logs"
+    packaging.mkdir(parents=True)
+    upstream.mkdir(parents=True)
+    tarballs.mkdir(parents=True)
+    logs.mkdir(parents=True)
 
     # Create a minimal releases repository with a data file so get_current_cycle
     # can read it without errors and create a git repo to satisfy RepoManager
@@ -59,8 +60,7 @@ def test_cli_end_to_end(mock_get_repos, tmp_path):
         cwd=str(releases),
         check=True,
     )
-    # Ensure a 'master' branch exists and is checked out for tests expecting it
-    _sub.run(["git", "branch", "master"], cwd=str(releases), check=True)
+    # The init already created a master branch, no need to create it again
     # Create a bare mirror of the releases repo and push to it so fetch/pull works
     bare_releases = upstream / "releases.git"
     bare_releases.mkdir()

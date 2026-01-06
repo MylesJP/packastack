@@ -13,9 +13,6 @@ import subprocess
 import sys
 from unittest.mock import patch
 
-import pytest
-
-
 
 def test_cli_main_execution():
     """Test that CLI can be executed as a script."""

@@ -27,10 +27,11 @@ def make_changelog(tmp_path: Path, version: str, name: str = "pkg") -> Path:
     """Create a minimal Debian changelog with the provided version."""
 
     changelog = tmp_path / "changelog"
-    changelog.write_text(
-        f"{name} ({version}) unstable; urgency=medium\n\n  * test entry\n\n -- Dev <dev@example.com>  Tue, 01 Jan 2025 00:00:00 +0000\n",
-        encoding="utf-8",
-    )
+    header = f"{name} ({version}) unstable; urgency=medium"
+    entry = "  * test entry"
+    author = "Dev <dev@example.com>  Tue, 01 Jan 2025 00:00:00 +0000"
+    text = f"{header}\n\n{entry}\n\n -- {author}\n"
+    changelog.write_text(text, encoding="utf-8")
     return changelog
 
 
@@ -198,9 +199,11 @@ def test_supports_watch_version_three(tmp_path: Path, monkeypatch):
     """Version 3 watch files are supported."""
 
     html = '<a href="pkg-1.2.tar.gz">tarball</a>'
-    watch = make_watch(
-        tmp_path, "version=3\nhttp://example.com pkg-(?P<version>\\d+\\.\\d+)\\.tar\\.gz\n"
+    watch_content = (
+        "version=3\n"
+        "http://example.com pkg-(?P<version>\\d+\\.\\d+)\\.tar\\.gz\n"
     )
+    watch = make_watch(tmp_path, watch_content)
     monkeypatch.setattr(Uscan, "_http_get", lambda self, url: fake_response(html))
 
     result = Uscan(watch).scan()
@@ -244,7 +247,7 @@ def test_uversionmangle_backreference_is_substituted(tmp_path: Path, monkeypatch
         (
             "version=4\n"
             "opts=uversionmangle=s/(rc|a|b|c)/~$1/ "
-            "http://example.com pkg-(?P<version>\\d+\\.\\d+rc\\d+)\\.tar\\.gz\n"
+            "http://example.com pkg-(?P<version>\\d+\\.\\d+\\.\\d+rc\\d+)\\.tar\\.gz\n"
         ),
     )
 
@@ -367,7 +370,7 @@ def test_package_placeholder_substitution(tmp_path: Path, monkeypatch):
 
 
 def test_perl_regex_escape_handling(tmp_path: Path, monkeypatch):
-    """Perl-style \Q..\E escapes should be converted for Python regex."""
+    r"""Perl-style \Q..\E escapes should be converted for Python regex."""
 
     html = '<a href="pkg-special+chars-3.tar.gz">release</a>'
     watch = make_watch(

@@ -13,8 +13,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from cliff.app import App
 from cliff.commandmanager import CommandManager
@@ -83,8 +83,8 @@ class PackastackApp(App):
             "root",
             default=None,
             help=(
-                "Root directory to operate in (default: current working "
-                "directory)"
+                "Root directory to operate in. Output will be created in "
+                "<root>/output/ (default: current working directory)"
             ),
         )
 
@@ -124,6 +124,15 @@ class PackastackApp(App):
 
             opts = self._registered_command_opts.get(name, [])
             add_opts_to_parser(parser, opts)
+
+            # Add positional packages argument for import command
+            if name == "import":
+                parser.add_argument(
+                    "packages",
+                    nargs="*",
+                    default=[],
+                    help="Packages to import (default: all known packages)",
+                )
 
             parser.set_defaults(command=name, __command_class=command_class)
 
@@ -176,8 +185,15 @@ class PackastackApp(App):
             command_class = cmd_factory
 
         cmd = command_class(self, None)
-        result = cmd.run(self.options)
-        return self.clean_up(cmd, result, err=None) or 0
+        try:
+            result = cmd.run(self.options)
+            return self.clean_up(cmd, result, err=None) or 0
+        except Exception as exc:
+            # Check if it's a CLICommandError from import_tarballs
+            if exc.__class__.__name__ == "CLICommandError":
+                self.stdout.write(f"{exc}\n")
+                return 1
+            raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:

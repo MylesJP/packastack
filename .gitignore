@@ -8,11 +8,7 @@ wheels/
 **/.*.swp
 .coverage
 .*_cache
-upstream/
-packages/
-tarballs/
-releases/
-logs/
+output/
 
 # Virtual environments
 .venv

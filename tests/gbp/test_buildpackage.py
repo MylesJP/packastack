@@ -44,8 +44,7 @@ def temp_repo(tmp_path):
         "-m",
         "init",
     ], cwd=str(repo_path), check=True)
-    # Ensure a 'master' branch exists for tests that expect it
-    _sub.run(["git", "branch", "master"], cwd=str(repo_path), check=True)
+    # The init already created a master branch, no need to create it again
     return repo_path
 
 
@@ -308,8 +307,7 @@ def test_import_orig_switches_branch(tmp_path):
         "-m",
         "init",
     ], cwd=str(repo_path), check=True)
-    # Ensure master exists and create a feature branch
-    _sub.run(["git", "branch", "master"], cwd=str(repo_path), check=True)
+    # Master branch already exists from git init, create a feature branch
     _sub.run(
         ["git", "checkout", "-b", "feature-branch"],
         cwd=str(repo_path),
@@ -357,8 +355,7 @@ def test_import_orig_no_switch_when_on_master(tmp_path):
         "-m",
         "init",
     ], cwd=str(repo_path), check=True)
-    # Ensure master exists and check it out
-    _sub.run(["git", "branch", "master"], cwd=str(repo_path), check=True)
+    # Master branch already exists from git init, just check it out
     _sub.run(["git", "checkout", "master"], cwd=str(repo_path), check=True)
 
     tarball = tmp_path / "test_1.0.orig.tar.gz"

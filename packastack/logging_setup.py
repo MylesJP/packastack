@@ -3,14 +3,16 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from packastack.constants import LOGS_DIR, OUTPUT_DIR
+
 
 def _setup_cli_logging(root: Path | None = None):
-    """Configures a logfile under the given root/logs or CWD/logs.
+    """Configures a logfile under the given root/output/logs or CWD/output/logs.
 
     Uses a timestamp to create a unique file per run.
     """
     logs_root = Path(root) if root else Path.cwd()
-    logs_dir = logs_root / "logs"
+    logs_dir = logs_root / OUTPUT_DIR / LOGS_DIR
     logs_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")

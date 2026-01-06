@@ -11,6 +11,7 @@
 import errno
 import fnmatch
 import logging
+import sys
 import threading
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,13 +21,17 @@ from pathlib import Path
 
 from cliff.command import Command
 from oslo_config import cfg
-import sys
 
 from packastack.constants import (
     ERROR_LOG_FILE,
+    LOGS_DIR,
+    OUTPUT_DIR,
+    PACKAGING_DIR,
     RELEASES_DIR,
     RELEASES_REPO_URL,
+    TARBALLS_DIR,
     UPSTREAM_BRANCH_PREFIX,
+    UPSTREAM_DIR,
     UPSTREAM_GIT_REPOS,
 )
 from packastack.exceptions import (
@@ -69,12 +74,6 @@ IMPORT_TYPES = [
 logger = logging.getLogger(__name__)
 
 CLI_OPTS: list[cfg.Opt] = [
-    cfg.MultiStrOpt(
-        "packages",
-        positional=True,
-        default=[],
-        help="Packages to import (default: all known packages)",
-    ),
     cfg.BoolOpt(
         "exclude_packages",
         default=False,
@@ -176,16 +175,17 @@ def setup_directories(root: Path | None = None) -> tuple[Path, Path, Path, Path]
     if root is None:
         root = Path.cwd()
 
-    packaging = root / "packaging"
-    upstream = root / "upstream"
-    tarballs = root / "tarballs"
-    logs = root / "logs"
+    output_root = root / OUTPUT_DIR
+    packaging = output_root / PACKAGING_DIR
+    upstream = output_root / UPSTREAM_DIR
+    tarballs = output_root / TARBALLS_DIR
+    logs = output_root / LOGS_DIR
 
     packaging.mkdir(parents=True, exist_ok=True)
     upstream.mkdir(parents=True, exist_ok=True)
     tarballs.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
-    logger.debug("Created working directories under %s", root)
+    logger.debug("Created working directories under %s", output_root)
 
     return packaging, upstream, tarballs, logs
 
@@ -832,6 +832,14 @@ class ImportTarballsCommand(Command):
         parser = super().get_parser(prog_name)
         from packastack.cli import add_opts_to_parser
 
+        # Add positional argument directly to the parser (not via oslo.config)
+        parser.add_argument(
+            "packages",
+            nargs="*",
+            default=[],
+            help="Packages to import (default: all known packages)",
+        )
+
         add_opts_to_parser(parser, CLI_OPTS)
         return parser
 
@@ -846,7 +854,9 @@ class ImportTarballsCommand(Command):
                 root_value = getattr(self.app.options, "root", None)
 
             root = Path(root_value) if root_value else None
-            packaging_dir, upstream_dir, tarballs_dir, logs_dir = setup_directories(root)
+            packaging_dir, upstream_dir, tarballs_dir, logs_dir = (
+                setup_directories(root)
+            )
             console.print("Created working directories")
             logging.getLogger(__name__).info("Created working directories in %s", root)
 
@@ -870,7 +880,9 @@ class ImportTarballsCommand(Command):
 
             if parsed_args.packages:
                 repositories = filter_repositories(
-                    repositories, list(parsed_args.packages), parsed_args.exclude_packages
+                    repositories,
+                    list(parsed_args.packages),
+                    parsed_args.exclude_packages,
                 )
                 msg = f"Processing {len(repositories)} repositories after filter"
                 console.print(msg)

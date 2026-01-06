@@ -6,7 +6,7 @@ from packastack.logging_setup import _setup_cli_logging
 def test_setup_cli_logging_creates_log_dir_and_file(tmp_path):
     logs_root = tmp_path
     _setup_cli_logging(logs_root)
-    logs_dir = logs_root / "logs"
+    logs_dir = logs_root / "output" / "logs"
     assert logs_dir.exists()
     files = list(logs_dir.glob("packastack-*.log"))
     assert len(files) >= 1

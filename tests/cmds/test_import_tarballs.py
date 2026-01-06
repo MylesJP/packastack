@@ -14,10 +14,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from packastack.cli import PackastackApp
-from packastack.cmds.import_tarballs import CLICommandError
 
+from packastack.cli import PackastackApp
 from packastack.cmds.import_tarballs import (
+    CLICommandError,
     ImportContext,
     RepositorySpec,
     create_and_import_tarball,
@@ -47,7 +47,10 @@ def test_import_cmd_creates_timestamped_log(
     mock_get_launchpad_repos,
     tmp_path,
 ):
-    """Ensure the import command creates a timestamped error log under root/logs."""
+    """Ensure import command creates timestamped error log.
+
+    Logs should be created under root/output/logs.
+    """
     # Patch heavy operations: fetching repositories and processing them
     def fake_get_launchpad_repos():
         import logging as _logging
@@ -60,15 +63,15 @@ def test_import_cmd_creates_timestamped_log(
     with _patch(
         "packastack.cmds.import_tarballs.setup_directories",
         return_value=(
-            tmp_path / "packaging",
-            tmp_path / "upstream",
-            tmp_path / "tarballs",
-            tmp_path / "logs",
+            tmp_path / "output" / "packaging",
+            tmp_path / "output" / "upstream",
+            tmp_path / "output" / "tarballs",
+            tmp_path / "output" / "logs",
         ),
     ):
         with _patch(
             "packastack.cmds.import_tarballs.setup_releases_repo",
-            return_value=tmp_path / "releases",
+            return_value=tmp_path / "output" / "releases",
         ):
             code, _ = run_cli(["--root", str(tmp_path), "import"])
 
@@ -76,7 +79,7 @@ def test_import_cmd_creates_timestamped_log(
 
     # Note: assert and logging checks moved inside context manager above
 
-    logs_dir = tmp_path / "logs"
+    logs_dir = tmp_path / "output" / "logs"
     assert logs_dir.exists()
     # There should be at least one timestamped import-errors log file
     matches = list(logs_dir.glob("import-errors-*.log"))
@@ -352,6 +355,7 @@ def test_setup_directories_with_root(mock_path_class):
     from packastack.cmds.import_tarballs import setup_directories
 
     # Create mock objects for each path
+    mock_output = MagicMock()
     mock_pkg = MagicMock()
     mock_upstream = MagicMock()
     mock_tarballs = MagicMock()
@@ -359,7 +363,9 @@ def test_setup_directories_with_root(mock_path_class):
 
     # Create a mock root
     mock_root = MagicMock()
-    mock_root.__truediv__.side_effect = [
+    # First call creates output/, then subsequent calls create subdirs
+    mock_root.__truediv__.return_value = mock_output
+    mock_output.__truediv__.side_effect = [
         mock_pkg,
         mock_upstream,
         mock_tarballs,
@@ -386,11 +392,11 @@ def test_setup_directories_real_root(tmp_path):
 
     packaging, upstream, tarballs, logs = setup_directories(tmp_path)
 
-    # Verify all directories were created under root
-    assert packaging == tmp_path / "packaging"
-    assert upstream == tmp_path / "upstream"
-    assert tarballs == tmp_path / "tarballs"
-    assert logs == tmp_path / "logs"
+    # Verify all directories were created under root/output
+    assert packaging == tmp_path / "output" / "packaging"
+    assert upstream == tmp_path / "output" / "upstream"
+    assert tarballs == tmp_path / "output" / "tarballs"
+    assert logs == tmp_path / "output" / "logs"
     assert packaging.exists()
     assert upstream.exists()
     assert tarballs.exists()
@@ -406,13 +412,15 @@ def test_setup_directories(mock_path_class):
     mock_root = MagicMock()
 
     # Create mock directory objects
+    mock_output = MagicMock()
     mock_pkg_dir = MagicMock()
     mock_upstream_dir = MagicMock()
     mock_tarballs_dir = MagicMock()
     mock_logs_dir = MagicMock()
 
-    # Setup mock root to return directories when using /
-    mock_root.__truediv__.side_effect = [
+    # Setup mock root to return output when using /, then subdirs
+    mock_root.__truediv__.return_value = mock_output
+    mock_output.__truediv__.side_effect = [
         mock_pkg_dir,
         mock_upstream_dir,
         mock_tarballs_dir,
@@ -439,11 +447,11 @@ def test_setup_directories_default_root(mock_cwd, tmp_path):
     mock_cwd.return_value = tmp_path
     packaging, upstream, tarballs, logs = setup_directories()
 
-    # Verify all directories were created under cwd
-    assert packaging == tmp_path / "packaging"
-    assert upstream == tmp_path / "upstream"
-    assert tarballs == tmp_path / "tarballs"
-    assert logs == tmp_path / "logs"
+    # Verify all directories were created under cwd/output
+    assert packaging == tmp_path / "output" / "packaging"
+    assert upstream == tmp_path / "output" / "upstream"
+    assert tarballs == tmp_path / "output" / "tarballs"
+    assert logs == tmp_path / "output" / "logs"
     assert packaging.exists()
     assert upstream.exists()
     assert tarballs.exists()
@@ -456,6 +464,7 @@ def test_setup_directories_path_mock(mock_path_class):
     from packastack.cmds.import_tarballs import setup_directories
 
     # Create mock objects for each path
+    mock_output = MagicMock()
     mock_pkg = MagicMock()
     mock_upstream = MagicMock()
     mock_tarballs = MagicMock()
@@ -464,7 +473,8 @@ def test_setup_directories_path_mock(mock_path_class):
     # Mock the / operator to return our mock paths
     mock_root = MagicMock()
     mock_path_class.cwd.return_value = mock_root
-    mock_root.__truediv__.side_effect = [
+    mock_root.__truediv__.return_value = mock_output
+    mock_output.__truediv__.side_effect = [
         mock_pkg,
         mock_upstream,
         mock_tarballs,
