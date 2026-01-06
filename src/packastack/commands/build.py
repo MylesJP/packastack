@@ -1988,19 +1988,6 @@ def _run_build(
         if not result.success:
             return result.exit_code
 
-        # Stop here if validate-plan-only
-        if validate_plan_only or plan_upload:
-            activity("report", f"Build order: {', '.join(build_order)}")
-            if plan_upload:
-                activity("report", f"Upload order: {', '.join(upload_order)}")
-            run.write_summary(
-                status="success",
-                build_order=build_order,
-                upload_order=upload_order,
-                exit_code=EXIT_SUCCESS,
-            )
-            return EXIT_SUCCESS
-
         # Ensure schroot exists for sbuild-based binary builds
         mirror = cfg.get("mirrors", {}).get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu")
         components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
