@@ -193,3 +193,110 @@ def get_parallel_batches(
         remaining -= set(ready)
 
     return batches
+
+
+def run_single_build(
+    package: str,
+    target: str,
+    ubuntu_series: str,
+    cloud_archive: str,
+    build_type: str,
+    binary: bool,
+    force: bool,
+    run_dir: Path,
+) -> tuple[bool, "FailureType | None", str, str]:
+    """Run a single package build as a subprocess.
+
+    Args:
+        package: Package name to build.
+        target: OpenStack target series.
+        ubuntu_series: Ubuntu series.
+        cloud_archive: Cloud archive pocket.
+        build_type: release/snapshot/milestone.
+        binary: Build binary packages.
+        force: Force through warnings.
+        run_dir: Directory for logs.
+
+    Returns:
+        Tuple of (success, failure_type, message, log_path).
+    """
+    import os
+    import subprocess
+    import sys
+
+    from packastack.planning.build_all_state import FailureType
+
+    cmd = [
+        sys.executable, "-m", "packastack", "build",
+        package,
+        "--target", target,
+        "--ubuntu-series", ubuntu_series,
+        "--yes",  # No prompts
+        "--no-cleanup",  # Keep workspace for debugging
+        "--skip-repo-regen",  # Coordinator handles repo regeneration
+    ]
+
+    if cloud_archive:
+        cmd.extend(["--cloud-archive", cloud_archive])
+
+    # Pass build type - "auto" means each package resolves its own type
+    if build_type == "auto":
+        cmd.extend(["--type", "auto"])
+    elif build_type == "snapshot":
+        cmd.extend(["--type", "snapshot"])
+    elif build_type == "milestone":
+        cmd.extend(["--type", "milestone", "--milestone", "b1"])
+    elif build_type == "release":
+        cmd.extend(["--type", "release"])
+
+    if binary:
+        cmd.append("--binary")
+    else:
+        cmd.append("--no-binary")
+
+    if force:
+        cmd.append("--force")
+
+    # Set env to prevent recursive build-deps
+    env = os.environ.copy()
+    env["PACKASTACK_BUILD_DEPTH"] = "10"  # Prevent auto-build-deps
+    env["PACKASTACK_NO_GPG_SIGN"] = "1"  # Don't require GPG signing
+
+    log_dir = run_dir / "logs" / package
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "build.log"
+
+    try:
+        with log_file.open("w") as f:
+            result = subprocess.run(
+                cmd,
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                env=env,
+                timeout=3600,  # 1 hour timeout per package
+            )
+
+        if result.returncode == 0:
+            return True, None, "", str(log_file)
+
+        # Determine failure type from exit code
+        failure_type = FailureType.UNKNOWN
+        if result.returncode == 3:
+            failure_type = FailureType.FETCH_FAILED
+        elif result.returncode == 4:
+            failure_type = FailureType.PATCH_FAILED
+        elif result.returncode == 5:
+            failure_type = FailureType.MISSING_DEP
+        elif result.returncode == 6:
+            failure_type = FailureType.CYCLE
+        elif result.returncode == 7:
+            failure_type = FailureType.BUILD_FAILED
+        elif result.returncode == 8:
+            failure_type = FailureType.POLICY_BLOCKED
+
+        return False, failure_type, f"Exit code {result.returncode}", str(log_file)
+
+    except subprocess.TimeoutExpired:
+        return False, FailureType.BUILD_FAILED, "Build timed out after 1 hour", str(log_file)
+    except Exception as e:
+        return False, FailureType.UNKNOWN, str(e), str(log_file)
