@@ -1469,3 +1469,118 @@ def verify_and_publish(
 
     activity("verify", "Verification complete")
     return PhaseResult.ok()
+
+
+# =============================================================================
+# Orchestrator: Build Single Package
+# =============================================================================
+
+
+@dataclass
+class SingleBuildOutcome:
+    """Complete result of building a single package."""
+
+    success: bool
+    exit_code: int = EXIT_SUCCESS
+    error: str = ""
+    new_version: str = ""
+    build_type: str = ""
+    artifacts: list[Path] = field(default_factory=list)
+    signature_verified: bool = False
+
+
+def build_single_package(
+    ctx: SingleBuildContext,
+    workspace_ref: Any = None,
+) -> SingleBuildOutcome:
+    """Orchestrate building a single package through all phases.
+
+    This function coordinates all the phase functions to build a package:
+    1. fetch_packaging_repo - Clone/update packaging repo
+    2. prepare_upstream_source - Acquire upstream tarball
+    3. validate_and_build_deps - Validate dependencies
+    4. import_and_patch - Import tarball and apply patches
+    5. build_packages - Build source and binary packages
+    6. verify_and_publish - Publish to local repo
+
+    Args:
+        ctx: Fully configured SingleBuildContext.
+        workspace_ref: Optional callback to receive workspace path.
+
+    Returns:
+        SingleBuildOutcome with build results.
+    """
+    run = ctx.run
+    outcome = SingleBuildOutcome(
+        success=False,
+        build_type=ctx.build_type_str,
+    )
+
+    # -------------------------------------------------------------------------
+    # Phase 1: Fetch packaging repository
+    # -------------------------------------------------------------------------
+    fetch_result_phase, fetch_data = fetch_packaging_repo(ctx, workspace_ref)
+    if not fetch_result_phase.success:
+        outcome.exit_code = fetch_result_phase.exit_code
+        outcome.error = fetch_result_phase.error
+        return outcome
+
+    # -------------------------------------------------------------------------
+    # Phase 2: Prepare upstream source
+    # -------------------------------------------------------------------------
+    prepare_result_phase, prepare_data = prepare_upstream_source(ctx)
+    if not prepare_result_phase.success:
+        outcome.exit_code = prepare_result_phase.exit_code
+        outcome.error = prepare_result_phase.error
+        return outcome
+
+    outcome.new_version = prepare_data.new_version
+    outcome.signature_verified = prepare_data.signature_verified
+
+    # -------------------------------------------------------------------------
+    # Phase 3: Validate dependencies (and auto-build if enabled)
+    # -------------------------------------------------------------------------
+    validate_result_phase, validate_data = validate_and_build_deps(ctx)
+    if not validate_result_phase.success:
+        outcome.exit_code = validate_result_phase.exit_code
+        outcome.error = validate_result_phase.error
+        return outcome
+
+    # -------------------------------------------------------------------------
+    # Phase 4: Import upstream and apply patches
+    # -------------------------------------------------------------------------
+    import_result_phase = import_and_patch(
+        ctx,
+        upstream_tarball=prepare_data.upstream_tarball,
+        snapshot_result=prepare_data.snapshot_result,
+    )
+    if not import_result_phase.success:
+        outcome.exit_code = import_result_phase.exit_code
+        outcome.error = import_result_phase.error
+        return outcome
+
+    # -------------------------------------------------------------------------
+    # Phase 5: Build packages
+    # -------------------------------------------------------------------------
+    build_result_phase, build_data = build_packages(ctx)
+    if not build_result_phase.success:
+        outcome.exit_code = build_result_phase.exit_code
+        outcome.error = build_result_phase.error
+        return outcome
+
+    outcome.artifacts = build_data.artifacts
+
+    # -------------------------------------------------------------------------
+    # Phase 6: Verify and publish
+    # -------------------------------------------------------------------------
+    verify_result_phase = verify_and_publish(ctx, build_data)
+    if not verify_result_phase.success:
+        outcome.exit_code = verify_result_phase.exit_code
+        outcome.error = verify_result_phase.error
+        return outcome
+
+    # Success!
+    outcome.success = True
+    outcome.exit_code = EXIT_SUCCESS
+    return outcome
+
