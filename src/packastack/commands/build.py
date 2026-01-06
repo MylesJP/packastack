@@ -147,7 +147,7 @@ from packastack.debpkg.control import fix_priority_extra, ensure_misc_pre_depend
 from packastack.debpkg.rules import add_doctree_cleanup
 
 # Build helpers (refactored modules)
-from packastack.commands.build_helpers import (
+from packastack.build import (
     # Git helpers
     _ensure_no_merge_paths,
     _get_git_author_env,

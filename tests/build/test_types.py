@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from packastack.commands.build_helpers.types import (
+from packastack.build.types import (
     BuildInputs,
     BuildOutcome,
     PhaseResult,

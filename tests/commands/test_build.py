@@ -19,7 +19,7 @@ import pytest
 from packastack.commands import build
 from packastack.commands import plan as plan_module
 from packastack.commands.plan import ResolvedTarget
-from packastack.commands.build_helpers import tarball as tarball_module
+from packastack.build import tarball as tarball_module
 from packastack.planning.type_selection import BuildType
 from packastack.upstream.registry import (
     ProjectConfig,

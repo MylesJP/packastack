@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
 
-from packastack.commands.build_helpers.tarball import (
+from packastack.build.tarball import (
     run_uscan,
     download_pypi_tarball,
     download_github_release_tarball,
@@ -33,7 +33,7 @@ class TestRunUscan:
         tarball.touch()
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
             success, path, err = run_uscan(tmp_path, "1.0")
@@ -56,7 +56,7 @@ class TestRunUscan:
         new_tarball.touch()
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
             success, path, err = run_uscan(tmp_path)
@@ -67,7 +67,7 @@ class TestRunUscan:
     def test_uscan_failure_returns_error(self, tmp_path: Path):
         """Test uscan failure returns error message."""
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (1, "stdout", "uscan failed: no watch file")
             success, path, err = run_uscan(tmp_path)
@@ -79,7 +79,7 @@ class TestRunUscan:
     def test_uscan_no_tarball_found(self, tmp_path: Path):
         """Test uscan succeeds but no tarball found."""
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
             success, path, err = run_uscan(tmp_path)
@@ -91,7 +91,7 @@ class TestRunUscan:
     def test_uscan_not_installed(self, tmp_path: Path):
         """Test uscan not installed."""
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.side_effect = FileNotFoundError("uscan not found")
             success, path, err = run_uscan(tmp_path)
@@ -103,7 +103,7 @@ class TestRunUscan:
     def test_uscan_exception_handled(self, tmp_path: Path):
         """Test unexpected exception is handled."""
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.side_effect = RuntimeError("unexpected error")
             success, path, err = run_uscan(tmp_path)
@@ -118,7 +118,7 @@ class TestRunUscan:
         tarball.touch()
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_command"
+            "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
             # Pass version - should be ignored
@@ -134,7 +134,7 @@ class TestDownloadPypiTarball:
     def test_successful_download(self, tmp_path: Path):
         """Test successful PyPI tarball download."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
             ok, path, err = download_pypi_tarball("oslo.config", "9.0.0", tmp_path)
@@ -152,7 +152,7 @@ class TestDownloadPypiTarball:
     def test_project_with_slash_replaced(self, tmp_path: Path):
         """Test project name with slash is handled."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
             ok, path, err = download_pypi_tarball("openstack/nova", "1.0", tmp_path)
@@ -166,7 +166,7 @@ class TestDownloadPypiTarball:
     def test_download_failure(self, tmp_path: Path):
         """Test download failure returns error."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (False, "Connection refused")
             ok, path, err = download_pypi_tarball("mypackage", "1.0", tmp_path)
@@ -182,7 +182,7 @@ class TestDownloadGithubReleaseTarball:
     def test_successful_download(self, tmp_path: Path):
         """Test successful GitHub release download."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
             ok, path, err = download_github_release_tarball(
@@ -201,7 +201,7 @@ class TestDownloadGithubReleaseTarball:
     def test_url_without_git_suffix(self, tmp_path: Path):
         """Test URL without .git suffix works."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
             ok, path, err = download_github_release_tarball(
@@ -215,7 +215,7 @@ class TestDownloadGithubReleaseTarball:
     def test_download_failure(self, tmp_path: Path):
         """Test download failure returns error."""
         with patch(
-            "packastack.commands.build_helpers.tarball.download_file"
+            "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (False, "404 Not Found")
             ok, path, err = download_github_release_tarball(
@@ -268,10 +268,10 @@ class TestFetchReleaseTarball:
         cached_meta.signature_warning = ""
 
         with patch(
-            "packastack.commands.build_helpers.tarball.find_cached_tarball"
+            "packastack.build.tarball.find_cached_tarball"
         ) as mock_cache:
             mock_cache.return_value = (cached, cached_meta)
-            with patch("packastack.commands.build_helpers.tarball.activity"):
+            with patch("packastack.build.tarball.activity"):
                 path, sig_verified, sig_warn = fetch_release_tarball(
                     upstream=upstream,
                     upstream_config=upstream_config,
@@ -299,7 +299,7 @@ class TestFetchReleaseTarball:
         upstream.version = "1.0.0"
 
         with patch(
-            "packastack.commands.build_helpers.tarball.find_cached_tarball"
+            "packastack.build.tarball.find_cached_tarball"
         ) as mock_cache:
             mock_cache.return_value = (None, None)
             path, sig_verified, sig_warn = fetch_release_tarball(
@@ -331,12 +331,12 @@ class TestFetchReleaseTarball:
         tarball.touch()
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_uscan"
+            "packastack.build.tarball.run_uscan"
         ) as mock_uscan:
             mock_uscan.return_value = (True, tarball, "")
-            with patch("packastack.commands.build_helpers.tarball.activity"):
+            with patch("packastack.build.tarball.activity"):
                 with patch(
-                    "packastack.commands.build_helpers.tarball.cache_tarball"
+                    "packastack.build.tarball.cache_tarball"
                 ):
                     path, sig_verified, sig_warn = fetch_release_tarball(
                         upstream=upstream,
@@ -374,16 +374,16 @@ class TestFetchReleaseTarball:
         tarball_result.signature_warning = ""
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_uscan"
+            "packastack.build.tarball.run_uscan"
         ) as mock_uscan:
             mock_uscan.return_value = (False, None, "no watch file")
             with patch(
-                "packastack.commands.build_helpers.tarball.download_and_verify_tarball"
+                "packastack.build.tarball.download_and_verify_tarball"
             ) as mock_dl:
                 mock_dl.return_value = tarball_result
-                with patch("packastack.commands.build_helpers.tarball.activity"):
+                with patch("packastack.build.tarball.activity"):
                     with patch(
-                        "packastack.commands.build_helpers.tarball.cache_tarball"
+                        "packastack.build.tarball.cache_tarball"
                     ):
                         path, sig_verified, sig_warn = fetch_release_tarball(
                             upstream=upstream,
@@ -418,16 +418,16 @@ class TestFetchReleaseTarball:
         tarball.touch()
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_uscan"
+            "packastack.build.tarball.run_uscan"
         ) as mock_uscan:
             mock_uscan.return_value = (False, None, "no watch file")
             with patch(
-                "packastack.commands.build_helpers.tarball.download_pypi_tarball"
+                "packastack.build.tarball.download_pypi_tarball"
             ) as mock_pypi:
                 mock_pypi.return_value = (True, tarball, "")
-                with patch("packastack.commands.build_helpers.tarball.activity"):
+                with patch("packastack.build.tarball.activity"):
                     with patch(
-                        "packastack.commands.build_helpers.tarball.cache_tarball"
+                        "packastack.build.tarball.cache_tarball"
                     ):
                         path, sig_verified, sig_warn = fetch_release_tarball(
                             upstream=upstream,
@@ -456,10 +456,10 @@ class TestFetchReleaseTarball:
         upstream.tarball_url = None  # No official URL
 
         with patch(
-            "packastack.commands.build_helpers.tarball.run_uscan"
+            "packastack.build.tarball.run_uscan"
         ) as mock_uscan:
             mock_uscan.return_value = (False, None, "uscan failed")
-            with patch("packastack.commands.build_helpers.tarball.activity"):
+            with patch("packastack.build.tarball.activity"):
                 path, sig_verified, sig_warn = fetch_release_tarball(
                     upstream=upstream,
                     upstream_config=upstream_config,

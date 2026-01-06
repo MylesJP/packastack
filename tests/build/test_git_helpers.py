@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from packastack.commands.build_helpers.git_helpers import (
+from packastack.build.git_helpers import (
     ensure_no_merge_paths,
     get_git_author_env,
     maybe_disable_gpg_sign,

@@ -43,12 +43,12 @@ from packastack.upstream.retirement import (
     RetirementStatus,
 )
 
-from packastack.commands.build_helpers.errors import (
+from packastack.build.errors import (
     EXIT_RETIRED_PROJECT,
     EXIT_REGISTRY_ERROR,
     phase_error,
 )
-from packastack.commands.build_helpers.types import PhaseResult
+from packastack.build.types import PhaseResult
 
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType

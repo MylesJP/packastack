@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from packastack.commands.build_helpers.errors import (
+from packastack.build.errors import (
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
     EXIT_FETCH_FAILED,

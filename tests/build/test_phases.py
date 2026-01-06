@@ -11,17 +11,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from packastack.commands.build_helpers.errors import (
+from packastack.build.errors import (
     EXIT_REGISTRY_ERROR,
     EXIT_RETIRED_PROJECT,
 )
-from packastack.commands.build_helpers.phases import (
+from packastack.build.phases import (
     RegistryResolutionResult,
     RetirementCheckResult,
     check_retirement_status,
     resolve_upstream_registry,
 )
-from packastack.commands.build_helpers.types import PhaseResult
+from packastack.build.types import PhaseResult
 
 
 class TestRetirementCheckResult:
@@ -101,8 +101,8 @@ class TestCheckRetirementStatus:
         assert phase_result.success is True
         assert retirement_result.is_retired is False
 
-    @patch("packastack.commands.build_helpers.phases._clone_or_update_project_config")
-    @patch("packastack.commands.build_helpers.phases.activity_spinner")
+    @patch("packastack.build.phases._clone_or_update_project_config")
+    @patch("packastack.build.phases.activity_spinner")
     def test_clones_project_config_when_missing(self, mock_spinner, mock_clone, tmp_path):
         """Test that project-config is cloned when missing and not offline."""
         run = MagicMock()
@@ -115,7 +115,7 @@ class TestCheckRetirementStatus:
         mock_spinner.return_value.__enter__ = MagicMock()
         mock_spinner.return_value.__exit__ = MagicMock()
         
-        with patch("packastack.commands.build_helpers.phases.RetirementChecker") as mock_checker_class:
+        with patch("packastack.build.phases.RetirementChecker") as mock_checker_class:
             mock_checker = MagicMock()
             mock_checker.check_retirement.return_value = MagicMock(
                 status=MagicMock(value="not_retired")  # Not retired
@@ -141,7 +141,7 @@ class TestCheckRetirementStatus:
         project_config_path = tmp_path / "project-config"
         # Path does not exist and we're offline
         
-        with patch("packastack.commands.build_helpers.phases._clone_or_update_project_config") as mock_clone:
+        with patch("packastack.build.phases._clone_or_update_project_config") as mock_clone:
             phase_result, _ = check_retirement_status(
                 pkg_name="python-oslo.config",
                 package="oslo.config",
@@ -157,7 +157,7 @@ class TestCheckRetirementStatus:
             # Should return OK since we can't check
             assert phase_result.success is True
 
-    @patch("packastack.commands.build_helpers.phases.RetirementChecker")
+    @patch("packastack.build.phases.RetirementChecker")
     def test_returns_failure_for_retired_project(self, mock_checker_class, tmp_path):
         """Test that retired projects return failure with proper exit code."""
         from packastack.upstream.retirement import RetirementStatus
@@ -201,7 +201,7 @@ class TestCheckRetirementStatus:
         # Should write summary
         run.write_summary.assert_called_once()
 
-    @patch("packastack.commands.build_helpers.phases.RetirementChecker")
+    @patch("packastack.build.phases.RetirementChecker")
     def test_warns_for_possibly_retired_project(self, mock_checker_class, tmp_path):
         """Test that possibly retired projects return success with warning."""
         from packastack.upstream.retirement import RetirementStatus
@@ -236,7 +236,7 @@ class TestCheckRetirementStatus:
         # Should log warning event
         run.log_event.assert_called()
 
-    @patch("packastack.commands.build_helpers.phases.RetirementChecker")
+    @patch("packastack.build.phases.RetirementChecker")
     def test_strips_python_prefix_for_deliverable(self, mock_checker_class, tmp_path):
         """Test that python- prefix is stripped when looking up deliverable."""
         from packastack.upstream.retirement import RetirementStatus
