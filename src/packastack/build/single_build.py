@@ -279,8 +279,8 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         load_openstack_packages,
         select_upstream_source,
     )
-    from packastack.core.context import resolve_series
-    from packastack.debpkg.arch import get_host_arch
+    from packastack.target.series import resolve_series
+    from packastack.target.arch import get_host_arch
     from packastack.planning.type_selection import BuildType
     from packastack.upstream.releases import get_current_development_series
     
@@ -1840,7 +1840,11 @@ def build_single_package(
     # -------------------------------------------------------------------------
     # Phase 3: Validate dependencies (and auto-build if enabled)
     # -------------------------------------------------------------------------
-    validate_result_phase, validate_data = validate_and_build_deps(ctx)
+    validate_result_phase, validate_data = validate_and_build_deps(
+        ctx,
+        upstream_tarball=prepare_data.upstream_tarball,
+        snapshot_result=prepare_data.snapshot_result,
+    )
     if not validate_result_phase.success:
         outcome.exit_code = validate_result_phase.exit_code
         outcome.error = validate_result_phase.error
@@ -1862,7 +1866,7 @@ def build_single_package(
     # -------------------------------------------------------------------------
     # Phase 5: Build packages
     # -------------------------------------------------------------------------
-    build_result_phase, build_data = build_packages(ctx)
+    build_result_phase, build_data = build_packages(ctx, prepare_data.new_version)
     if not build_result_phase.success:
         outcome.exit_code = build_result_phase.exit_code
         outcome.error = build_result_phase.error
