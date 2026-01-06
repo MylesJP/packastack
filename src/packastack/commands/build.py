@@ -27,15 +27,14 @@ from __future__ import annotations
 
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
 
-from packastack.core.context import BuildRequest
-
-from packastack.core.config import load_config
-from packastack.planning.graph import DependencyGraph
+# Core packastack imports
+from packastack.apt import localrepo
 from packastack.apt.packages import (
     PackageIndex,
     load_cloud_archive_index,
@@ -43,26 +42,35 @@ from packastack.apt.packages import (
     load_package_index,
     merge_package_indexes,
 )
+from packastack.core.config import load_config
+from packastack.core.context import BuildAllRequest, BuildRequest
 from packastack.core.paths import resolve_paths
+from packastack.core.run import RunContext, activity
+from packastack.planning.build_all_state import (
+    BuildAllState,
+    FailureType,
+    PackageStatus,
+    create_initial_state,
+    load_state,
+    save_state,
+)
+from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
+from packastack.planning.graph import DependencyGraph
+from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
+from packastack.planning.package_discovery import discover_packages
+from packastack.planning.type_selection import get_default_parallel_workers
+from packastack.reports.plan_graph import PlanGraph, render_waves
+from packastack.target.arch import get_host_arch
+from packastack.target.series import resolve_series
 from packastack.upstream.releases import (
     get_current_development_series,
     get_previous_series,
     is_snapshot_eligible,
     load_openstack_packages,
 )
-from packastack.core.run import RunContext, activity
-from packastack.target.series import resolve_series
-from packastack.apt import localrepo
-from packastack.target.arch import get_host_arch
-from packastack.build.provenance import (
-    summarize_provenance,
-)
-from packastack.commands.init import _clone_or_update_project_config
-from packastack.build.tools import check_required_tools
 
-# Build helpers (refactored modules)
+# Build module imports
 from packastack.build import (
-    # Exit codes - re-exported for backwards compatibility
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
@@ -79,21 +87,6 @@ from packastack.build import (
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
 )
-from packastack.build.git_helpers import (
-    _ensure_no_merge_paths,
-    _get_git_author_env,
-    _maybe_disable_gpg_sign,
-)
-from packastack.build.type_resolution import (
-    build_type_from_string,
-    resolve_build_type_auto,
-    resolve_build_type_from_cli,
-)
-# Private aliases for backwards compatibility
-_build_type_from_string = build_type_from_string
-_resolve_build_type_auto = resolve_build_type_auto
-_resolve_build_type_from_cli = resolve_build_type_from_cli
-
 from packastack.build.all_helpers import (
     build_dependency_graph,
     build_upstream_versions_from_packaging,
@@ -101,13 +94,76 @@ from packastack.build.all_helpers import (
     get_parallel_batches,
     run_single_build,
 )
-
-# Build-all execution - core implementation from all_runner.py
 from packastack.build.all_runner import (
     _run_build_all,
-    _run_sequential_builds,
     _run_parallel_builds,
+    _run_sequential_builds,
 )
+from packastack.build.git_helpers import (
+    _ensure_no_merge_paths,
+    _get_git_author_env,
+    _maybe_disable_gpg_sign,
+)
+from packastack.build.localrepo_helpers import (
+    refresh_local_repo_indexes as _refresh_local_repo_indexes,
+)
+from packastack.build.provenance import summarize_provenance
+from packastack.build.tools import check_required_tools
+from packastack.build.type_resolution import (
+    build_type_from_string,
+    resolve_build_type_auto,
+    resolve_build_type_from_cli,
+)
+from packastack.commands.init import _clone_or_update_project_config
+
+if TYPE_CHECKING:
+    from packastack.core.run import RunContext as RunContextType
+
+# =============================================================================
+# Backwards-compatibility aliases (tests import these from build.py)
+# =============================================================================
+_build_type_from_string = build_type_from_string
+_resolve_build_type_auto = resolve_build_type_auto
+_resolve_build_type_from_cli = resolve_build_type_from_cli
+_build_dependency_graph = build_dependency_graph
+_build_upstream_versions_from_packaging = build_upstream_versions_from_packaging
+_get_parallel_batches = get_parallel_batches
+_run_single_build = run_single_build
+OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
+
+
+def _filter_retired_packages(
+    packages: list[str],
+    project_config_path: Path | None,
+    releases_repo: Path | None,
+    openstack_target: str,
+    offline: bool,
+    run: RunContext,
+) -> tuple[list[str], list[str], list[str]]:
+    """Filter retired packages using openstack/project-config and releases inference."""
+    return filter_retired_packages(
+        packages=packages,
+        project_config_path=project_config_path,
+        releases_repo=releases_repo,
+        openstack_target=openstack_target,
+        offline=offline,
+        run=run,
+        clone_project_config_fn=_clone_or_update_project_config,
+    )
+
+
+def _generate_reports(
+    state: BuildAllState,
+    run_dir: Path,
+) -> tuple[Path, Path]:
+    """Generate build-all summary reports."""
+    from packastack.build.all_reports import generate_build_all_reports
+    return generate_build_all_reports(state, run_dir)
+
+
+# =============================================================================
+# Build-all entry point
+# =============================================================================
 
 
 def run_build_all(
@@ -188,83 +244,10 @@ def run_build_all(
 
     return exit_code
 
-# Build-all imports needed for backwards compatibility
-from datetime import datetime
-
-from packastack.core.context import BuildAllRequest
-from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
-from packastack.planning.build_all_state import (
-    BuildAllState,
-    FailureType,
-    PackageStatus,
-    create_initial_state,
-    load_state,
-    save_state,
-)
-from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
-from packastack.planning.package_discovery import (
-    discover_packages,
-)
-from packastack.planning.type_selection import get_default_parallel_workers
-from packastack.reports.plan_graph import PlanGraph, render_waves
-
-if TYPE_CHECKING:
-    from packastack.core.run import RunContext as RunContextType
-
-
-# Known optional dependencies that can be ignored for cycle breaking.
-OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
-
 
 # =============================================================================
-# Build-all functions (migrated from build_all.py)
+# CLI entry point
 # =============================================================================
-
-# Delegate to packastack.build.all_helpers
-_build_dependency_graph = build_dependency_graph
-_build_upstream_versions_from_packaging = build_upstream_versions_from_packaging
-_get_parallel_batches = get_parallel_batches
-_run_single_build = run_single_build
-
-
-def _filter_retired_packages(
-    packages: list[str],
-    project_config_path: Path | None,
-    releases_repo: Path | None,
-    openstack_target: str,
-    offline: bool,
-    run: RunContext,
-) -> tuple[list[str], list[str], list[str]]:
-    """Filter retired packages using openstack/project-config and releases inference."""
-    return filter_retired_packages(
-        packages=packages,
-        project_config_path=project_config_path,
-        releases_repo=releases_repo,
-        openstack_target=openstack_target,
-        offline=offline,
-        run=run,
-        clone_project_config_fn=_clone_or_update_project_config,
-    )
-
-
-def _generate_reports(
-    state: BuildAllState,
-    run_dir: Path,
-) -> tuple[Path, Path]:
-    """Generate build-all summary reports."""
-    from packastack.build.all_reports import generate_build_all_reports
-    return generate_build_all_reports(state, run_dir)
-
-
-# =============================================================================
-# End of build-all functions
-# =============================================================================
-
-
-# Build type resolution delegated to packastack.build.type_resolution
-_resolve_build_type_from_cli = resolve_build_type_from_cli
-_resolve_build_type_auto = resolve_build_type_auto
-_build_type_from_string = build_type_from_string
 
 
 
@@ -500,12 +483,6 @@ def _build_all_mode(
 def _set_workspace(w: Path, local_vars: dict) -> None:
     """Helper to set workspace in outer scope."""
     local_vars["workspace"] = w
-
-
-# Import from extracted module - re-exported for backwards compatibility
-from packastack.build.localrepo_helpers import (
-    refresh_local_repo_indexes as _refresh_local_repo_indexes,
-)
 
 
 def _run_build(
