@@ -98,6 +98,22 @@ from packastack.build.phases import (
     resolve_upstream_registry,
 )
 
+# Single build phases
+from packastack.build.single_build import (
+    BuildResult as SingleBuildResult,
+    FetchResult,
+    PhaseResult as SinglePhaseResult,
+    PrepareResult,
+    SingleBuildContext,
+    ValidateDepsResult,
+    build_packages,
+    fetch_packaging_repo,
+    import_and_patch,
+    prepare_upstream_source,
+    validate_and_build_deps,
+    verify_and_publish,
+)
+
 __all__ = [
     # Types
     "BuildInputs",
@@ -134,6 +150,19 @@ __all__ = [
     "ensure_schroot_ready",
     "load_package_indexes",
     "resolve_upstream_registry",
+    # Single build phases
+    "SingleBuildContext",
+    "SingleBuildResult",
+    "SinglePhaseResult",
+    "FetchResult",
+    "PrepareResult",
+    "ValidateDepsResult",
+    "fetch_packaging_repo",
+    "prepare_upstream_source",
+    "validate_and_build_deps",
+    "import_and_patch",
+    "build_packages",
+    "verify_and_publish",
     # Exit codes
     "EXIT_SUCCESS",
     "EXIT_CONFIG_ERROR",
