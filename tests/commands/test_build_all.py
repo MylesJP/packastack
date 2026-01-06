@@ -587,7 +587,8 @@ class TestRunBuildAllIndexLoading:
 
     def test_loads_indexes_with_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ensure build-all calls index loaders with correct arguments."""
-        import packastack.commands.build as build_all
+        # Import the module where _run_build_all now lives
+        import packastack.build.all_runner as all_runner
 
         cfg = {
             "defaults": {
@@ -606,10 +607,10 @@ class TestRunBuildAllIndexLoading:
 
         calls: dict[str, object] = {}
 
-        monkeypatch.setattr(build_all, "load_config", lambda: cfg)
-        monkeypatch.setattr(build_all, "resolve_paths", lambda _cfg: paths)
-        monkeypatch.setattr(build_all, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all, "get_host_arch", lambda: "amd64")
+        monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
+        monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner, "get_host_arch", lambda: "amd64")
 
         def fake_discover_packages(**kwargs) -> DiscoveryResult:
             calls["discover"] = kwargs
@@ -655,11 +656,11 @@ class TestRunBuildAllIndexLoading:
                 graph.add_node(pkg)
             return graph, {}
 
-        monkeypatch.setattr(build_all, "discover_packages", fake_discover_packages)
-        monkeypatch.setattr(build_all, "load_package_index", fake_load_package_index)
-        monkeypatch.setattr(build_all, "load_cloud_archive_index", fake_load_cloud_archive_index)
-        monkeypatch.setattr(build_all, "load_local_repo_index", fake_load_local_repo_index)
-        monkeypatch.setattr(build_all, "merge_package_indexes", fake_merge_package_indexes)
+        monkeypatch.setattr(all_runner, "discover_packages", fake_discover_packages)
+        monkeypatch.setattr(all_runner, "load_package_index", fake_load_package_index)
+        monkeypatch.setattr(all_runner, "load_cloud_archive_index", fake_load_cloud_archive_index)
+        monkeypatch.setattr(all_runner, "load_local_repo_index", fake_load_local_repo_index)
+        monkeypatch.setattr(all_runner, "merge_package_indexes", fake_merge_package_indexes)
         # The actual code imports plan._build_dependency_graph, so patch that module
         import packastack.commands.plan as plan_module
         monkeypatch.setattr(plan_module, "_build_dependency_graph", fake_build_dependency_graph)
@@ -960,7 +961,7 @@ class TestRunSequentialBuilds:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should execute pending builds and mark failures."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         state = create_initial_state(
             run_id="run-1",
@@ -978,9 +979,9 @@ class TestRunSequentialBuilds:
                 return False, FailureType.BUILD_FAILED, "boom", "/tmp/c.log"
             return True, None, "", f"/tmp/{package}.log"
 
-        monkeypatch.setattr(build_all_module, "_run_single_build", fake_run_single_build)
-        monkeypatch.setattr(build_all_module, "save_state", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "run_single_build", fake_run_single_build)
+        monkeypatch.setattr(all_runner, "save_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
         exit_code = _run_sequential_builds(
             state=state,
@@ -1008,7 +1009,7 @@ class TestRunParallelBuilds:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should run builds in parallel and report failures."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         state = create_initial_state(
             run_id="run-1",
@@ -1029,9 +1030,9 @@ class TestRunParallelBuilds:
                 return False, FailureType.BUILD_FAILED, "boom", "/tmp/b.log"
             return True, None, "", f"/tmp/{package}.log"
 
-        monkeypatch.setattr(build_all_module, "_run_single_build", fake_run_single_build)
-        monkeypatch.setattr(build_all_module, "save_state", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "run_single_build", fake_run_single_build)
+        monkeypatch.setattr(all_runner, "save_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
         exit_code = _run_parallel_builds(
             state=state,
@@ -1061,16 +1062,16 @@ class TestRunBuildAllResume:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should return EXIT_RESUME_ERROR when resume ID not found."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: {"defaults": {}})
+        monkeypatch.setattr(all_runner, "load_config", lambda: {"defaults": {}})
         monkeypatch.setattr(
-            build_all_module,
+            all_runner,
             "resolve_paths",
             lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
         )
-        monkeypatch.setattr(build_all_module, "load_state", lambda _path: None)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "load_state", lambda _path: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
         run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
 
         exit_code = _call_run_build_all(
@@ -1101,7 +1102,7 @@ class TestRunBuildAllResume:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should reset failed packages to pending when retrying."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         state = create_initial_state(
             run_id="run-1",
@@ -1113,14 +1114,14 @@ class TestRunBuildAllResume:
         )
         state.mark_failed("a", FailureType.BUILD_FAILED, "boom")
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: {"defaults": {}})
+        monkeypatch.setattr(all_runner, "load_config", lambda: {"defaults": {}})
         monkeypatch.setattr(
-            build_all_module,
+            all_runner,
             "resolve_paths",
             lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
         )
-        monkeypatch.setattr(build_all_module, "load_state", lambda _path: state)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "load_state", lambda _path: state)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
         run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
 
         exit_code = _call_run_build_all(
@@ -1157,7 +1158,7 @@ class TestRunBuildAllDiscovery:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should return EXIT_DISCOVERY_FAILED when no packages found."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         discovery = DiscoveryResult(
             packages=[],
@@ -1166,15 +1167,15 @@ class TestRunBuildAllDiscovery:
             source="explicit",
         )
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: {"defaults": {}})
+        monkeypatch.setattr(all_runner, "load_config", lambda: {"defaults": {}})
         monkeypatch.setattr(
-            build_all_module,
+            all_runner,
             "resolve_paths",
             lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
         )
-        monkeypatch.setattr(build_all_module, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all_module, "discover_packages", lambda **_kwargs: discovery)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner, "discover_packages", lambda **_kwargs: discovery)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
         run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
 
@@ -1210,7 +1211,7 @@ class TestRunBuildAllCycles:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should report cycles and return graph error."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
@@ -1251,22 +1252,24 @@ class TestRunBuildAllCycles:
             write_summary=lambda **_kwargs: None,
         )
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: cfg)
-        monkeypatch.setattr(build_all_module, "resolve_paths", lambda _cfg: paths)
-        monkeypatch.setattr(build_all_module, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all_module, "get_host_arch", lambda: "amd64")
-        monkeypatch.setattr(build_all_module, "discover_packages", fake_discover_packages)
-        monkeypatch.setattr(build_all_module, "_filter_retired_packages", lambda **_kwargs: (["a", "b"], [], []))
-        monkeypatch.setattr(build_all_module, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "load_cloud_archive_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "merge_package_indexes", lambda *_args: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
+        monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner, "get_host_arch", lambda: "amd64")
+        monkeypatch.setattr(all_runner, "discover_packages", fake_discover_packages)
+        # Patch filter_retired_packages - it's imported from all_helpers
+        import packastack.build.all_helpers as all_helpers
+        monkeypatch.setattr(all_helpers, "filter_retired_packages", lambda **_kwargs: (["a", "b"], [], []))
+        monkeypatch.setattr(all_runner, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_cloud_archive_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "merge_package_indexes", lambda *_args: PackageIndex())
         # Patch plan module's _build_dependency_graph since that's what _run_build_all imports
         import packastack.commands.plan as plan_module
         monkeypatch.setattr(plan_module, "_build_dependency_graph", fake_build_dependency_graph)
-        monkeypatch.setattr(build_all_module, "load_openstack_packages", lambda *_args, **_kwargs: {})
-        monkeypatch.setattr(build_all_module, "suggest_cycle_edge_exclusions", lambda **_kwargs: suggestions)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "load_openstack_packages", lambda *_args, **_kwargs: {})
+        monkeypatch.setattr(all_runner, "suggest_cycle_edge_exclusions", lambda **_kwargs: suggestions)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1384,7 +1387,8 @@ class TestRunBuildAllExecution:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should execute builds, generate reports, and write summary."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
+        import packastack.build.all_helpers as all_helpers
 
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
@@ -1428,21 +1432,21 @@ class TestRunBuildAllExecution:
             write_summary=lambda **kwargs: summary.update(kwargs),
         )
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: cfg)
-        monkeypatch.setattr(build_all_module, "resolve_paths", lambda _cfg: paths)
-        monkeypatch.setattr(build_all_module, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all_module, "discover_packages", fake_discover_packages)
-        monkeypatch.setattr(build_all_module, "_filter_retired_packages", lambda **_kwargs: (packages, [], []))
-        monkeypatch.setattr(build_all_module, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "merge_package_indexes", lambda *_args: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
+        monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner, "discover_packages", fake_discover_packages)
+        monkeypatch.setattr(all_helpers, "filter_retired_packages", lambda **_kwargs: (packages, [], []))
+        monkeypatch.setattr(all_runner, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "merge_package_indexes", lambda *_args: PackageIndex())
         # Patch plan module's _build_dependency_graph since that's what _run_build_all imports
         import packastack.commands.plan as plan_module
         monkeypatch.setattr(plan_module, "_build_dependency_graph", fake_build_dependency_graph)
-        monkeypatch.setattr(build_all_module, "_run_sequential_builds", fake_run_sequential_builds)
-        monkeypatch.setattr(build_all_module, "_generate_reports", fake_generate_reports)
-        monkeypatch.setattr(build_all_module, "save_state", lambda *_args, **_kwargs: None)
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "_run_sequential_builds", fake_run_sequential_builds)
+        monkeypatch.setattr(all_runner, "generate_build_all_reports", fake_generate_reports)
+        monkeypatch.setattr(all_runner, "save_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1547,7 +1551,7 @@ class TestRunBuildAllDevelTarget:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should use 'devel' when current development series is unknown."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner
 
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
@@ -1561,24 +1565,26 @@ class TestRunBuildAllDevelTarget:
 
         messages: list[str] = []
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: cfg)
-        monkeypatch.setattr(build_all_module, "resolve_paths", lambda _cfg: paths)
-        monkeypatch.setattr(build_all_module, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all_module, "get_current_development_series", lambda _path: None)
+        monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
+        monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner, "get_current_development_series", lambda _path: None)
         monkeypatch.setattr(
-            build_all_module,
+            all_runner,
             "discover_packages",
             lambda **_kwargs: DiscoveryResult(packages=["a"], total_repos=1, source="explicit"),
         )
+        # Patch plan module's _build_dependency_graph
+        import packastack.commands.plan as plan_module
         monkeypatch.setattr(
-            build_all_module,
+            plan_module,
             "_build_dependency_graph",
             lambda **_kwargs: (DependencyGraph(), {}),
         )
-        monkeypatch.setattr(build_all_module, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "merge_package_indexes", lambda *_args: PackageIndex())
-        monkeypatch.setattr(build_all_module, "activity", lambda _scope, msg: messages.append(msg))
+        monkeypatch.setattr(all_runner, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner, "merge_package_indexes", lambda *_args: PackageIndex())
+        monkeypatch.setattr(all_runner, "activity", lambda _scope, msg: messages.append(msg))
 
         run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
 
