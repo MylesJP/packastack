@@ -1844,8 +1844,6 @@ def _run_build(
         include_retired = request.include_retired
         skip_repo_regen = request.skip_repo_regen
         workspace_ref = request.workspace_ref
-        validate_plan_only = request.validate_plan_only
-        plan_upload = request.plan_upload
     
         # Resolve series (already done in planning, but needed for later phases)
         resolved_ubuntu = resolve_series(ubuntu_series)
