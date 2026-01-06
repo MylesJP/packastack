@@ -148,18 +148,24 @@ run_command(cmd, cwd=pkg_repo, env=_get_git_author_env())
 
 ## Proposed Module Boundaries
 
-### New Directory Structure
+### Directory Structure (Implemented)
 
 ```
-src/packastack/commands/build/
-├── __init__.py          # Re-export build() CLI entry point
-├── types.py             # Dataclasses for state objects
-├── errors.py            # Typed exceptions, phase_error() helper
-├── git_helpers.py       # Git-related utilities
-├── tarball.py           # Tarball acquisition logic
+src/packastack/build/
+├── __init__.py          # Re-exports all public APIs
+├── collector.py         # Artifact collection (existing)
+├── errors.py            # Exit codes, phase_error() helper
+├── git_helpers.py       # Git-related utilities  
+├── mode.py              # BuildMode configuration (existing)
 ├── phases.py            # Phase functions for _run_build
-├── executor.py          # Build-all executor logic
-└── reports.py           # Report generation
+├── provenance.py        # Build provenance (existing)
+├── runner.py            # Build runner (existing)
+├── sbuild.py            # Sbuild integration (existing)
+├── sbuildrc.py          # Sbuildrc parsing (existing)
+├── schroot.py           # Schroot management (existing)
+├── tarball.py           # Tarball acquisition logic
+├── tools.py             # Tool validation (existing)
+└── types.py             # Dataclasses for state objects
 ```
 
 ### What Stays in build.py
@@ -332,11 +338,11 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Commit REFACTOR_PLAN.md
 
 ### Commit 2: Introduce types.py with dataclasses
-- [x] Create `src/packastack/commands/build_helpers/` directory
+- [x] Create modules in `src/packastack/build/` (moved from build_helpers)
 - [x] Create `types.py` with dataclasses
 - [x] Create `errors.py` with `phase_error()` helper
 - [x] Add tests for dataclass construction
-- [x] Verify: `uv run pytest tests/commands/build_helpers/ -q`
+- [x] Verify: `uv run pytest tests/build/ -q`
 
 ### Commit 3: Extract git_helpers.py
 - [x] Move git helper functions
@@ -357,7 +363,7 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Verify tests pass (102 tests passing)
 
 ### Commit 6: Create phases.py
-- [x] Create `phases.py` with phase functions
+- [x] Create `phases.py` in `packastack.build` with phase functions
   - [x] `check_retirement_status()` - retirement phase
   - [x] `resolve_upstream_registry()` - registry phase
   - [ ] `check_policy()` - policy phase
@@ -366,21 +372,27 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
   - [ ] Other phases...
 - [x] Add `RetirementCheckResult` and `RegistryResolutionResult` dataclasses
 - [x] Add tests for phases (15 tests)
-- [x] Verify tests pass (92 build_helpers tests)
+- [x] Verify tests pass (242 build tests)
 
-### Commit 7: Wire phases into build.py
+### Commit 7: Move build_helpers to packastack.build
+- [x] Move modules from `commands/build_helpers/` to `build/`
+- [x] Update all imports in build.py and tests
+- [x] Remove old build_helpers directory
+- [x] Verify tests pass (242 build tests)
+
+### Commit 8: Wire phases into build.py
 - [ ] Replace inline retirement code with `check_retirement_status()`
 - [ ] Replace inline registry code with `resolve_upstream_registry()`
 - [ ] Ensure all event keys preserved
 - [ ] Verify tests pass
 
-### Commit 8: Extract executor.py for build-all
+### Commit 9: Extract executor.py for build-all
 - [ ] Move executor functions
 - [ ] Update `_run_build_all` to use executor
 - [ ] Add tests for retry/resume semantics
 - [ ] Verify tests pass
 
-### Commit 9: Cleanup pass
+### Commit 10: Cleanup pass
 - [ ] Reduce deref churn (consistent aliasing)
 - [ ] Flatten nesting with guard clauses
 - [ ] Collapse repeated guard patterns
