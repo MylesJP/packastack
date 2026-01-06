@@ -6,8 +6,8 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
-| build.py lines | 3,873 | 2,864 | -1,009 (-26%) |
-| tests passing | 269 | 1,429 | ✓ |
+| build.py lines | 3,873 | 2,766 | -1,107 (-29%) |
+| tests passing | 269 | 1,432 | ✓ |
 
 ### Extracted Modules in `packastack.build/`:
 
@@ -20,7 +20,7 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 | `phases.py` | 655 | 6 phase functions (retirement, registry, policy, indexes, tools, schroot) |
 | `all_reports.py` | 245 | Build-all report generation (JSON + Markdown) |
 | `type_resolution.py` | 145 | CLI build type parsing and auto-resolution |
-| `all_helpers.py` | 195 | Build-all helpers (graph, versions, retire filter, batches) |
+| `all_helpers.py` | ~300 | Build-all helpers (graph, versions, retire filter, batches, run_single_build) |
 
 ### Phase Functions in `phases.py`:
 - `check_retirement_status()` → RetirementCheckResult
@@ -41,6 +41,7 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 - `build_upstream_versions_from_packaging()` - extract versions from changelogs
 - `filter_retired_packages()` - filter retired packages using project-config
 - `get_parallel_batches()` - compute parallel build batches
+- `run_single_build()` - run subprocess for single package build with exit code mapping
 
 ### Functions in `all_reports.py`:
 - `generate_build_all_reports()` - generate JSON and Markdown summary reports
