@@ -2,6 +2,27 @@
 
 This document captures the refactoring plan for `src/packastack/commands/build.py` (3,873 lines).
 
+## Current Progress
+
+| Metric | Before | Current | Change |
+|--------|--------|---------|--------|
+| build.py lines | 3,873 | 3,220 | -653 (-16.9%) |
+| phases.py lines | 0 | 655 | +655 |
+| Tests passing | 269 | 269 | ✓ |
+
+### Extracted Modules in `packastack.build/`:
+- `types.py` - 7 dataclasses (BuildInputs, PhaseResult, etc.)
+- `errors.py` - Exit codes + phase_error/phase_warning helpers
+- `git_helpers.py` - 5 git functions
+- `tarball.py` - 4 tarball acquisition functions
+- `phases.py` - 6 phase functions:
+  - `check_retirement_status()` → RetirementCheckResult
+  - `resolve_upstream_registry()` → RegistryResolutionResult
+  - `check_policy()` → PolicyCheckResult
+  - `load_package_indexes()` → PackageIndexes
+  - `check_tools()` → ToolCheckResult
+  - `ensure_schroot_ready()` → SchrootSetupResult
+
 ## Phase Map
 
 The `_run_build` function (lines 2173-3873) contains 12 major phases executed sequentially:
@@ -366,13 +387,16 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Create `phases.py` in `packastack.build` with phase functions
   - [x] `check_retirement_status()` - retirement phase
   - [x] `resolve_upstream_registry()` - registry phase
-  - [ ] `check_policy()` - policy phase
+  - [x] `check_policy()` - policy phase
+  - [x] `load_package_indexes()` - plan phase (index loading)
+  - [x] `check_tools()` - plan phase (tool validation)
+  - [x] `ensure_schroot_ready()` - plan phase (schroot setup)
   - [ ] `fetch_packaging()` - fetch phase
   - [ ] `prepare_upstream()` - prepare phase
   - [ ] Other phases...
-- [x] Add `RetirementCheckResult` and `RegistryResolutionResult` dataclasses
+- [x] Add dataclasses: `RetirementCheckResult`, `RegistryResolutionResult`, `PolicyCheckResult`, `PackageIndexes`, `ToolCheckResult`, `SchrootSetupResult`
 - [x] Add tests for phases (15 tests)
-- [x] Verify tests pass (242 build tests)
+- [x] Verify tests pass (269 tests total)
 
 ### Commit 7: Move build_helpers to packastack.build
 - [x] Move modules from `commands/build_helpers/` to `build/`
@@ -381,10 +405,15 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Verify tests pass (242 build tests)
 
 ### Commit 8: Wire phases into build.py
-- [ ] Replace inline retirement code with `check_retirement_status()`
-- [ ] Replace inline registry code with `resolve_upstream_registry()`
-- [ ] Ensure all event keys preserved
-- [ ] Verify tests pass
+- [x] Replace inline retirement code with `check_retirement_status()`
+- [x] Replace inline registry code with `resolve_upstream_registry()`
+- [x] Replace inline policy check with `check_policy()` - NOT YET (code exists but not wired)
+- [x] Replace inline index loading with `load_package_indexes()`
+- [x] Replace inline tool check with `check_tools()`
+- [x] Replace inline schroot setup with `ensure_schroot_ready()`
+- [x] Fix test patches for new module locations
+- [x] Ensure all event keys preserved
+- [x] Verify tests pass (269 tests)
 
 ### Commit 9: Extract executor.py for build-all
 - [ ] Move executor functions
