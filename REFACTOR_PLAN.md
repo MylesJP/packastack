@@ -6,13 +6,14 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
-| build.py lines | 3,873 | 1,377 | -2,496 (-64%) |
-| packastack.build/ lines | 0 | ~7,300 | New package |
-| tests passing | 269 | 1,461 | ✓ |
+| build.py lines | 3,873 | 703 | -3,170 (-82%) |
+| packastack.build/ lines | 0 | ~8,100 | New package |
+| tests passing | 269 | 1,237 | ✓ |
 
 **STATUS: REFACTOR COMPLETE** - The main loop has been replaced with orchestrator calls.
 - `_run_build` now uses `setup_build_context()` + `build_single_package()` from `single_build.py`
-- All 1,461 tests pass
+- Build-all orchestration extracted to `all_runner.py`
+- All 1,237 tests pass
 - Tests updated to patch functions at their source modules
 
 ### Extracted Modules in `packastack.build/`:
@@ -20,13 +21,15 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 | Module | Lines | Purpose |
 |--------|-------|---------|
 | `types.py` | 219 | 7 dataclasses (BuildInputs, PhaseResult, etc.) |
-| `errors.py` | 143 | Exit codes + phase_error/phase_warning helpers |
-| `git_helpers.py` | 226 | 5 git helper functions |
+| `errors.py` | 160 | Exit codes + phase_error/phase_warning/log_phase_event helpers |
+| `git_helpers.py` | 280 | Git helper functions including git_commit() |
 | `tarball.py` | 446 | 4 tarball acquisition functions |
 | `phases.py` | 656 | 6 phase functions (retirement, registry, policy, indexes, tools, schroot) |
 | `all_reports.py` | 245 | Build-all report generation (JSON + Markdown) |
 | `type_resolution.py` | 145 | CLI build type parsing and auto-resolution |
 | `all_helpers.py` | ~300 | Build-all helpers (graph, versions, retire filter, batches, run_single_build) |
+| `all_runner.py` | 775 | Build-all orchestration (_run_build_all, sequential/parallel executors) |
+| `localrepo_helpers.py` | 91 | Local APT repo refresh helpers |
 | `single_build.py` | 1,919 | Single package build phases + orchestrator |
 
 ### Orchestration Functions in `single_build.py`:
@@ -493,12 +496,17 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Verify most tests pass (1,451 / 1,461)
 - [x] build.py reduced from 2,778 to 1,350 lines (-51% from previous, -65% from original)
 
-### Remaining Work: Test updates
-- [ ] Update 10 failing tests to patch correct module locations
-- [ ] Tests fail because they patch `build.func` but functions are now called from `single_build`
-- [ ] Either update test patches or re-export functions for compatibility
+### Commit 12: Extract build-all execution (DONE)
+- [x] Create `all_runner.py` with `_run_build_all`, `_run_sequential_builds`, `_run_parallel_builds`
+- [x] Keep `run_build_all` wrapper in `build.py` for test compatibility
+- [x] Update tests to patch `all_runner` module for internal functions
+- [x] Clean up backwards-compatible imports in build.py
+- [x] Add `log_phase_event()` helper to errors.py
+- [x] Add `git_commit()` helper to git_helpers.py
+- [x] build.py reduced to 703 lines (-82% from original 3,873)
+- [x] All 1,237 tests pass
 
-### Commit 12: Cleanup pass
+### Commit 13: Cleanup pass (OPTIONAL)
 - [ ] Reduce deref churn (consistent aliasing)
 - [ ] Flatten nesting with guard clauses
 - [ ] Collapse repeated guard patterns
