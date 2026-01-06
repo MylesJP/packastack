@@ -25,42 +25,17 @@ packages, and produces upload orders.
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import typer
 
-from packastack.core.context import BuildContext, BuildOptions, BuildRequest, PlanRequest, PolicyConfig, TargetConfig
+from packastack.core.context import BuildRequest
 
-from packastack.debpkg.changelog import (
-    generate_changelog_message,
-    generate_milestone_version,
-    generate_release_version,
-    generate_snapshot_version,
-    get_current_version,
-    increment_upstream_version,
-    parse_version,
-    update_changelog,
-)
 from packastack.core.config import load_config
-from packastack.debpkg.gbp import (
-    PatchHealthReport,
-    build_binary,
-    build_source,
-    check_upstreamed_patches,
-    ensure_upstream_branch,
-    import_orig,
-    pq_export,
-    pq_import,
-    run_command,
-)
-from packastack.debpkg.gbpconf import update_gbp_conf_from_launchpad_yaml
-from packastack.upstream.gitfetch import GitFetcher
 from packastack.planning.graph import DependencyGraph
-from packastack.debpkg.launchpad_yaml import update_launchpad_yaml_series
 from packastack.apt.packages import (
     PackageIndex,
     load_cloud_archive_index,
@@ -74,95 +49,40 @@ from packastack.upstream.releases import (
     get_previous_series,
     is_snapshot_eligible,
     load_openstack_packages,
-    load_project_releases,
-    load_series_info,
 )
 from packastack.core.run import RunContext, activity
 from packastack.target.series import resolve_series
-from packastack.core.spinner import activity_spinner
-from packastack.build.tools import check_required_tools, get_missing_tools_message
-from packastack.build.schroot import SchrootConfig, ensure_schroot, get_schroot_name
-from packastack.planning.type_selection import (
-    BuildType,
-    CycleStage,
-    select_build_type,
-    determine_cycle_stage,
-)
-from packastack.upstream.source import (
-    SnapshotAcquisitionResult,
-    SnapshotRequest,
-    TarballResult,
-    UpstreamSource,
-    acquire_upstream_snapshot,
-    apply_signature_policy,
-    download_file,
-    download_and_verify_tarball,
-    generate_snapshot_tarball,
-    get_git_snapshot_info,
-    select_upstream_source,
-)
-from packastack.upstream.tarball_cache import (
-    TarballCacheEntry,
-    cache_tarball,
-    find_cached_tarball,
-)
-from packastack.planning.validated_plan import extract_upstream_deps, validate_plan
 from packastack.apt import localrepo
 from packastack.target.arch import get_host_arch
-from packastack.build.mode import BuildMode, Builder
-from packastack.planning.deploop import check_dependencies, DependencyBuildPlan
-from packastack.build.sbuild import SbuildConfig, run_sbuild, is_sbuild_available
 from packastack.build.provenance import (
-    BuildProvenance,
-    create_provenance,
     summarize_provenance,
-    write_provenance,
-    ReleaseSourceProvenance,
-    TarballProvenance,
-    UpstreamProvenance,
-    VerificationProvenance,
-    WatchMismatchProvenance,
-)
-from packastack.upstream.registry import (
-    ResolutionSource,
-)
-from packastack.upstream.retirement import (
-    RetirementChecker,
 )
 from packastack.commands.init import _clone_or_update_project_config
-from packastack.debpkg.watch import (
-    check_watch_mismatch,
-    ensure_pgp_verification_valid,
-    fix_oslo_watch_pattern,
-    format_mismatch_warning,
-    parse_watch_file,
-    update_signing_key,
-    upgrade_watch_version,
+from packastack.build.tools import check_required_tools
+from packastack.upstream.source import select_upstream_source, apply_signature_policy
+
+# Re-exports for test compatibility - these are used by single_build.py
+from packastack.upstream.gitfetch import GitFetcher
+from packastack.debpkg.launchpad_yaml import update_launchpad_yaml_series
+from packastack.debpkg.gbp import (
+    ensure_upstream_branch,
+    import_orig,
+    run_command,
+    pq_import,
+    check_upstreamed_patches,
+    build_source,
 )
-from packastack.debpkg.manpages import apply_man_pages_support
-from packastack.debpkg.control import fix_priority_extra, ensure_misc_pre_depends
-from packastack.debpkg.rules import add_doctree_cleanup
+from packastack.debpkg.changelog import (
+    get_current_version,
+    generate_changelog_message,
+    update_changelog,
+    generate_release_version,
+    parse_version,
+)
 
 # Build helpers (refactored modules)
 from packastack.build import (
-    # Git helpers
-    _ensure_no_merge_paths,
-    _get_git_author_env,
-    _maybe_disable_gpg_sign,
-    _maybe_enable_sphinxdoc,
-    _no_gpg_sign_enabled,
-    # Tarball helpers
-    _download_github_release_tarball,
-    _download_pypi_tarball,
-    _fetch_release_tarball,
-    _run_uscan,
-    # Phase functions
-    check_retirement_status,
-    check_tools,
-    ensure_schroot_ready,
-    load_package_indexes,
-    resolve_upstream_registry,
-    # Exit codes
+    # Exit codes - re-exported for backwards compatibility
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
@@ -179,12 +99,21 @@ from packastack.build import (
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
 )
+from packastack.build.git_helpers import (
+    _ensure_no_merge_paths,
+    _get_git_author_env,
+    _maybe_disable_gpg_sign,
+)
 from packastack.build.type_resolution import (
-    VALID_BUILD_TYPES,
     build_type_from_string,
     resolve_build_type_auto,
     resolve_build_type_from_cli,
 )
+# Private aliases for backwards compatibility
+_build_type_from_string = build_type_from_string
+_resolve_build_type_auto = resolve_build_type_auto
+_resolve_build_type_from_cli = resolve_build_type_from_cli
+
 from packastack.build.all_helpers import (
     build_dependency_graph,
     build_upstream_versions_from_packaging,
@@ -192,36 +121,18 @@ from packastack.build.all_helpers import (
     get_parallel_batches,
     run_single_build,
 )
-from packastack.build.single_build import (
-    SetupInputs,
-    SingleBuildContext,
-    build_packages,
-    build_single_package,
-    fetch_packaging_repo,
-    import_and_patch,
-    prepare_upstream_source,
-    setup_build_context,
-    validate_and_build_deps,
-    verify_and_publish,
-)
 
 # Build-all imports
 import concurrent.futures
 import contextlib
-import json
 import threading
-from collections import defaultdict
 from datetime import datetime
 
 from packastack.core.context import BuildAllRequest
-from packastack.debpkg.control import get_changelog_version
-from packastack.debpkg.version import extract_upstream_version
 from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
 from packastack.planning.build_all_state import (
     BuildAllState,
     FailureType,
-    MissingDependency,
-    PackageState,
     PackageStatus,
     create_initial_state,
     load_state,
@@ -229,9 +140,7 @@ from packastack.planning.build_all_state import (
 )
 from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
 from packastack.planning.package_discovery import (
-    DiscoveryResult,
     discover_packages,
-    discover_packages_from_cache,
 )
 from packastack.planning.type_selection import get_default_parallel_workers
 from packastack.reports.plan_graph import PlanGraph, render_waves
@@ -1385,1388 +1294,77 @@ def _run_build(
         run.write_summary(status="failed", error="No packages in build order", exit_code=EXIT_CONFIG_ERROR)
         return EXIT_CONFIG_ERROR
     
-    # Build all packages in dependency order (respecting waves for parallelism)
-    # For now, we'll iterate sequentially through the build order
-    # TODO: Extract and reuse the parallel batch logic from build-all
+    # Build all packages in dependency order using extracted orchestrator
+    from packastack.build.single_build import (
+        SetupInputs,
+        build_single_package,
+        setup_build_context,
+    )
+
     activity("build", f"Building {len(plan_result.build_order)} package(s) in dependency order")
     
     for pkg_idx, pkg_name in enumerate(plan_result.build_order, 1):
         activity("build", f"[{pkg_idx}/{len(plan_result.build_order)}] Building: {pkg_name}")
         
-        # Derive project name from package name
-        # For python-* packages, strip the prefix to get project name
-        if pkg_name.startswith("python-"):
-            package = pkg_name[7:]  # Remove "python-" prefix
-        else:
-            package = pkg_name
-        
-        target = request.target
-        ubuntu_series = request.ubuntu_series
-        cloud_archive = request.cloud_archive
-        build_type_str = request.build_type_str
-        milestone = request.milestone
-        force = request.force
-        offline = request.offline
-        upload = request.upload
-        binary = request.binary
-        builder = request.builder
-        build_deps = request.build_deps
-        no_spinner = request.no_spinner
-        yes = request.yes
-        use_gbp_dch = request.use_gbp_dch
-        include_retired = request.include_retired
-        skip_repo_regen = request.skip_repo_regen
-        workspace_ref = request.workspace_ref
-    
-        # Resolve series (already done in planning, but needed for later phases)
-        resolved_ubuntu = resolve_series(ubuntu_series)
-        releases_repo = paths["openstack_releases_repo"]
-        if target == "devel":
-            openstack_target = get_current_development_series(releases_repo) or target
-        else:
-            openstack_target = target
-        local_repo = paths["local_apt_repo"]
-    
-        activity("resolve", f"Package: {pkg_name}")
-        run.log_event({"event": "resolve.package", "name": pkg_name})
-
-        # =========================================================================
-        # PHASE: retirement check
-        # =========================================================================
-        project_config_path = paths.get("openstack_project_config")
-        retirement_result, retirement_info = check_retirement_status(
+        # Create setup inputs for the orchestrator
+        setup_inputs = SetupInputs(
             pkg_name=pkg_name,
-            package=package,
-            project_config_path=project_config_path,
-            releases_repo=releases_repo,
-            openstack_target=openstack_target,
-            include_retired=include_retired,
-            offline=offline,
+            target=request.target,
+            ubuntu_series=request.ubuntu_series,
+            cloud_archive=request.cloud_archive,
+            build_type_str=request.build_type_str,
+            milestone=request.milestone,
+            binary=request.binary,
+            builder=request.builder,
+            force=request.force,
+            offline=request.offline,
+            use_gbp_dch=request.use_gbp_dch,
+            skip_repo_regen=request.skip_repo_regen,
+            no_spinner=request.no_spinner,
+            build_deps=request.build_deps,
+            include_retired=request.include_retired,
+            resolved_build_type_str=resolved_build_type_str,
+            milestone_from_cli=milestone_from_cli,
+            paths=paths,
+            cfg=cfg,
             run=run,
         )
-        if not retirement_result.success:
-            return retirement_result.exit_code
-
-        # Build type already resolved before planning (see earlier in function)
-        # Just convert string back to enum and handle milestone
-        build_type = _build_type_from_string(resolved_build_type_str)
-        milestone_str = milestone_from_cli
-    
-        # Log what we're using (already shown during early resolution)
-        run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
-
-        # Get previous series for launchpad.yaml update
-        prev_series = get_previous_series(releases_repo, openstack_target)
-        if prev_series:
-            activity("resolve", f"Previous series: {prev_series}")
-        run.log_event({"event": "resolve.prev_series", "prev": prev_series, "target": openstack_target})
-
-        # =========================================================================
-        # PHASE: registry
-        # =========================================================================
-        registry_result, registry_info = resolve_upstream_registry(
-            package=package,
-            pkg_name=pkg_name,
-            releases_repo=releases_repo,
-            openstack_target=openstack_target,
-            run=run,
-        )
-        if not registry_result.success:
-            return registry_result.exit_code
-
-        # Extract values from registry resolution result
-        registry = registry_info.registry
-        resolved_upstream = registry_info.resolved
-        upstream_config = resolved_upstream.config
-        resolution_source = resolved_upstream.resolution_source
-
-        # Initialize provenance record
-        provenance = create_provenance(pkg_name, run.run_id)
-        provenance.registry_version = registry.version
-        provenance.resolution_source = resolution_source.value
-        provenance.project_key = resolved_upstream.project
-        provenance.build_type = build_type.value
-        provenance.upstream.url = upstream_config.upstream.url
-        provenance.upstream.branch = upstream_config.upstream.default_branch
-        provenance.release_source.type = upstream_config.release_source.type.value
-        provenance.release_source.deliverable = upstream_config.release_source.deliverable
-        if registry.override_applied:
-            provenance.registry_override_path = registry.override_path
-
-        # =========================================================================
-        # PHASE: policy
-        # =========================================================================
-        activity("policy", "Checking snapshot eligibility")
-
-        if build_type == BuildType.SNAPSHOT:
-            eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, package)
-            if not eligible:
-                activity("policy", f"Blocked: {reason}")
-                if preferred:
-                    activity("policy", f"Preferred version: {preferred}")
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error=f"Snapshot build blocked: {reason}",
-                        exit_code=EXIT_POLICY_BLOCKED,
-                    )
-                    return EXIT_POLICY_BLOCKED
-                activity("policy", "Continuing with --force")
-            elif "Warning" in reason:
-                activity("policy", f"Warning: {reason}")
-            run.log_event({"event": "policy.snapshot", "eligible": eligible, "reason": reason})
-
-        activity("policy", "Policy check: OK")
-
-        # =========================================================================
-        # PHASE: plan
-        # =========================================================================
-
-        # Load package indexes (Ubuntu, Cloud Archive, local repo)
-        pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
-        components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
-        result, indexes = load_package_indexes(
-            ubuntu_cache=paths["ubuntu_archive_cache"],
-            resolved_ubuntu=resolved_ubuntu,
-            ubuntu_pockets=pockets,
-            ubuntu_components=components,
-            cloud_archive=cloud_archive,
-            cache_root=paths["cache_root"],
-            local_repo_root=paths.get("local_apt_repo"),
-            arch=get_host_arch(),
-            run=run,
-        )
-        if not result.success:
-            return result.exit_code
         
-        ubuntu_index = indexes.ubuntu
-        ca_index = indexes.cloud_archive
-        local_index = indexes.local_repo
+        # Run setup phases (retirement, registry, policy, indexes, tools, schroot)
+        setup_result, ctx = setup_build_context(setup_inputs)
+        if not setup_result.success:
+            return setup_result.exit_code
 
-        # Build preliminary graph
-        openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
-        activity("plan", f"OpenStack packages: {len(openstack_pkgs)} in {openstack_target}")
-
-        # For build command, we focus on single package
-        build_order = [pkg_name]
-        upload_order = [pkg_name]
-
-        activity("plan", f"Build order: {', '.join(build_order)}")
-        run.log_event({"event": "plan.build_order", "order": build_order})
-
-        # Validate tools before proceeding
-        result, _ = check_tools(need_sbuild=binary, run=run)
-        if not result.success:
-            return result.exit_code
-
-        # Ensure schroot exists for sbuild-based binary builds
-        mirror = cfg.get("mirrors", {}).get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu")
-        components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
-        result, schroot_info = ensure_schroot_ready(
-            binary=binary,
-            builder=builder,
-            resolved_ubuntu=resolved_ubuntu,
-            mirror=mirror,
-            components=components,
-            offline=offline,
-            run=run,
-        )
-        if not result.success:
-            return result.exit_code
-        schroot_name = schroot_info.schroot_name
-
-        # =========================================================================
-        # PHASE: fetch
-        # =========================================================================
-
-        # Create workspace
-        build_root = paths.get("build_root", paths["cache_root"] / "build")
-        workspace = build_root / run.run_id / pkg_name
-        workspace.mkdir(parents=True, exist_ok=True)
-        if workspace_ref:
-            workspace_ref(workspace)
-
-        # Mirror RunContext logs into the build workspace
-        try:
-            run.add_log_mirror(workspace / "logs")
-        except Exception:
-            pass
-
-        # Clone packaging repo
-        fetcher = GitFetcher()
-        pkg_workspace = workspace / "packaging"
-        with activity_spinner("fetch", f"Cloning packaging repository: {pkg_name}"):
-            result = fetcher.fetch_and_checkout(
-                pkg_name,
-                workspace,
-                resolved_ubuntu,
-                openstack_target,
-                offline=offline,
+        # Run the package build using the orchestrator
+        outcome = build_single_package(ctx, workspace_ref=request.workspace_ref)
+        
+        if not outcome.success:
+            run.write_summary(
+                status="failed",
+                error=outcome.error,
+                exit_code=outcome.exit_code,
             )
-
-        if result.error:
-            activity("fetch", f"Clone failed: {result.error}")
-            run.write_summary(status="failed", error=result.error, exit_code=EXIT_FETCH_FAILED)
-            return EXIT_FETCH_FAILED
-
-        pkg_repo = result.path
-        # Protect packaging-only files from being removed during upstream merges
-        _ensure_no_merge_paths(pkg_repo, ["launchpad.yaml"])
-    
-        # Commit .gitattributes so it's active during import-orig merge
-        gitattributes = pkg_repo / ".gitattributes"
-        if gitattributes.exists():
-            try:
-                activity("fetch", "Committing .gitattributes for merge protection")
-                run_command(["git", "add", ".gitattributes"], cwd=pkg_repo)
-                commit_cmd = _maybe_disable_gpg_sign(["git", "commit", "-m", "Protect packaging files during merge"])
-                returncode, stdout, stderr = run_command(commit_cmd, cwd=pkg_repo, env=_get_git_author_env())
-                if returncode == 0:
-                    activity("fetch", ".gitattributes committed successfully")
-                else:
-                    activity("fetch", f".gitattributes commit result: {returncode}")
-            except Exception as e:
-                activity("fetch", f".gitattributes commit failed: {e}")
-
-        activity("fetch", f"Cloned to: {pkg_repo}")
-        activity("fetch", f"Branches: {', '.join(result.branches[:5])}...")
-        run.log_event({
-            "event": "fetch.complete",
-            "path": str(pkg_repo),
-            "branches": result.branches,
-            "cloned": result.cloned,
-            "updated": result.updated,
-        })
-
-        # Check debian/watch for mismatch with registry (advisory only)
-        watch_path = pkg_repo / "debian" / "watch"
-        watch_result = parse_watch_file(watch_path)
-        if watch_result.mode.value != "unknown":
-            mismatch = check_watch_mismatch(
-                pkg_name,
-                watch_result,
-                upstream_config.upstream.host,
-                upstream_config.upstream.url,
-            )
-            if mismatch:
-                activity("policy", f"debian/watch mismatch (warn): registry={upstream_config.upstream.host} watch={mismatch.watch_mode.value}")
-                run.log_event({
-                    "event": "policy.watch_mismatch",
-                    "package": pkg_name,
-                    "registry_host": upstream_config.upstream.host,
-                    "watch_mode": mismatch.watch_mode.value,
-                    "watch_url": mismatch.watch_url,
-                })
-                # Record in provenance
-                provenance.watch_mismatch.detected = True
-                provenance.watch_mismatch.watch_mode = mismatch.watch_mode.value
-                provenance.watch_mismatch.watch_url = mismatch.watch_url
-                provenance.watch_mismatch.registry_mode = upstream_config.upstream.host
-                provenance.watch_mismatch.message = mismatch.message
-
-        watch_updated = False
-        signing_key_updated = False
-        files_to_commit = []
+            return outcome.exit_code
         
-        if upgrade_watch_version(watch_path):
-            activity("prepare", "Updated debian/watch to version=4")
-            watch_updated = True
-
-        # Fix oslo.* watch patterns to accept both oslo.* and oslo_* naming
-        if fix_oslo_watch_pattern(watch_path, package):
-            activity("prepare", f"Updated debian/watch to accept {package} or {package.replace('.', '_')} naming")
-            watch_updated = True
-
-        # Update or remove signing key based on build type
-        is_snapshot = build_type == BuildType.SNAPSHOT
-        if update_signing_key(pkg_repo, releases_repo, openstack_target, is_snapshot):
-            signing_key_updated = True
-            if is_snapshot:
-                activity("prepare", "Removed debian/upstream/signing-key.asc for snapshot build")
-            else:
-                activity("prepare", f"Updated debian/upstream/signing-key.asc for {openstack_target}")
+        # Show upload commands if requested
+        if request.upload and outcome.artifacts:
+            # Find the .changes file
+            changes_files = [a for a in outcome.artifacts if a.suffix == ".changes"]
+            if changes_files:
+                activity("report", "Upload commands:")
+                activity("report", f"  dput ppa:ubuntu-openstack-dev/proposed {changes_files[0]}")
         
-        # Commit watch file and signing key together before uscan runs
-        if watch_updated:
-            files_to_commit.append("debian/watch")
-        if signing_key_updated:
-            files_to_commit.append("debian/upstream/signing-key.asc")
-        
-        if files_to_commit:
-            commit_parts = []
-            if watch_updated:
-                commit_parts.append("Update debian/watch")
-            if signing_key_updated:
-                if is_snapshot:
-                    commit_parts.append("remove signing key for snapshot")
-                else:
-                    commit_parts.append(f"update signing key for {openstack_target}")
-            
-            commit_msg = " and ".join(commit_parts)
-            commit_cmd = _maybe_disable_gpg_sign([
-                "git", "commit", "-m", commit_msg
-            ] + files_to_commit)
-            
-            exit_code, stdout, stderr = run_command(commit_cmd, cwd=pkg_repo, env=_get_git_author_env())
-            if exit_code == 0:
-                activity("prepare", "Committed watch and signing key updates")
-            else:
-                activity("warn", f"Failed to commit updates: {stderr}")
-
-        # Ensure sphinxdoc addon is enabled before patch application/commits
-        _maybe_enable_sphinxdoc(pkg_repo)
-
-        # =========================================================================
-        # PHASE: prepare
-        # =========================================================================
-        activity("prepare", "Preparing packaging repository")
-
-        # Update launchpad.yaml if previous series exists
-        if prev_series:
-            success, updated_fields, error = update_launchpad_yaml_series(
-                pkg_repo, prev_series, openstack_target
-            )
-            if success:
-                if updated_fields:
-                    activity("prepare", f"Updated launchpad.yaml: {len(updated_fields)} fields")
-                    run.log_event({"event": "prepare.launchpad_yaml", "fields": updated_fields})
-                else:
-                    activity("prepare", "launchpad.yaml: no changes needed")
-            else:
-                activity("prepare", f"launchpad.yaml warning: {error}")
-                run.log_event({"event": "prepare.launchpad_yaml_warning", "error": error})
-
-        # Select upstream source
-        activity("prepare", f"Looking for upstream {build_type.value} tarball for {package}")
-        upstream = select_upstream_source(
-            releases_repo,
-            openstack_target,
-            package,  # Use original project name
-            build_type,
-            milestone_str,
-        )
-
-        if upstream is None and build_type != BuildType.SNAPSHOT:
-            error_msg = f"No {build_type.value} tarball found for {package} in OpenStack {openstack_target}"
-            activity("prepare", error_msg)
-            run.write_summary(status="failed", error=error_msg, exit_code=EXIT_CONFIG_ERROR)
-            return EXIT_CONFIG_ERROR
-
-        # Apply signature policy (remove signing keys for snapshots)
-        debian_dir = pkg_repo / "debian"
-        removed_keys = apply_signature_policy(debian_dir, build_type)
-        if removed_keys:
-            activity("prepare", f"Removed signing keys: {len(removed_keys)} files")
-            run.log_event({"event": "prepare.signing_keys_removed", "files": [str(f) for f in removed_keys]})
-
-        # Get/fetch upstream source
-        upstream_tarball: Path | None = None
-        signature_verified = False
-        signature_warning = ""
-        git_sha = ""
-        git_date = ""
-
-        if build_type == BuildType.SNAPSHOT:
-            if offline:
-                cached_path, cached_meta = find_cached_tarball(
-                    project=package,
-                    build_type=build_type.value,
-                    cache_base=tarball_cache_base,
-                    allow_latest=True,
-                )
-                if not cached_path or not cached_meta:
-                    error_msg = f"Offline snapshot build requires a cached tarball for {package}"
-                    activity("prepare", error_msg)
-                    run.write_summary(status="failed", error=error_msg, exit_code=EXIT_FETCH_FAILED)
-                    return EXIT_FETCH_FAILED
-
-                git_sha = cached_meta.git_sha or "cached"
-                git_date = cached_meta.git_date or "00000000"
-                upstream_tarball = cached_path
-                snapshot_result = SnapshotAcquisitionResult(
-                    success=True,
-                    repo_path=None,
-                    tarball_result=TarballResult(success=True, path=cached_path),
-                    git_sha=git_sha,
-                    git_sha_short=git_sha[:7],
-                    git_date=git_date,
-                    upstream_version=cached_meta.version,
-                    project=cached_meta.project or package,
-                    git_ref=cached_meta.git_ref or "cached",
-                    cloned=False,
-                )
-
-                activity("prepare", f"Snapshot: cached tarball {cached_path.name}")
-                run.log_event({
-                    "event": "prepare.snapshot.cached",
-                    "tarball": str(cached_path),
-                    "git_sha": git_sha,
-                    "git_date": git_date,
-                    "upstream_version": cached_meta.version,
-                })
-
-                provenance.upstream.ref = cached_meta.git_ref or "cached"
-                provenance.upstream.sha = git_sha
-                provenance.tarball.method = "cache"
-                provenance.tarball.path = str(cached_path)
-                provenance.verification.mode = "none"
-                provenance.verification.result = "not_applicable"
-                signature_warning = "Snapshot build from cached tarball - no signature verification"
-            else:
-                # For snapshot, clone upstream and generate tarball from git
-                activity("prepare", "Snapshot build - cloning upstream repository")
-
-                # Determine base version from current packaging
-                current_version = get_current_version(debian_dir / "changelog")
-                if current_version:
-                    parsed_ver = parse_version(current_version)
-                    base_version = increment_upstream_version(parsed_ver.upstream) if parsed_ver else "0.0.0"
-                else:
-                    base_version = "0.0.0"
-
-                # Determine upstream branch
-                # Development series use master/main, released series use stable/series
-                upstream_branch = None
-                if openstack_target:
-                    series_info = load_series_info(releases_repo)
-                    is_development = (
-                        openstack_target in series_info
-                        and series_info[openstack_target].status == "development"
-                    )
-                    # Development series don't have stable/ branches yet
-                    upstream_branch = None if is_development else f"stable/{openstack_target}"
-
-                # Clone upstream and generate snapshot tarball
-                upstream_work_dir = workspace / "upstream"
-                snapshot_request = SnapshotRequest(
-                    project=package,  # Use original project name (not pkg_name which has python- prefix)
-                    base_version=base_version,
-                    branch=upstream_branch,
-                    git_ref="HEAD",
-                    package_name=pkg_name,
-                )
-                snapshot_result = acquire_upstream_snapshot(
-                    request=snapshot_request,
-                    work_dir=upstream_work_dir,
-                    output_dir=workspace,
-                )
-
-                if not snapshot_result.success:
-                    activity("prepare", f"Snapshot acquisition failed: {snapshot_result.error}")
-                    if not force:
-                        run.write_summary(
-                            status="failed",
-                            error=f"Snapshot acquisition failed: {snapshot_result.error}",
-                            exit_code=EXIT_FETCH_FAILED,
-                        )
-                        return EXIT_FETCH_FAILED
-                    # Continue with placeholder values if forced
-                    git_sha = "HEAD"
-                    git_date = "00000000"
-                else:
-                    git_sha = snapshot_result.git_sha
-                    git_date = snapshot_result.git_date
-                    upstream_tarball = snapshot_result.tarball_result.path if snapshot_result.tarball_result else None
-                    activity("prepare", f"Snapshot: git {snapshot_result.git_sha_short} from {snapshot_result.git_date}")
-                    if snapshot_result.cloned:
-                        activity("prepare", "Cloned upstream from OpenDev")
-                    run.log_event({
-                        "event": "prepare.snapshot",
-                        "git_sha": snapshot_result.git_sha,
-                        "git_sha_short": snapshot_result.git_sha_short,
-                        "git_date": snapshot_result.git_date,
-                        "upstream_version": snapshot_result.upstream_version,
-                        "cloned": snapshot_result.cloned,
-                    })
-                    # Update provenance with snapshot details
-                    provenance.upstream.ref = upstream_branch or "HEAD"
-                    provenance.upstream.sha = snapshot_result.git_sha
-                    provenance.tarball.method = "git_archive"
-                    if upstream_tarball:
-                        provenance.tarball.path = str(upstream_tarball)
-                    provenance.verification.mode = "none"
-                    provenance.verification.result = "not_applicable"
-                    if upstream_tarball and snapshot_result.upstream_version:
-                        cache_tarball(
-                            tarball_path=upstream_tarball,
-                            entry=TarballCacheEntry(
-                                project=package,
-                                package_name=pkg_name,
-                                version=snapshot_result.upstream_version,
-                                build_type=build_type.value,
-                                source_method="git_archive",
-                                git_sha=snapshot_result.git_sha,
-                                git_date=snapshot_result.git_date,
-                                git_ref=upstream_branch or "HEAD",
-                            ),
-                            cache_base=tarball_cache_base,
-                        )
-
-                signature_warning = "Snapshot build - no signature verification"
-        else:
-            # Release/milestone: uscan first, then official, then fallbacks
-            upstream_tarball, signature_verified, signature_warning = _fetch_release_tarball(
-                upstream=upstream,
-                upstream_config=upstream_config,
-                pkg_repo=pkg_repo,
-                workspace=workspace,
-                provenance=provenance,
-                offline=offline,
-                project_key=package,
-                package_name=pkg_name,
-                build_type=build_type,
-                cache_base=tarball_cache_base,
-                force=force,
-                run=run,
-            )
-
-            if upstream_tarball is None:
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error=signature_warning or "Failed to fetch upstream tarball",
-                        exit_code=EXIT_FETCH_FAILED,
-                    )
-                    return EXIT_FETCH_FAILED
-                activity("prepare", "Proceeding without upstream tarball due to --force")
-
-        # =========================================================================
-        # PHASE: validate-deps
-        # =========================================================================
-        activity("validate-deps", "Validating upstream dependencies")
-
-        # Extract dependencies from upstream repo (if available)
-        upstream_repo_path = None
-        if build_type == BuildType.SNAPSHOT and snapshot_result and snapshot_result.repo_path:
-            upstream_repo_path = snapshot_result.repo_path
-        elif build_type == BuildType.RELEASE and upstream_tarball:
-            # For release builds, extract the tarball to cache for dependency analysis
-            from packastack.upstream.tarball_cache import extract_tarball
-
-            activity("validate-deps", f"Extracting tarball for dependency analysis: {upstream_tarball.name}")
-            tarball_version = upstream.version if upstream else pkg_name
-
-            extraction_result = extract_tarball(
-                tarball_path=upstream_tarball,
-                project=pkg_name,
-                version=tarball_version,
-                cache_base=tarball_cache_base,
-            )
-
-            if extraction_result.success and extraction_result.extraction_path:
-                upstream_repo_path = extraction_result.extraction_path
-                if extraction_result.from_cache:
-                    activity("validate-deps", "Using cached tarball extraction")
-                else:
-                    activity("validate-deps", f"Extracted to: {extraction_result.extraction_path}")
-            else:
-                activity("validate-deps", f"Could not extract tarball: {extraction_result.error}")
-
-        upstream_deps = None
-        missing_deps_list: list[str] = []
-        new_deps_to_build: list[str] = []
-
-        if upstream_repo_path and upstream_repo_path.exists():
-            upstream_deps = extract_upstream_deps(upstream_repo_path)
-            activity("validate-deps", f"Found {len(upstream_deps.runtime)} runtime dependencies")
-            run.log_event({
-                "event": "validate-deps.extracted",
-                "runtime_count": len(upstream_deps.runtime),
-                "test_count": len(upstream_deps.test),
-                "build_count": len(upstream_deps.build),
-            })
-
-            # Validate each dependency
-            from packastack.planning.validated_plan import (
-                map_python_to_debian,
-                resolve_dependency_with_spec,
-            )
-
-            resolved_count = 0
-            for python_dep, version_spec in upstream_deps.runtime:
-                debian_name, uncertain = map_python_to_debian(python_dep)
-                if not debian_name:
-                    activity("validate-deps", f"  {python_dep} -> (unmapped)")
-                    continue
-
-                # Try to resolve the dependency with version checking
-                version, source, satisfied = resolve_dependency_with_spec(
-                    debian_name, version_spec, local_index, ca_index, ubuntu_index
-                )
-
-                spec_display = f" (req: {version_spec})" if version_spec else ""
-                if version:
-                    resolved_count += 1
-                    status = "✓ SATISFIED" if satisfied else "✗ OUTDATED"
-                    activity("validate-deps", f"  {python_dep}{spec_display} -> {debian_name} = {version} ({source}) [{status}]")
-                    run.log_event({
-                        "event": "validate-deps.resolved",
-                        "python_dep": python_dep,
-                        "version_spec": version_spec,
-                        "debian_name": debian_name,
-                        "version": version,
-                        "source": source,
-                        "satisfied": satisfied,
-                    })
-                else:
-                    missing_deps_list.append(debian_name)
-                    activity("validate-deps", f"  {python_dep}{spec_display} -> {debian_name} [✗ MISSING]")
-
-            activity("validate-deps", f"Resolved {resolved_count}/{len(upstream_deps.runtime)} dependencies")
-
-            if missing_deps_list:
-                activity("validate-deps", f"Warning: {len(missing_deps_list)} dependencies not resolved")
-
-                run.log_event({
-                    "event": "validate-deps.missing",
-                    "count": len(missing_deps_list),
-                    "deps": missing_deps_list,
-                })
-
-                # Check which missing deps are OpenStack packages we could build
-                from packastack.planning.validated_plan import project_to_source_package
-                # openstack_pkgs may be a dict mapping source package -> project name (runtime)
-                # or a simple iterable of project names (older tests). Handle both.
-                if isinstance(openstack_pkgs, dict):
-                    openstack_projects = set(openstack_pkgs.values())
-                else:
-                    openstack_projects = set(openstack_pkgs)
-                buildable_deps: list[str] = []
-            
-                for dep in missing_deps_list:
-                    # Infer project name from debian package name
-                    if dep.startswith("python3-"):
-                        potential_project = dep[8:]
-                    elif dep.startswith("python-"):
-                        potential_project = dep[7:]
-                    else:
-                        potential_project = dep
-                
-                    if potential_project in openstack_projects:
-                        source_pkg = project_to_source_package(potential_project)
-                        if source_pkg not in buildable_deps:
-                            buildable_deps.append(source_pkg)
-            
-                if buildable_deps:
-                    activity("validate-deps", f"The following {len(buildable_deps)} packages could be built first:")
-                    for dep in buildable_deps[:10]:
-                        type_hint = f" --type {build_type.value}" if build_type != BuildType.RELEASE else ""
-                        activity("validate-deps", f"  packastack build {dep}{type_hint}")
-                    if len(buildable_deps) > 10:
-                        activity("validate-deps", f"  ... and {len(buildable_deps) - 10} more")
-                
-                    run.log_event({
-                        "event": "validate-deps.buildable",
-                        "packages": buildable_deps,
-                    })
-                
-                    # Store for auto-build phase
-                    new_deps_to_build.extend(buildable_deps)
-            else:
-                activity("validate-deps", "All dependencies resolved")
-        else:
-            activity("validate-deps", "Skipping - no upstream repo available")
-
-        # =========================================================================
-        # PHASE: auto-build (if enabled and missing deps detected)
-        # =========================================================================
-        if build_deps and new_deps_to_build:
-            activity("auto-build", f"Auto-building {len(new_deps_to_build)} missing dependencies")
-        
-            # Get the current build depth from environment or default to 0
-            import os
-            current_depth = int(os.environ.get("PACKASTACK_BUILD_DEPTH", "0"))
-            max_depth = 10
-        
-            if current_depth >= max_depth:
-                activity("auto-build", f"Maximum build depth ({max_depth}) reached, aborting")
-                run.log_event({
-                    "event": "auto-build.max_depth",
-                    "current_depth": current_depth,
-                    "max_depth": max_depth,
-                })
-                run.write_summary(
-                    status="failed",
-                    error=f"Maximum dependency build depth ({max_depth}) exceeded",
-                    exit_code=EXIT_MISSING_PACKAGES,
-                )
-                return EXIT_MISSING_PACKAGES
-        
-            # Build dependencies in order (they should already be topologically sorted)
-            for i, dep_pkg in enumerate(new_deps_to_build, 1):
-                activity("auto-build", f"[{i}/{len(new_deps_to_build)}] Building dependency: {dep_pkg}")
-                run.log_event({
-                    "event": "auto-build.start",
-                    "package": dep_pkg,
-                    "index": i,
-                    "total": len(new_deps_to_build),
-                    "depth": current_depth + 1,
-                })
-            
-                # Set depth environment variable for child builds
-                child_env = os.environ.copy()
-                child_env["PACKASTACK_BUILD_DEPTH"] = str(current_depth + 1)
-            
-                # Build the dependency using subprocess
-                import subprocess
-                cmd = [
-                    "packastack", "build", dep_pkg,
-                    "--target", target,
-                    "--ubuntu-series", ubuntu_series,
-                    "--type", build_type.value,
-                ]
-                if cloud_archive:
-                    cmd.extend(["--cloud-archive", cloud_archive])
-                if force:
-                    cmd.append("--force")
-                if offline:
-                    cmd.append("--offline")
-                if not binary:
-                    cmd.append("--no-binary")
-                # Continue building deps of deps
-                cmd.append("--build-deps")
-                # Don't ask for confirmations
-                cmd.append("--yes")
-            
-                activity("auto-build", f"Running: {' '.join(cmd)}")
-            
-                try:
-                    result = subprocess.run(
-                        cmd,
-                        env=child_env,
-                        cwd=str(paths["local_apt_repo"]),
-                        capture_output=False,  # Stream output to console
-                    )
-                
-                    if result.returncode != 0:
-                        activity("auto-build", f"Dependency build failed: {dep_pkg} (exit code: {result.returncode})")
-                        run.log_event({
-                            "event": "auto-build.failed",
-                            "package": dep_pkg,
-                            "exit_code": result.returncode,
-                        })
-                        run.write_summary(
-                            status="failed",
-                            error=f"Dependency build failed: {dep_pkg}",
-                            exit_code=result.returncode,
-                        )
-                        return result.returncode
-                
-                    activity("auto-build", f"Successfully built dependency: {dep_pkg}")
-                    run.log_event({
-                        "event": "auto-build.success",
-                        "package": dep_pkg,
-                    })
-                
-                except FileNotFoundError:
-                    activity("auto-build", "Error: packastack command not found")
-                    run.write_summary(
-                        status="failed",
-                        error="packastack command not found for auto-build",
-                        exit_code=EXIT_TOOL_MISSING,
-                    )
-                    return EXIT_TOOL_MISSING
-        
-            activity("auto-build", f"All {len(new_deps_to_build)} dependencies built successfully")
-            run.log_event({
-                "event": "auto-build.complete",
-                "count": len(new_deps_to_build),
-            })
-        
-            # Refresh local package index after building dependencies
-            activity("auto-build", "Refreshing local package index")
-            local_index = load_package_index(local_repo)
-            if local_index:
-                run.log_event({"event": "auto-build.index_refreshed"})
-
-        # Determine version
-        current_version = get_current_version(debian_dir / "changelog")
-        if current_version:
-            parsed = parse_version(current_version)
-            activity("prepare", f"Current version: {current_version}")
-        else:
-            parsed = None
-
-        if build_type == BuildType.RELEASE and upstream:
-            new_version = generate_release_version(
-                upstream.version, epoch=parsed.epoch if parsed else 0
-            )
-        elif build_type == BuildType.MILESTONE and upstream:
-            new_version = generate_milestone_version(
-                upstream.version, milestone_str, epoch=parsed.epoch if parsed else 0
-            )
-        elif build_type == BuildType.SNAPSHOT:
-            # Use the version computed by acquire_upstream_snapshot using git describe
-            # This accurately reflects the upstream state (tag + commits)
-            if snapshot_result and snapshot_result.upstream_version:
-                upstream_ver = snapshot_result.upstream_version
-            else:
-                # Fallback for forced builds or errors
-                if parsed:
-                    next_upstream = increment_upstream_version(parsed.upstream)
-                else:
-                    next_upstream = "0.0.0"
-                upstream_ver = f"{next_upstream}~git{git_date}.{git_sha[:7]}"
-
-            # Apply epoch and debian revision
-            epoch = parsed.epoch if parsed else 0
-            if epoch:
-                new_version = f"{epoch}:{upstream_ver}-0ubuntu1"
-            else:
-                new_version = f"{upstream_ver}-0ubuntu1"
-        else:
-            new_version = current_version or "0.0.0-0ubuntu1"
-
-        activity("prepare", f"New version: {new_version}")
-        run.log_event({"event": "prepare.version", "current": current_version, "new": new_version})
-
-        # Update changelog
-        changes = generate_changelog_message(
-            build_type.value,
-            upstream.version if upstream else "",
-            git_sha,
-            signature_verified,
-            signature_warning,
-        )
-        if update_changelog(
-            debian_dir / "changelog",
-            pkg_name,
-            new_version,
-            resolved_ubuntu,
-            changes,
-            prefer_gbp=use_gbp_dch,
-        ):
-            activity("prepare", "Updated debian/changelog")
-        else:
-            activity("prepare", "Warning: failed to update changelog")
-
-        # Update debian/gbp.conf to match launchpad.yaml branch
-        gbp_success, gbp_updated, gbp_error = update_gbp_conf_from_launchpad_yaml(pkg_repo)
-        if gbp_success and gbp_updated:
-            activity("prepare", "Updated debian/gbp.conf")
-            for update in gbp_updated:
-                activity("prepare", f"  {update}")
-        elif gbp_error and "No launchpad.yaml" not in gbp_error:
-            activity("prepare", f"Warning: gbp.conf update issue: {gbp_error}")
-
-        # Apply man pages support if upstream has Sphinx man_pages configured
-        man_result = apply_man_pages_support(pkg_repo)
-        if man_result.applied:
-            activity("prepare", "Applied man pages support from upstream Sphinx docs")
-            if man_result.control_modified:
-                activity("prepare", "  - Added python3-sphinx to Build-Depends")
-            if man_result.rules_modified:
-                activity("prepare", "  - Updated debian/rules to build man pages")
-            if man_result.manpages_created:
-                activity("prepare", "  - Created .manpages file for installation")
-            run.log_event({
-                "event": "prepare.manpages",
-                "control_modified": man_result.control_modified,
-                "rules_modified": man_result.rules_modified,
-                "manpages_created": man_result.manpages_created,
-            })
-
-        # Apply lintian fixes
-        # Fix deprecated Priority: extra -> optional
-        if fix_priority_extra(debian_dir / "control"):
-            activity("prepare", "Fixed deprecated Priority: extra -> optional")
-            run.log_event({"event": "prepare.fix_priority_extra"})
-
-        # Add doctree cleanup to prevent package-contains-python-doctree-file
-        if add_doctree_cleanup(pkg_repo / "debian" / "rules"):
-            activity("prepare", "Added .doctrees cleanup to debian/rules")
-            run.log_event({"event": "prepare.doctree_cleanup"})
-
-        # Ensure PGP verification in watch file is valid (remove if no key exists)
-        pgp_modified, pgp_msg = ensure_pgp_verification_valid(debian_dir)
-        if pgp_modified:
-            activity("prepare", pgp_msg)
-            run.log_event({"event": "prepare.pgp_watch_fix", "message": pgp_msg})
-
-        # Ensure packages with systemd units have proper Pre-Depends
-        if ensure_misc_pre_depends(debian_dir / "control"):
-            activity("prepare", "Added ${misc:Pre-Depends} for init-system-helpers")
-            run.log_event({"event": "prepare.misc_pre_depends"})
-
-        # Commit changes to ensure clean working directory for gbp pq
-        # gbp pq requires a clean git tree to operate
-        # Include changelog entries in commit message so gbp dch attributes them correctly
-        activity("prepare", "Committing packaging changes")
-        run_command(["git", "add", "."], cwd=pkg_repo)
-        
-        # Build commit message with changelog entries for gbp dch to extract
-        commit_message_lines = [f"Prepare {pkg_name} {new_version}", ""]
-        commit_message_lines.extend(changes)
-        commit_message = "\n".join(commit_message_lines)
-        
-        commit_cmd = _maybe_disable_gpg_sign(["git", "commit", "-m", commit_message])
-        git_env = _get_git_author_env()
-        activity("prepare", f"Git author env for Prepare commit: {git_env}")
-        run_command(commit_cmd, cwd=pkg_repo, env=git_env)
-
-        # =========================================================================
-        # PHASE: import-orig
-        # =========================================================================
-        # Import the upstream tarball so it's available in pristine-tar branch
-        if upstream_tarball and upstream_tarball.exists():
-            activity("import-orig", f"Importing upstream tarball: {upstream_tarball.name}")
-
-            # Ensure the upstream branch for this series exists
-            upstream_branch_name = f"upstream-{openstack_target}"
-
-            branch_result = ensure_upstream_branch(pkg_repo, openstack_target, prev_series)
-            if branch_result.success:
-                if branch_result.created:
-                    activity("import-orig", f"Created upstream branch: {upstream_branch_name}")
-                    if prev_series:
-                        activity("import-orig", f"  (branched from upstream-{prev_series})")
-                else:
-                    activity("import-orig", f"Using upstream branch: {upstream_branch_name}")
-                run.log_event({
-                    "event": "import-orig.branch",
-                    "branch": upstream_branch_name,
-                    "created": branch_result.created,
-                })
-            else:
-                activity("import-orig", f"Failed to ensure upstream branch: {branch_result.error}")
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error=branch_result.error,
-                        exit_code=EXIT_FETCH_FAILED,
-                    )
-                    return EXIT_FETCH_FAILED
-                run.log_event({
-                    "event": "import-orig.branch_failed",
-                    "error": branch_result.error,
-                })
-
-            # Extract the upstream version for import-orig
-            # For snapshots, use the version from git describe
-            # For releases, use the upstream version
-            if build_type == BuildType.SNAPSHOT and snapshot_result:
-                import_version = snapshot_result.upstream_version
-            elif upstream:
-                import_version = upstream.version
-            else:
-                import_version = None
-
-            import_result = import_orig(
-                pkg_repo,
-                upstream_tarball,
-                upstream_version=import_version,
-                upstream_branch=upstream_branch_name,
-                pristine_tar=True,
-                merge=True,
-            )
-
-            if import_result.success:
-                activity("import-orig", "Upstream tarball imported successfully")
-                run.log_event({
-                    "event": "import-orig.complete",
-                    "tarball": str(upstream_tarball),
-                    "version": import_result.upstream_version,
-                })
-            else:
-                activity("import-orig", f"Import failed: {import_result.output}")
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error="Failed to import upstream tarball",
-                        exit_code=EXIT_FETCH_FAILED,
-                    )
-                    return EXIT_FETCH_FAILED
-                run.log_event({
-                    "event": "import-orig.failed",
-                    "output": import_result.output,
-                })
-        else:
-            activity("import-orig", "No upstream tarball to import")
-
-        # =========================================================================
-        # PHASE: patches
-        # =========================================================================
-        activity("patches", "Applying patches with gbp pq")
-
-        # Check for upstreamed patches first
-        upstreamed = check_upstreamed_patches(pkg_repo)
-        if upstreamed:
-            activity("patches", f"Potentially upstreamed patches: {len(upstreamed)}")
-            for report in upstreamed:
-                activity("patches", f"  {report.patch_name}: {report.suggested_action}")
-            if not force:
-                activity("patches", "Use --force to continue with potentially upstreamed patches")
-                run.write_summary(
-                    status="failed",
-                    error="Patches appear to be upstreamed",
-                    patches=[str(r) for r in upstreamed],
-                    exit_code=EXIT_PATCH_FAILED,
-                )
-                return EXIT_PATCH_FAILED
-            run.log_event({"event": "patches.upstreamed", "patches": [r.patch_name for r in upstreamed]})
-
-        # Import patches
-        pq_result = pq_import(pkg_repo)
-        if pq_result.success:
-            activity("patches", "Patches applied successfully")
-        elif pq_result.needs_refresh:
-            activity("patches", "Patches need refresh - forcing import with time-machine")
-            # Force import with time-machine=0 to accept offset/fuzz
-            force_result = pq_import(pkg_repo, time_machine=0)
-            if force_result.success:
-                activity("patches", "Patches imported with offset/fuzz - exporting refreshed patches")
-                export_result = pq_export(pkg_repo)
-                if export_result.success:
-                    activity("patches", "Patches refreshed successfully")
-                else:
-                    activity("patches", f"Patch export failed: {export_result.output}")
-                    if not force:
-                        run.write_summary(
-                            status="failed",
-                            error="Patch export failed",
-                            exit_code=EXIT_PATCH_FAILED,
-                        )
-                        return EXIT_PATCH_FAILED
-            else:
-                activity("patches", f"Forced import failed: {force_result.output}")
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error="Patch refresh failed",
-                        exit_code=EXIT_PATCH_FAILED,
-                    )
-                    return EXIT_PATCH_FAILED
-        else:
-            activity("patches", f"Patch import failed: {pq_result.output}")
-            # Generate patch health report
-            for report in pq_result.patch_reports:
-                activity("patches", f"  {report}")
-            if not force:
-                run.write_summary(
-                    status="failed",
-                    error="Patch import failed",
-                    patches=[str(r) for r in pq_result.patch_reports],
-                    exit_code=EXIT_PATCH_FAILED,
-                )
-                return EXIT_PATCH_FAILED
-
-        run.log_event({"event": "patches.complete", "success": pq_result.success})
-
-        # Export patches and return to master branch for subsequent steps
-        if (pkg_repo / ".git").exists():
-            branch_rc, branch_out, _ = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=pkg_repo)
-            current_branch = branch_out.strip() if branch_rc == 0 else ""
-            on_patch_queue = current_branch.startswith("patch-queue/")
-
-            if on_patch_queue:
-                export_result = pq_export(pkg_repo)
-                if export_result.success:
-                    activity("patches", "Patches exported (back to debian branch)")
-                else:
-                    activity("patches", f"Patch export failed: {export_result.output}")
-                    if not force:
-                        run.write_summary(
-                            status="failed",
-                            error="Patch export failed",
-                            exit_code=EXIT_PATCH_FAILED,
-                        )
-                        return EXIT_PATCH_FAILED
-            else:
-                activity("patches", f"Skipping patch export: current branch {current_branch or 'unknown'}")
-
-            checkout_rc, checkout_out, checkout_err = run_command(["git", "checkout", "master"], cwd=pkg_repo)
-            if checkout_rc != 0:
-                activity("patches", f"Failed to checkout master after export: {checkout_err or checkout_out}")
-                if not force:
-                    run.write_summary(
-                        status="failed",
-                        error="Failed to checkout master after patch export",
-                        exit_code=EXIT_PATCH_FAILED,
-                    )
-                    return EXIT_PATCH_FAILED
-            else:
-                activity("patches", "Checked out master after patch export")
-                activity("patches", "Committing refreshed patches on master")
-                run_command(["git", "add", "debian/patches"], cwd=pkg_repo)
-                commit_cmd = _maybe_disable_gpg_sign(["git", "commit", "-m", "Refresh patches"])
-                commit_rc, commit_out, commit_err = run_command(commit_cmd, cwd=pkg_repo, env=_get_git_author_env())
-                if commit_rc == 0:
-                    activity("patches", "Recorded refreshed patches commit")
-                else:
-                    activity(
-                        "patches",
-                        f"Patch commit skipped: {commit_err or commit_out or 'no changes to commit'}",
-                    )
-        else:
-            activity("patches", "Skipping patch export/checkout (not a git repo)")
-
-        # =========================================================================
-        # PHASE: build
-        # =========================================================================
-        activity("build", "Building source package")
-
-        # Use a dedicated build output directory to avoid conflicts with git repo
-        # (gbp --git-export-dir creates a subdir with package name, which would
-        # conflict if output_dir already contains the packaging repo)
-        build_output = workspace / "build-output"
-        build_output.mkdir(parents=True, exist_ok=True)
-
-        # Disable pristine-tar for snapshot builds (tarball not in pristine-tar branch)
-        use_pristine_tar = build_type != BuildType.SNAPSHOT
-        build_result = build_source(pkg_repo, build_output, pristine_tar=use_pristine_tar)
-        if build_result.success:
-            activity("build", "Source package built successfully")
-            for artifact in build_result.artifacts:
-                activity("build", f"  {artifact.name}")
-            run.log_event({
-                "event": "build.source_complete",
-                "artifacts": [str(a) for a in build_result.artifacts],
-            })
-        else:
-            activity("build", f"Source build failed: {build_result.output}")
-            run.write_summary(status="failed", error="Source build failed", exit_code=EXIT_BUILD_FAILED)
-            return EXIT_BUILD_FAILED
-
-        # Optional binary build
-        if binary and build_result.dsc_file:
-            # Determine which builder to use
-            use_builder = Builder.SBUILD if builder == "sbuild" else Builder.DPKG
-
-            if use_builder == Builder.SBUILD:
-                # Check sbuild availability
-                if not is_sbuild_available():
-                    activity("build", "sbuild not available, falling back to dpkg-buildpackage")
-                    use_builder = Builder.DPKG
-                else:
-                    # Ensure local repo has indexes before sbuild (may be empty but needs structure)
-                    # Skip regeneration if caller (e.g., build-all coordinator) manages indexes
-                    if not skip_repo_regen:
-                        _refresh_local_repo_indexes(local_repo, get_host_arch(), run, phase="build")
-                    
-                    # Use sbuild wrapper with local repo support and log capture
-                    sbuild_config = SbuildConfig(
-                        dsc_path=build_result.dsc_file,
-                        output_dir=build_output,
-                        distribution=resolved_ubuntu,
-                        arch=get_host_arch(),
-                        local_repo_root=local_repo,
-                        chroot_name=schroot_name,
-                        run_log_dir=run.logs_path,
-                        source_package=package,
-                        version=str(parse_version(get_current_version(pkg_repo / "debian" / "changelog"))) if pkg_repo else None,
-                        # Suppress lintian error for maintainer mismatch (local user vs Ubuntu Developers)
-                        lintian_suppress_tags=["inconsistent-maintainer"],
-                    )
-                
-                    # Pre-build diagnostic message
-                    activity("build", f"Running sbuild (binary): {build_result.dsc_file.name}")
-                    activity("build", f"sbuild logs will be captured to: {run.logs_path}/sbuild.*.log")
-                
-                    with activity_spinner(
-                        "sbuild",
-                        f"Building {build_result.dsc_file.name} ({resolved_ubuntu}/{get_host_arch()})",
-                        disable=no_spinner,
-                    ):
-                        sbuild_result = run_sbuild(sbuild_config)
-                
-                    # Post-build diagnostic messages
-                    activity("build", f"sbuild exited: {sbuild_result.exit_code}")
-                
-                    # Log sbuild command and result to events.jsonl
-                    run.log_event({
-                        "event": "build.sbuild_command",
-                        "command": sbuild_result.command,
-                        "exit_code": sbuild_result.exit_code,
-                        "stdout_path": str(sbuild_result.stdout_log_path) if sbuild_result.stdout_log_path else None,
-                        "stderr_path": str(sbuild_result.stderr_log_path) if sbuild_result.stderr_log_path else None,
-                    })
-                
-                    if sbuild_result.searched_dirs:
-                        top_dirs = sbuild_result.searched_dirs[:3]
-                        activity("build", f"artifact search paths (top 3): {', '.join(top_dirs)}")
-                
-                    if sbuild_result.success:
-                        # Count collected artifacts
-                        deb_count = sum(1 for a in sbuild_result.collected_artifacts if a.source_path.suffix in {".deb", ".udeb"})
-                        changes_count = sum(1 for a in sbuild_result.collected_artifacts if a.source_path.suffix == ".changes")
-                        buildinfo_count = sum(1 for a in sbuild_result.collected_artifacts if a.source_path.suffix == ".buildinfo")
-                    
-                        activity("build", f"collected binaries: {deb_count} debs, changes: {changes_count}, buildinfo: {buildinfo_count}")
-                        activity("build", f"sbuild logs copied: {len(sbuild_result.collected_logs)}" + 
-                                 (f" (primary: {sbuild_result.primary_log_path})" if sbuild_result.primary_log_path else ""))
-                    
-                        activity("build", "Binary package built successfully (sbuild)")
-                        for artifact in sbuild_result.artifacts:
-                            activity("build", f"  {artifact.name}")
-                        run.log_event({
-                            "event": "build.binary_complete",
-                            "builder": "sbuild",
-                            "artifacts": [str(a) for a in sbuild_result.artifacts],
-                            "deb_count": deb_count,
-                            "report_path": str(sbuild_result.report_path) if sbuild_result.report_path else None,
-                        })
-                        # Merge sbuild artifacts into build result for publishing
-                        build_result.artifacts.extend(sbuild_result.artifacts)
-                    else:
-                        # Binary build failed - show diagnostic info
-                        activity("build", "ERROR: no binaries found; check:")
-                        if sbuild_result.stdout_log_path:
-                            activity("build", f"  stdout: {sbuild_result.stdout_log_path}")
-                        if sbuild_result.stderr_log_path:
-                            activity("build", f"  stderr: {sbuild_result.stderr_log_path}")
-                        if sbuild_result.primary_log_path:
-                            activity("build", f"  primary log: {sbuild_result.primary_log_path}")
-                        else:
-                            activity("build", "  primary log: not found")
-                    
-                        activity("build", f"Binary build failed: {sbuild_result.validation_message}")
-                        run.log_event({
-                            "event": "build.binary_failed",
-                            "builder": "sbuild",
-                            "exit_code": sbuild_result.exit_code,
-                            "validation_message": sbuild_result.validation_message,
-                            "searched_dirs": sbuild_result.searched_dirs,
-                            "output": sbuild_result.output[:2000] if sbuild_result.output else "",
-                        })
-                    
-                        # Binary build failure with sbuild is now fatal if no debs found
-                        run.write_summary(
-                            status="failed",
-                            error=f"Binary build failed: {sbuild_result.validation_message}",
-                            exit_code=EXIT_BUILD_FAILED,
-                        )
-                        return EXIT_BUILD_FAILED
-
-            if use_builder == Builder.DPKG:
-                activity("build", "Building binary package with dpkg-buildpackage")
-                binary_result = build_binary(build_result.dsc_file, build_output, resolved_ubuntu)
-                if binary_result.success:
-                    activity("build", "Binary package built successfully (dpkg)")
-                    for artifact in binary_result.artifacts:
-                        activity("build", f"  {artifact.name}")
-                    run.log_event({
-                        "event": "build.binary_complete",
-                        "builder": "dpkg",
-                        "artifacts": [str(a) for a in binary_result.artifacts],
-                    })
-                else:
-                    activity("build", f"Binary build failed: {binary_result.output}")
-                    # Binary build failure is not fatal
-                    run.log_event({"event": "build.binary_failed", "builder": "dpkg", "output": binary_result.output})
-
-        # =========================================================================
-        # PHASE: verify
-        # =========================================================================
-        activity("verify", "Verifying build artifacts")
-
-        if build_result.dsc_file and build_result.dsc_file.exists():
-            activity("verify", f"Source: {build_result.dsc_file.name}")
-        if build_result.changes_file and build_result.changes_file.exists():
-            activity("verify", f"Changes: {build_result.changes_file.name}")
-
-        host_arch = get_host_arch()
-
-        # Publish artifacts to local APT repository
-        if build_result.artifacts:
-            activity("verify", "Publishing artifacts to local APT repository")
-        
-            # Show artifact paths before publishing (no debug suffix)
-            for art in build_result.artifacts:
-                activity("verify", f"  artifact to publish: {art}")
-        
-            # Count binary artifacts for verification
-            deb_artifacts = [a for a in build_result.artifacts if a.suffix in {".deb", ".udeb", ".ddeb"}]
-        
-            publish_result = localrepo.publish_artifacts(
-                artifact_paths=build_result.artifacts,
-                repo_root=local_repo,
-                arch=host_arch,
-            )
-        
-            if publish_result.success:
-                # Count published debs
-                published_debs = [p for p in publish_result.published_paths if p.suffix in {".deb", ".udeb", ".ddeb"}]
-                activity("verify", f"Published binaries: {len(published_debs)} debs")
-                activity("verify", f"Published {len(publish_result.published_paths)} files to local repo")
-                run.log_event({
-                    "event": "verify.publish",
-                    "published": [str(p) for p in publish_result.published_paths],
-                    "deb_count": len(published_debs),
-                })
-
-                # Skip index regeneration if coordinator handles it (e.g., build-all mode)
-                if not skip_repo_regen:
-                    binary_index_result, _ = _refresh_local_repo_indexes(local_repo, host_arch, run)
-
-                    # Verify that published debs are reflected in index
-                    if (
-                        binary_index_result.success
-                        and len(published_debs) > 0
-                        and binary_index_result.package_count == 0
-                    ):
-                        activity("verify", "WARNING: Published debs but Packages index is empty!")
-                        run.log_event({
-                            "event": "verify.index_mismatch",
-                            "published_debs": len(published_debs),
-                            "index_packages": binary_index_result.package_count,
-                        })
-            else:
-                activity("verify", f"Warning: Failed to publish artifacts: {publish_result.error}")
-                run.log_event({"event": "verify.publish_failed", "error": publish_result.error})
-                if not skip_repo_regen:
-                    _refresh_local_repo_indexes(local_repo, host_arch, run)
-
-        else:
-            activity("verify", "No build artifacts to publish; ensuring local repo metadata exists")
-            if not skip_repo_regen:
-                _refresh_local_repo_indexes(local_repo, host_arch, run)
-
-        activity("verify", "Verification complete")
-
-        # =========================================================================
-        # PHASE: provenance
-        # =========================================================================
-        # Update provenance with final details and write to disk
-        provenance.verification.result = "verified" if signature_verified else "skipped"
-        if signature_warning:
-            provenance.verification.result = "not_applicable"
-
-        # Write provenance file
-        try:
-            provenance_path = write_provenance(provenance, run.run_path)
-            activity("provenance", f"Written to: {provenance_path}")
-            run.log_event({
-                "event": "provenance.written",
-                "path": str(provenance_path),
-            })
-        except Exception as e:
-            activity("provenance", f"Warning: Failed to write provenance: {e}")
-            run.log_event({"event": "provenance.write_failed", "error": str(e)})
-
-        # =========================================================================
-        # PHASE: report
-        # =========================================================================
-        activity("report", "Build Summary")
-        activity("report", f"  Package: {pkg_name}")
-        activity("report", f"  Version: {new_version}")
-        activity("report", f"  Build type: {build_type.value}")
-        activity("report", f"  Upstream resolution: {resolution_source.value}")
-        activity("report", f"  Workspace: {workspace}")
-
-        if upload and build_result.changes_file:
-            activity("report", "Upload commands:")
-            activity("report", f"  dput ppa:ubuntu-openstack-dev/proposed {build_result.changes_file}")
-
+        # Write final summary
         run.write_summary(
             status="success",
-            package=pkg_name,
-            version=new_version,
-            build_type=build_type.value,
-            build_order=build_order,
-            upload_order=upload_order,
-            signature_verified=signature_verified,
-            artifacts=[str(a) for a in build_result.artifacts],
-            provenance=summarize_provenance(provenance),
+            package=ctx.pkg_name,
+            version=outcome.new_version,
+            build_type=outcome.build_type,
+            build_order=plan_result.build_order,
+            upload_order=plan_result.upload_order,
+            signature_verified=outcome.signature_verified,
+            artifacts=[str(a) for a in outcome.artifacts],
+            provenance=summarize_provenance(ctx.provenance) if ctx.provenance else None,
             exit_code=EXIT_SUCCESS,
         )
 
@@ -2776,3 +1374,4 @@ def _run_build(
     # All packages built successfully
     activity("build", f"Successfully built all {len(plan_result.build_order)} package(s)")
     return EXIT_SUCCESS
+
