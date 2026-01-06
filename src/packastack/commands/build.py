@@ -124,13 +124,10 @@ from packastack.build.provenance import (
     WatchMismatchProvenance,
 )
 from packastack.upstream.registry import (
-    ProjectNotFoundError,
     ResolutionSource,
-    UpstreamsRegistry,
 )
 from packastack.upstream.retirement import (
     RetirementChecker,
-    RetirementStatus,
 )
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.debpkg.watch import (
@@ -159,6 +156,9 @@ from packastack.build import (
     _download_pypi_tarball,
     _fetch_release_tarball,
     _run_uscan,
+    # Phase functions
+    check_retirement_status,
+    resolve_upstream_registry,
     # Exit codes
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
@@ -1859,55 +1859,19 @@ def _run_build(
         # =========================================================================
         # PHASE: retirement check
         # =========================================================================
-        # Check if the package's upstream project is retired
-        if not include_retired:
-            project_config_path = paths.get("openstack_project_config")
-        
-            # Clone project-config if missing and not in offline mode
-            if project_config_path and not project_config_path.exists() and not offline:
-                with activity_spinner("retire", "Cloning openstack/project-config repository"):
-                    _clone_or_update_project_config(project_config_path, run)
-        
-            if project_config_path and project_config_path.exists():
-                retirement_checker = RetirementChecker(
-                    project_config_path=project_config_path,
-                    releases_path=releases_repo,
-                    target_series=openstack_target,
-                )
-                # Infer deliverable name from package for retirement lookup
-                deliverable_for_retire = package
-                if pkg_name.startswith("python-"):
-                    deliverable_for_retire = pkg_name[7:]
-
-                retirement_info = retirement_checker.check_retirement(pkg_name, deliverable_for_retire)
-                if retirement_info.status == RetirementStatus.RETIRED:
-                    activity("policy", f"Package {pkg_name} is RETIRED upstream; skipping build")
-                    activity("policy", f"  Upstream project: {retirement_info.upstream_project or 'unknown'}")
-                    activity("policy", f"  Source: {retirement_info.source}")
-                    if retirement_info.description:
-                        activity("policy", f"  Reason: {retirement_info.description}")
-                    activity("policy", "Use --include-retired to override")
-                    run.log_event({
-                        "event": "policy.retired_project",
-                        "package": pkg_name,
-                        "upstream_project": retirement_info.upstream_project,
-                        "source": retirement_info.source,
-                        "description": retirement_info.description,
-                    })
-                    run.write_summary(
-                        status="skipped",
-                        error=f"Package {pkg_name} upstream is retired",
-                        exit_code=EXIT_RETIRED_PROJECT,
-                    )
-                    return EXIT_RETIRED_PROJECT
-                elif retirement_info.status == RetirementStatus.POSSIBLY_RETIRED:
-                    activity("policy", f"Warning: {pkg_name} may be retired upstream (not released in 3+ cycles)")
-                    activity("policy", f"  Source: {retirement_info.source}")
-                    run.log_event({
-                        "event": "policy.possibly_retired",
-                        "package": pkg_name,
-                        "source": retirement_info.source,
-                    })
+        project_config_path = paths.get("openstack_project_config")
+        retirement_result, retirement_info = check_retirement_status(
+            pkg_name=pkg_name,
+            package=package,
+            project_config_path=project_config_path,
+            releases_repo=releases_repo,
+            openstack_target=openstack_target,
+            include_retired=include_retired,
+            offline=offline,
+            run=run,
+        )
+        if not retirement_result.success:
+            return retirement_result.exit_code
 
         # Build type already resolved before planning (see earlier in function)
         # Just convert string back to enum and handle milestone
@@ -1926,66 +1890,21 @@ def _run_build(
         # =========================================================================
         # PHASE: registry
         # =========================================================================
-        # Load upstreams registry and resolve upstream configuration
-        activity("resolve", "Loading upstreams registry")
-
-        try:
-            registry = UpstreamsRegistry()
-            run.log_event({
-                "event": "registry.loaded",
-                "version": registry.version,
-                "override_applied": registry.override_applied,
-                "override_path": registry.override_path,
-            })
-            if registry.override_applied:
-                activity("resolve", f"Registry override applied: {registry.override_path}")
-            for warning in registry.warnings:
-                activity("resolve", f"Registry warning: {warning}")
-        except Exception as e:
-            activity("resolve", f"Registry error: {e}")
-            run.write_summary(status="failed", error=f"Registry error: {e}", exit_code=EXIT_REGISTRY_ERROR)
-            return EXIT_REGISTRY_ERROR
-
-        # Check if project is OpenStack-governed (in openstack/releases)
-        openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
-        # Note: openstack_pkgs maps source_pkg_name -> project_name
-        # We need to check if the package or project is in there
-        is_openstack_governed = (
-            pkg_name in openstack_pkgs
-            or package in openstack_pkgs.values()
-            or package in openstack_pkgs
+        registry_result, registry_info = resolve_upstream_registry(
+            package=package,
+            pkg_name=pkg_name,
+            releases_repo=releases_repo,
+            openstack_target=openstack_target,
+            run=run,
         )
+        if not registry_result.success:
+            return registry_result.exit_code
 
-        # Resolve upstream configuration from registry
-        try:
-            resolved_upstream = registry.resolve(package, openstack_governed=is_openstack_governed)
-            upstream_config = resolved_upstream.config
-            resolution_source = resolved_upstream.resolution_source
-
-            activity("resolve", f"Upstream resolution: {resolution_source.value}")
-            run.log_event({
-                "event": "registry.resolved",
-                "project": package,
-                "project_key": resolved_upstream.project,
-                "resolution_source": resolution_source.value,
-                "upstream_host": upstream_config.upstream.host,
-                "upstream_url": upstream_config.upstream.url,
-            })
-
-            # Log tarball and verification config
-            tarball_methods = [m.value for m in upstream_config.tarball.prefer]
-            activity("policy", f"Tarball prefer: {', '.join(tarball_methods)}")
-            activity("policy", f"Signature mode: {upstream_config.signatures.mode.value}")
-            run.log_event({
-                "event": "policy.tarball_verification",
-                "tarball_prefer": tarball_methods,
-                "signature_mode": upstream_config.signatures.mode.value,
-            })
-
-        except ProjectNotFoundError as e:
-            activity("resolve", f"Registry error: {e}")
-            run.write_summary(status="failed", error=str(e), exit_code=EXIT_REGISTRY_ERROR)
-            return EXIT_REGISTRY_ERROR
+        # Extract values from registry resolution result
+        registry = registry_info.registry
+        resolved_upstream = registry_info.resolved
+        upstream_config = resolved_upstream.config
+        resolution_source = resolved_upstream.resolution_source
 
         # Initialize provenance record
         provenance = create_provenance(pkg_name, run.run_id)

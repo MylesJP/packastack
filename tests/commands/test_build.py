@@ -390,7 +390,7 @@ class TestRunBuildPhases:
             patch.object(build, "load_config", return_value={"defaults": {}}),
             patch.object(build, "resolve_paths", return_value=mock_paths),
             patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)),
-            patch.object(build, "UpstreamsRegistry", return_value=mock_registry),
+            patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
             patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}),
             patch.object(build, "check_required_tools", return_value=mock_tool_result),
             patch.object(build, "get_missing_tools_message", return_value="Missing: gbp"),
@@ -433,7 +433,7 @@ class TestRunBuildPhases:
             patch.object(build, "load_config", return_value={"defaults": {}}),
             patch.object(build, "resolve_paths", return_value=mock_paths),
             patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)),
-            patch.object(build, "UpstreamsRegistry", return_value=mock_registry),
+            patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
             patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}),
             patch.object(build, "is_snapshot_eligible", return_value=(False, "Release exists", "1.0.0")),
         ):
@@ -486,7 +486,7 @@ class TestRunBuildPhases:
             # Mock auto type resolution to return RELEASE
             patch.object(build, "_resolve_build_type_auto", return_value=(BuildType.RELEASE, "", "release_available")),
             patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)),
-            patch.object(build, "UpstreamsRegistry", return_value=mock_registry),
+            patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
         ):
             result = _call_run_build(
                 run=mock_run,
@@ -533,7 +533,7 @@ class TestRunBuildPhases:
             patch.object(build, "resolve_series", return_value="noble"),
             patch.object(build, "get_current_development_series", return_value="caracal"),
             patch.object(build, "get_previous_series", return_value="bobcat"),
-            patch.object(build, "UpstreamsRegistry", return_value=mock_registry),
+            patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry),
             patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}),
             patch.object(build, "is_snapshot_eligible", return_value=(False, "Release exists", "1.0.0")),
             patch.object(build, "load_package_index", return_value=mock_index),
@@ -672,7 +672,7 @@ class TestFetchPhase:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -737,7 +737,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -819,7 +819,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -911,7 +911,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -1004,7 +1004,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -1080,7 +1080,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
@@ -1171,7 +1171,7 @@ class TestReleaseTarballFetch:
             stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
             stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
             stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch.object(build, "UpstreamsRegistry", return_value=mock_registry))
+            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
             stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
             stack.enter_context(patch.object(build.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
