@@ -6,9 +6,9 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 
 | Metric | Before | Current | Change |
 |--------|--------|---------|--------|
-| build.py lines | 3,873 | 2,766 | -1,107 (-29%) |
-| packastack.build/ lines | 0 | ~6,450 | New package |
-| tests passing | 269 | 1,432 | ✓ |
+| build.py lines | 3,873 | 2,778 | -1,095 (-28%) |
+| packastack.build/ lines | 0 | ~6,945 | New package |
+| tests passing | 269 | 1,461 | ✓ |
 
 ### Extracted Modules in `packastack.build/`:
 
@@ -18,29 +18,38 @@ This document captures the refactoring plan for `src/packastack/commands/build.p
 | `errors.py` | 143 | Exit codes + phase_error/phase_warning helpers |
 | `git_helpers.py` | 226 | 5 git helper functions |
 | `tarball.py` | 446 | 4 tarball acquisition functions |
-| `phases.py` | 655 | 6 phase functions (retirement, registry, policy, indexes, tools, schroot) |
+| `phases.py` | 656 | 6 phase functions (retirement, registry, policy, indexes, tools, schroot) |
 | `all_reports.py` | 245 | Build-all report generation (JSON + Markdown) |
 | `type_resolution.py` | 145 | CLI build type parsing and auto-resolution |
 | `all_helpers.py` | ~300 | Build-all helpers (graph, versions, retire filter, batches, run_single_build) |
-| `single_build.py` | 1,471 | **NEW** Single package build phase functions |
+| `single_build.py` | 1,919 | Single package build phases + orchestrator |
 
-### Phase Functions in `single_build.py` (NEW):
+### Orchestration Functions in `single_build.py`:
+
+**NEW: Setup and Orchestration**
+- `SetupInputs` - Dataclass for pre-build phase inputs
+- `setup_build_context()` - Runs phases 1-6 (retirement through schroot), returns `SingleBuildContext`
+- `SingleBuildOutcome` - Complete result of building a single package
+- `build_single_package()` - Orchestrator that calls all phase functions in sequence
+
+**Phase Functions:**
 - `SingleBuildContext` - Collects all resolved values for phase execution
 - `PhaseResult` - Standard result type for phases
-- `fetch_packaging_repo()` → FetchResult - Clone packaging repo, protect files, update watch
-- `prepare_upstream_source()` → PrepareResult - Fetch/generate upstream tarball
-- `validate_and_build_deps()` → ValidateDepsResult - Validate deps, auto-build missing
+- `FetchResult`, `PrepareResult`, `ValidateDepsResult`, `BuildResult` - Phase-specific results
+- `fetch_packaging_repo()` → (PhaseResult, FetchResult) - Clone packaging repo, protect files, update watch
+- `prepare_upstream_source()` → (PhaseResult, PrepareResult) - Fetch/generate upstream tarball
+- `validate_and_build_deps()` → (PhaseResult, ValidateDepsResult) - Validate deps, auto-build missing
 - `import_and_patch()` → PhaseResult - Import tarball, apply patches with gbp pq
-- `build_packages()` → BuildResult - Build source and optionally binary packages
+- `build_packages()` → (PhaseResult, BuildResult) - Build source and optionally binary packages
 - `verify_and_publish()` → PhaseResult - Publish to local APT repo
 
 ### Phase Functions in `phases.py`:
-- `check_retirement_status()` → RetirementCheckResult
-- `resolve_upstream_registry()` → RegistryResolutionResult
-- `check_policy()` → PolicyCheckResult
-- `load_package_indexes()` → PackageIndexes
-- `check_tools()` → ToolCheckResult
-- `ensure_schroot_ready()` → SchrootSetupResult
+- `check_retirement_status()` → (PhaseResult, RetirementCheckResult)
+- `resolve_upstream_registry()` → (PhaseResult, RegistryResolutionResult)
+- `check_policy()` → (PhaseResult, PolicyCheckResult)
+- `load_package_indexes()` → (PhaseResult, PackageIndexes)
+- `check_tools()` → (PhaseResult, ToolCheckResult)
+- `ensure_schroot_ready()` → (PhaseResult, SchrootSetupResult)
 
 ### Functions in `type_resolution.py`:
 - `VALID_BUILD_TYPES` - constant
@@ -450,16 +459,39 @@ All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - [x] Ensure all event keys preserved
 - [x] Verify tests pass (269 tests)
 
-### Commit 9: Extract executor.py for build-all
-- [ ] Move executor functions
-- [ ] Update `_run_build_all` to use executor
-- [ ] Add tests for retry/resume semantics
-- [ ] Verify tests pass
+### Commit 9: Extract single_build.py for per-package phases (DONE)
+- [x] Create `SingleBuildContext` dataclass
+- [x] Create phase result types (FetchResult, PrepareResult, etc.)
+- [x] Extract `fetch_packaging_repo()` phase function
+- [x] Extract `prepare_upstream_source()` phase function
+- [x] Extract `validate_and_build_deps()` phase function
+- [x] Extract `import_and_patch()` phase function
+- [x] Extract `build_packages()` phase function
+- [x] Extract `verify_and_publish()` phase function
+- [x] Add 12 tests for single_build module
+- [x] Verify tests pass (1,461 tests)
 
-### Commit 10: Cleanup pass
+### Commit 10: Add setup_build_context and orchestrator (DONE)
+- [x] Create `SetupInputs` dataclass for pre-build inputs
+- [x] Create `setup_build_context()` to run phases 1-6
+- [x] Create `SingleBuildOutcome` for orchestrator result
+- [x] Create `build_single_package()` orchestrator
+- [x] Add provenance and report phases to orchestrator
+- [x] Export from `packastack.build/__init__.py`
+- [x] Verify tests pass (1,461 tests)
+
+### Remaining Work: Wire orchestrator into _run_build
+- [ ] Replace per-package loop in `_run_build` with calls to `setup_build_context()` + `build_single_package()`
+- [ ] Handle write_summary after orchestrator returns
+- [ ] Handle upload command display
+- [ ] Verify all 1,461 tests pass
+- [ ] Measure line reduction (target: ~1,000 lines removed from build.py)
+
+### Commit 11: Cleanup pass
 - [ ] Reduce deref churn (consistent aliasing)
 - [ ] Flatten nesting with guard clauses
 - [ ] Collapse repeated guard patterns
+- [ ] Remove dead code after wiring
 - [ ] Final test verification
 
 ---
