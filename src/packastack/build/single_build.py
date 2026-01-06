@@ -1879,6 +1879,42 @@ def build_single_package(
         outcome.error = verify_result_phase.error
         return outcome
 
+    # -------------------------------------------------------------------------
+    # Phase 7: Provenance
+    # -------------------------------------------------------------------------
+    if ctx.provenance:
+        from packastack.build.provenance import write_provenance
+        
+        # Update provenance with final details
+        ctx.provenance.verification.result = (
+            "verified" if prepare_data.signature_verified else "skipped"
+        )
+        if prepare_data.signature_warning:
+            ctx.provenance.verification.result = "not_applicable"
+        
+        # Write provenance file
+        try:
+            provenance_path = write_provenance(ctx.provenance, run.run_path)
+            activity("provenance", f"Written to: {provenance_path}")
+            run.log_event({
+                "event": "provenance.written",
+                "path": str(provenance_path),
+            })
+        except Exception as e:
+            activity("provenance", f"Warning: Failed to write provenance: {e}")
+            run.log_event({"event": "provenance.write_failed", "error": str(e)})
+
+    # -------------------------------------------------------------------------
+    # Phase 8: Report
+    # -------------------------------------------------------------------------
+    activity("report", "Build Summary")
+    activity("report", f"  Package: {ctx.pkg_name}")
+    activity("report", f"  Version: {prepare_data.new_version}")
+    activity("report", f"  Build type: {ctx.build_type.value}")
+    if ctx.resolution_source:
+        activity("report", f"  Upstream resolution: {ctx.resolution_source.value}")
+    activity("report", f"  Workspace: {ctx.workspace}")
+
     # Success!
     outcome.success = True
     outcome.exit_code = EXIT_SUCCESS
