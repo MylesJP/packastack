@@ -179,6 +179,12 @@ from packastack.build import (
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
 )
+from packastack.build.type_resolution import (
+    VALID_BUILD_TYPES,
+    build_type_from_string,
+    resolve_build_type_auto,
+    resolve_build_type_from_cli,
+)
 
 # Build-all imports
 import concurrent.futures
@@ -214,9 +220,6 @@ from packastack.reports.plan_graph import PlanGraph, render_waves
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
 
-
-# Valid build type values for CLI
-VALID_BUILD_TYPES = {"auto", "release", "snapshot", "milestone"}
 
 # Known optional dependencies that can be ignored for cycle breaking.
 OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
@@ -1177,105 +1180,10 @@ def _run_parallel_builds(
 # =============================================================================
 
 
-def _resolve_build_type_from_cli(
-    build_type_str: str,
-    milestone: str,
-) -> tuple[str, str]:
-    """Parse and validate CLI build type options.
-
-    Args:
-        build_type_str: --type value (auto, release, snapshot, milestone)
-        milestone: --milestone value (e.g., "b1", "rc1")
-
-    Returns:
-        Tuple of (build_type_str, milestone_string).
-        For "auto", returns ("auto", "") to indicate auto-selection needed.
-
-    Raises:
-        typer.BadParameter: If invalid build type specified.
-    """
-    # Milestone flag implies milestone type
-    if milestone:
-        return "milestone", milestone
-
-    build_type_str = build_type_str.lower()
-    if build_type_str not in VALID_BUILD_TYPES:
-        raise typer.BadParameter(
-            f"Invalid build type: {build_type_str}. "
-            f"Must be one of: {', '.join(sorted(VALID_BUILD_TYPES))}"
-        )
-
-    return build_type_str, ""
-
-
-def _resolve_build_type_auto(
-    releases_repo: Path | None,
-    series: str,
-    source_package: str,
-    deliverable: str,
-    offline: bool,
-    run: RunContextType,
-) -> tuple[BuildType, str, str]:
-    """Auto-select build type based on openstack/releases data.
-
-    Args:
-        releases_repo: Path to openstack/releases repository.
-        series: OpenStack series name.
-        source_package: Ubuntu source package name.
-        deliverable: OpenStack project/deliverable name.
-        offline: Whether running in offline mode.
-        run: RunContext for logging.
-
-    Returns:
-        Tuple of (BuildType, milestone_string, reason).
-
-    Raises:
-        typer.Exit: If releases repo is missing in offline mode.
-    """
-    # Check releases repo availability
-    if not releases_repo or not releases_repo.exists():
-        if offline:
-            activity("resolve", "ERROR: Auto type selection requires openstack/releases repo")
-            activity("resolve", "In offline mode, the releases repo must be pre-cached")
-            run.log_event({
-                "event": "resolve.auto_type_failed",
-                "reason": "releases_repo_missing_offline",
-            })
-            raise typer.Exit(EXIT_CONFIG_ERROR)
-        else:
-            # Would fetch here in online mode, but for now just use snapshot
-            activity("resolve", "WARNING: openstack/releases repo not found, defaulting to snapshot")
-            return BuildType.SNAPSHOT, "", "releases_repo_unavailable"
-
-    # Get cycle stage
-    cycle_stage = determine_cycle_stage(releases_repo, series)
-
-    # Run auto-selection
-    result = select_build_type(
-        releases_repo=releases_repo,
-        series=series,
-        source_package=source_package,
-        deliverable=deliverable,
-        cycle_stage=cycle_stage,
-    )
-
-    run.log_event({
-        "event": "resolve.auto_type_selected",
-        "chosen_type": result.chosen_type.value,
-        "reason_code": result.reason_code.value,
-        "reason": result.reason_human,
-        "deliverable": deliverable,
-        "cycle_stage": cycle_stage.value,
-    })
-
-    activity("resolve", f"Auto-selected: {result.chosen_type.value} ({result.reason_human})")
-
-    return result.chosen_type, "", result.reason_code.value
-
-
-def _build_type_from_string(build_type_str: str) -> BuildType:
-    """Convert string to BuildType enum."""
-    return BuildType(build_type_str)
+# Build type resolution delegated to packastack.build.type_resolution
+_resolve_build_type_from_cli = resolve_build_type_from_cli
+_resolve_build_type_auto = resolve_build_type_auto
+_build_type_from_string = build_type_from_string
 
 
 
