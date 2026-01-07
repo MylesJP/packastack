@@ -21,7 +21,7 @@ from packastack.core.run import RunContext, activity
 from packastack.debpkg.control import parse_control
 from packastack.planning.dependency_satisfaction import evaluate_dependencies
 from packastack.reports.explain import write_explain_reports
-from packastack.target.distro_info import get_previous_lts
+from packastack.target.distro_info import get_current_lts
 from packastack.target.series import resolve_series
 from packastack.upstream.releases import get_current_development_series, is_snapshot_eligible
 
@@ -62,7 +62,7 @@ def _render_text(report: dict[str, Any]) -> str:
     lines.append(f"          cloud-archive required:    {summary.get('cloud_archive_required_count',0)} deps")
     lines.append(f"          MIR warnings:              {summary.get('mir_warning_count',0)} deps in universe")
 
-    cloud_list = [d for d in report.get("dependencies", {}).get("build", []) if d.get("cloud_archive_required")]
+    cloud_list = report.get("cloud_archive_deps", [])
     if cloud_list:
         lines.append("[explain] Cloud-archive required deps:")
         for dep in cloud_list:
@@ -71,7 +71,7 @@ def _render_text(report: dict[str, Any]) -> str:
                 f"{_format_dependency(dep.get('name',''), dep.get('relation',''), dep.get('version',''))}"
             )
 
-    mir_list = [d for d in report.get("dependencies", {}).get("build", []) if d.get("mir_warning")]
+    mir_list = report.get("mir_warning_deps", [])
     if mir_list:
         lines.append("[explain] MIR warnings (universe):")
         for dep in mir_list:
@@ -95,7 +95,7 @@ def explain(
     include_universe: bool = typer.Option(True, "--include-universe/--no-include-universe", help="Include universe deps (still warn about MIR)"),
     include_retired: bool = typer.Option(False, "--include-retired", help="Include retired upstream projects"),
     offline: bool = typer.Option(False, "-o", "--offline", help="Run in offline mode"),
-    force: bool = typer.Option(False, "-f", "--force", help="Proceed on multiple matches"),
+    force: bool = typer.Option(False, "-F", "--force", help="Proceed on multiple matches"),
 ) -> None:
     """Explain target resolution, build type, and dependency satisfaction."""
 
@@ -114,11 +114,11 @@ def explain(
         activity("resolve", f"Ubuntu series: {resolved_ubuntu}")
         run.log_event({"event": "series.ubuntu_resolved", "series": resolved_ubuntu})
 
-        prev_lts = get_previous_lts()
-        prev_lts_codename = prev_lts.codename if prev_lts else ""
-        if prev_lts_codename:
-            activity("resolve", f"Previous series: {prev_lts_codename}")
-        run.log_event({"event": "series.prev_lts", "series": prev_lts_codename})
+        current_lts = get_current_lts()
+        current_lts_series = current_lts.series if current_lts else ""
+        if current_lts_series:
+            activity("resolve", f"Previous LTS series: {current_lts_series}")
+        run.log_event({"event": "series.prev_lts", "series": current_lts_series})
 
         releases_repo = paths["openstack_releases_repo"]
         if target == "devel":
@@ -126,6 +126,10 @@ def explain(
         else:
             openstack_target = target
         activity("resolve", f"OpenStack target: {openstack_target}")
+        cloud_archive = None
+        if current_lts_series and openstack_target:
+            cloud_archive = f"{current_lts_series}-{openstack_target}"
+            activity("resolve", f"Cloud Archive: {cloud_archive}")
         run.log_event({"event": "series.openstack_resolved", "target": openstack_target})
 
         local_repo = paths["local_apt_repo"]
@@ -161,8 +165,8 @@ def explain(
         activity("plan", "Loading package indexes")
         dev_index = load_package_index(ubuntu_cache, resolved_ubuntu, pockets, components)
         prev_index = None
-        if prev_lts_codename:
-            prev_index = load_package_index(ubuntu_cache, prev_lts_codename, pockets, components)
+        if current_lts_series:
+            prev_index = load_package_index(ubuntu_cache, current_lts_series, pockets, components)
 
         reports_dir = run.run_path / "reports"
 
@@ -212,20 +216,20 @@ def explain(
                 filtered.append(item)
             return filtered
 
-        build_payload = [r.to_dict() for r in build_results]
-        runtime_payload = [r.to_dict() for r in runtime_results]
+        build_payload_full = [r.to_dict() for r in build_results]
+        runtime_payload_full = [r.to_dict() for r in runtime_results]
+
+        def _is_main(entry: dict[str, Any]) -> bool:
+            dev_comp = entry.get("dev", {}).get("component")
+            prev_comp = entry.get("prev_lts", {}).get("component")
+            return (dev_comp in ("main", None, "")) and (prev_comp in ("main", None, ""))
+
+        build_payload_display = _filter(build_payload_full)
+        runtime_payload_display = _filter(runtime_payload_full)
 
         if not include_universe:
-            def _is_main(entry: dict[str, Any]) -> bool:
-                dev_comp = entry.get("dev", {}).get("component")
-                prev_comp = entry.get("prev_lts", {}).get("component")
-                return (dev_comp in ("main", None, "")) and (prev_comp in ("main", None, ""))
-
-            build_payload = [d for d in build_payload if _is_main(d)]
-            runtime_payload = [d for d in runtime_payload if _is_main(d)]
-
-        build_payload = _filter(build_payload)
-        runtime_payload = _filter(runtime_payload)
+            build_payload_display = [d for d in build_payload_display if _is_main(d)]
+            runtime_payload_display = [d for d in runtime_payload_display if _is_main(d)]
 
         summary = {
             "build_deps_total": build_summary.total,
@@ -255,7 +259,8 @@ def explain(
             },
             "openstack_target": openstack_target,
             "ubuntu_series": resolved_ubuntu,
-            "previous_lts": prev_lts_codename,
+            "previous_lts": current_lts_series,
+            "cloud_archive": cloud_archive,
             "type_selection": {
                 "mode": "auto",
                 "selected": selected_type,
@@ -263,9 +268,11 @@ def explain(
                 "preferred_version": preferred_version,
             },
             "dependencies": {
-                "build": build_payload,
-                "runtime": runtime_payload,
+                "build": build_payload_display,
+                "runtime": runtime_payload_display,
             },
+            "cloud_archive_deps": [d for d in (build_payload_full + runtime_payload_full) if d.get("cloud_archive_required")],
+            "mir_warning_deps": [d for d in (build_payload_full + runtime_payload_full) if d.get("mir_warning")],
             "summary": summary,
         }
 
