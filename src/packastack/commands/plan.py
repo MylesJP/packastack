@@ -77,6 +77,8 @@ from packastack.upstream.releases import (
     get_current_development_series,
     is_snapshot_eligible,
     load_openstack_packages,
+    load_project_releases,
+    project_to_package_name,
 )
 from packastack.upstream.retirement import RetirementChecker, RetirementStatus
 from packastack.upstream.registry import UpstreamsRegistry
@@ -489,6 +491,7 @@ def run_plan_for_package(
         mir_candidates=mir_candidates,
         missing_packages=missing,
         cycles=cycles,
+        plan_graph=plan_graph,
     )
     run.log_event({"event": "report.plan_result", "result": str(plan_result)})
 
@@ -535,6 +538,26 @@ def _resolve_package_targets(
         run.log_event({"event": "resolve.parse_error", "input": common_name, "error": str(e)})
         return []
 
+    results: list[ResolvedTarget] = []
+    seen: set[str] = set()
+
+    # 1) Local apt repo (exact + prefix) - preserve legacy behavior
+    if use_local and local_repo.exists():
+        for pkg_dir in sorted(local_repo.iterdir()):
+            if not pkg_dir.is_dir():
+                continue
+            name = pkg_dir.name
+            is_name_match = (
+                name == common_name
+                or name.startswith(f"{common_name}-")
+                or name.startswith(f"python3-{common_name}")
+            )
+            if is_name_match and (pkg_dir / "debian" / "control").exists():
+                    if name not in seen:
+                        seen.add(name)
+                        results.append(ResolvedTarget(source_package=name, upstream_project=common_name, resolution_source="local"))
+
+
     # Create resolver
     resolver = TargetResolver(
         registry=registry,
@@ -552,9 +575,9 @@ def _resolve_package_targets(
         candidates = [result.identity]
 
     # Convert to ResolvedTarget format for backward compatibility
-    results: list[ResolvedTarget] = []
+    converted: list[ResolvedTarget] = []
     for identity in candidates:
-        results.append(ResolvedTarget(
+        converted.append(ResolvedTarget(
             source_package=identity.source_package,
             upstream_project=identity.canonical_upstream,
             resolution_source=identity.origin.value,
@@ -565,6 +588,22 @@ def _resolve_package_targets(
             "upstream": identity.canonical_upstream,
             "source": identity.origin.value,
         })
+
+    # Merge converted results with any local matches
+    for r in converted:
+        if r.source_package not in {x.source_package for x in results}:
+            results.append(r)
+
+    # Fallback: if no results found, try project-releases exact match (legacy behavior)
+    if not results and releases_repo:
+        try:
+            proj = load_project_releases(releases_repo, openstack_target, common_name)
+            if proj:
+                pkg_name = project_to_package_name(common_name, local_repo)
+                if pkg_name not in {r.source_package for r in results}:
+                    results.append(ResolvedTarget(source_package=pkg_name, upstream_project=common_name, resolution_source="releases_exact"))
+        except Exception:
+            pass
 
     return results
 
@@ -1626,6 +1665,38 @@ def plan(
             reports_dir=reports_dir,
             run=run,
         )
+
+        # Print build order to console if requested (support waves/list/dot/ascii)
+        show_build_order = print_build_order or print_graph
+        focus = build_order_focus or graph_focus
+        format_choice = build_order_format if not print_graph else graph_format
+
+        if show_build_order and plan_graph:
+            if format_choice == "waves":
+                waves_output = render_waves(plan_graph, focus=focus or None)
+                print(f"\n{waves_output}", file=sys.__stdout__, flush=True)
+            elif format_choice == "list":
+                list_output = render_build_order_list(plan_graph, focus=focus or None)
+                print(f"\n{list_output}", file=sys.__stdout__, flush=True)
+            elif format_choice == "dot":
+                dot_output = render_dot(
+                    plan_graph,
+                    focus=focus or None,
+                    depth=graph_depth,
+                    max_nodes=graph_max_nodes,
+                )
+                print(dot_output, file=sys.__stdout__, flush=True)
+            elif format_choice == "ascii":
+                ascii_output = render_ascii(
+                    plan_graph,
+                    focus=focus or None,
+                    depth=graph_depth,
+                    max_nodes=graph_max_nodes,
+                )
+                print(f"\n{ascii_output}", file=sys.__stdout__, flush=True)
+            else:
+                waves_output = render_waves(plan_graph, focus=focus or None)
+                print(f"\n{waves_output}", file=sys.__stdout__, flush=True)
 
         # Print graph to console if requested
         if print_graph:

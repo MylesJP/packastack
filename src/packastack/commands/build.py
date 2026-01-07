@@ -625,11 +625,17 @@ def _run_build(
     
     # Handle plan-only modes
     if request.validate_plan_only or request.plan_upload:
-        activity("report", f"Build order: {len(plan_result.build_order)} packages")
-        for i, pkg in enumerate(plan_result.build_order, 1):
-            activity("report", f"  {i}. {pkg}")
-        
+        # Prefer waves output when available; fall back to enumerated lists
+        if getattr(plan_result, "plan_graph", None) is not None:
+            waves_output = render_waves(plan_result.plan_graph)
+            print(f"\n{waves_output}", file=sys.__stdout__, flush=True)
+        else:
+            activity("report", f"Build order: {len(plan_result.build_order)} packages")
+            for i, pkg in enumerate(plan_result.build_order, 1):
+                activity("report", f"  {i}. {pkg}")
+
         if request.plan_upload:
+            # Upload order remains a simple enumerated list
             activity("report", f"Upload order: {len(plan_result.upload_order)} packages")
             for i, pkg in enumerate(plan_result.upload_order, 1):
                 activity("report", f"  {i}. {pkg}")

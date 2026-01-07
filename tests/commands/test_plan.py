@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
+import io
 
 from packastack.cli import app
 from packastack.commands.plan import (
@@ -744,6 +745,40 @@ Description: Nova
                                         result = runner.invoke(app, ["plan", "nova", "--plan-upload"])
 
                                         assert result.exit_code == EXIT_SUCCESS
+
+    def test_print_build_order_waves_single_package(self, tmp_path: Path) -> None:
+        """Test that single-package plan supports waves output."""
+        with patch("packastack.commands.plan.load_config") as mock_cfg:
+            mock_cfg.return_value = {"defaults": {}}
+            with patch("packastack.commands.plan.resolve_paths") as mock_paths:
+                mock_paths.return_value = {
+                    "local_apt_repo": tmp_path / "local",
+                    "openstack_releases_repo": tmp_path / "releases",
+                    "ubuntu_archive_cache": tmp_path / "cache",
+                }
+                with patch("packastack.commands.plan.resolve_series") as mock_series:
+                    mock_series.return_value = "oracular"
+                    with patch("packastack.commands.plan.get_current_development_series") as mock_dev:
+                        mock_dev.return_value = "2024.2"
+                        with patch("packastack.commands.plan._resolve_package_targets") as mock_resolve:
+                            mock_resolve.return_value = [_make_resolved_target("nova")]
+                            with patch("packastack.commands.plan.is_snapshot_eligible") as mock_eligible:
+                                mock_eligible.return_value = (True, "ok", None)
+                                with patch("packastack.commands.plan.load_package_index") as mock_index:
+                                    mock_index.return_value = PackageIndex()
+                                    with patch("packastack.commands.plan._build_dependency_graph") as mock_graph:
+                                        from packastack.planning.graph import DependencyGraph
+                                        g = DependencyGraph()
+                                        # Create a small graph with two nodes to generate waves
+                                        g.add_node("lib", needs_rebuild=True)
+                                        g.add_node("nova", needs_rebuild=True)
+                                        g.add_edge("nova", "lib")
+                                        mock_graph.return_value = (g, {})
+
+                                        with patch("sys.__stdout__", new=io.StringIO()) as fake_stdout:
+                                            result = runner.invoke(app, ["plan", "nova", "--print-build-order", "--build-order-format", "waves"])
+                                            assert result.exit_code == EXIT_SUCCESS
+                                            assert "Build waves" in fake_stdout.getvalue()
 
     def test_successful_plan_with_mir_warnings(self, tmp_path: Path) -> None:
         """Test successful plan with MIR warnings."""

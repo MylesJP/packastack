@@ -3032,6 +3032,54 @@ class TestValidatePlanOnly:
         # Git fetch should not be called in validate mode
         mock_fetch.assert_not_called()
 
+    def test_validate_plan_prints_waves(self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock) -> None:
+        """Test that validate-plan prints waves when plan_graph is available."""
+        pkg_dir = mock_paths["local_apt_repo"] / "nova" / "debian"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "control").touch()
+        (pkg_dir.parent / ".git").mkdir()
+
+        mock_index = MagicMock()
+        mock_index.packages = {}
+
+        mock_tool_result = MagicMock()
+        mock_tool_result.is_complete.return_value = True
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
+            stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
+            stack.enter_context(patch.object(build, "resolve_series", return_value="noble"))
+            stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
+            stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
+            stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
+            stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
+
+            # Patch run_plan_for_package to return a PlanResult with a PlanGraph
+            from packastack.planning.graph import DependencyGraph
+            from packastack.reports.plan_graph import PlanGraph
+            g = DependencyGraph()
+            g.add_node("lib", needs_rebuild=True)
+            g.add_node("nova", needs_rebuild=True)
+            g.add_edge("nova", "lib")
+            plan_graph = PlanGraph.from_dependency_graph(g, run_id="r", target="t", ubuntu_series="u")
+
+            from packastack.planning.graph import PlanResult
+            fake_plan_result = PlanResult(build_order=["lib", "nova"], upload_order=[], plan_graph=plan_graph)
+
+            stack.enter_context(patch("packastack.commands.build.run_plan_for_package", return_value=(fake_plan_result, build.EXIT_SUCCESS)))
+
+            result = _call_run_build(
+                run=mock_run, package="nova", target="devel", ubuntu_series="devel",
+                cloud_archive="", build_type_str="release", milestone="",
+                force=False, offline=False, validate_plan_only=True, plan_upload=False,
+                upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
+                workspace_ref=lambda w: None,
+            )
+
+        assert result == build.EXIT_SUCCESS
+
     def test_plan_upload_mode(
         self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock
     ) -> None:
