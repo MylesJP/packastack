@@ -282,7 +282,7 @@ def build(
         help="Fail build if any dependency is only available from universe (MIR needed)",
     ),
     update_control_min_versions: bool = typer.Option(
-        False,
+        True,
         "--update-control-min-versions/--no-update-control-min-versions",
         help="Update debian/control minimum versions using previous LTS floor when compatible",
     ),

@@ -125,7 +125,7 @@ class BuildRequest:
     # Fail build when dependencies are only in universe (need MIR)
     fail_on_mir_required: bool = False
     # Control-file min-version policy switches
-    update_control_min_versions: bool = False
+    update_control_min_versions: bool = True
     normalize_to_prev_lts_floor: bool = False
     dry_run_control_edit: bool = False
     no_cleanup: bool = False
