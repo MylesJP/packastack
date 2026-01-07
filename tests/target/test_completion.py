@@ -157,5 +157,10 @@ class TestCompletions:
 
     def test_completions_no_index(self) -> None:
         """Test completions with no index."""
-        completions = get_completions("glance", None)
+        # Ensure we don't accidentally read a real cache during test runs
+        import packastack.target.completion as completion_module
+        from unittest.mock import patch
+
+        with patch.object(completion_module, "load_completion_index", return_value=None):
+            completions = get_completions("glance", None)
         assert completions == []

@@ -77,12 +77,14 @@ def test_explain_command_renders_text(monkeypatch, tmp_path):
 
     monkeypatch.setattr(explain_module, "load_package_index", fake_load_index)
 
+    # Patch TargetResolver.resolve to return a ResolutionResult-like object
     monkeypatch.setattr(
-        explain_module,
-        "_resolve_package_targets",
-        lambda package, local_repo, releases_repo, registry, openstack_target, use_local, run, allow_prefix: [
-            SimpleNamespace(source_package="foo", upstream_project="foo", resolution_source="local")
-        ],
+        explain_module.TargetResolver,
+        "resolve",
+        lambda self, expr, all_matches=True: SimpleNamespace(
+            candidates=[SimpleNamespace(source_package="foo", canonical_upstream="foo", origin=SimpleNamespace(value="local"))],
+            identity=None,
+        ),
     )
 
     pkg_path = tmp_path / "pkg"
@@ -158,11 +160,12 @@ def test_explain_emits_resolve_lines(monkeypatch, tmp_path):
     monkeypatch.setattr(explain_module, "activity", capture_activity)
 
     monkeypatch.setattr(
-        explain_module,
-        "_resolve_package_targets",
-        lambda package, local_repo, releases_repo, registry, openstack_target, use_local, run, allow_prefix: [
-            SimpleNamespace(source_package="foo", upstream_project="foo", resolution_source="local")
-        ],
+        explain_module.TargetResolver,
+        "resolve",
+        lambda self, expr, all_matches=True: SimpleNamespace(
+            candidates=[SimpleNamespace(source_package="foo", canonical_upstream="foo", origin=SimpleNamespace(value="local"))],
+            identity=None,
+        ),
     )
 
     pkg_path = tmp_path / "pkg"
@@ -256,11 +259,12 @@ def test_explain_html_filters_universe(monkeypatch, tmp_path):
     monkeypatch.setattr(explain_module, "load_package_index", fake_load_index)
 
     monkeypatch.setattr(
-        explain_module,
-        "_resolve_package_targets",
-        lambda package, local_repo, releases_repo, registry, openstack_target, use_local, run, allow_prefix: [
-            SimpleNamespace(source_package="foo", upstream_project="foo", resolution_source="local")
-        ],
+        explain_module.TargetResolver,
+        "resolve",
+        lambda self, expr, all_matches=True: SimpleNamespace(
+            candidates=[SimpleNamespace(source_package="foo", canonical_upstream="foo", origin=SimpleNamespace(value="local"))],
+            identity=None,
+        ),
     )
 
     pkg_path = tmp_path / "pkg"
@@ -327,12 +331,15 @@ def test_explain_requires_force_for_multiple_matches(monkeypatch, tmp_path):
     monkeypatch.setattr(explain_module, "load_package_index", lambda *args, **kwargs: None)
 
     monkeypatch.setattr(
-        explain_module,
-        "_resolve_package_targets",
-        lambda package, local_repo, releases_repo, registry, openstack_target, use_local, run, allow_prefix: [
-            SimpleNamespace(source_package="foo", upstream_project="foo", resolution_source="local"),
-            SimpleNamespace(source_package="bar", upstream_project="bar", resolution_source="local"),
-        ],
+        explain_module.TargetResolver,
+        "resolve",
+        lambda self, expr, all_matches=True: SimpleNamespace(
+            candidates=[
+                SimpleNamespace(source_package="foo", canonical_upstream="foo", origin=SimpleNamespace(value="local")),
+                SimpleNamespace(source_package="bar", canonical_upstream="bar", origin=SimpleNamespace(value="local")),
+            ],
+            identity=None,
+        ),
     )
 
     result = runner.invoke(app, ["explain", "foo"])

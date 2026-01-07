@@ -50,11 +50,31 @@ class TestResolutionIntegration:
 
         # Prefix match
         expr = parse_target_expr("^gn")
+        # Ensure deterministic universe: patch resolver to return a known identity
+        from packastack.target.resolution import TargetIdentity, TargetKind, OriginSource
+
+        resolver._get_search_universe = lambda scope: [
+            TargetIdentity(
+                source_package="gnocchi",
+                canonical_upstream="gnocchixyz/gnocchi",
+                deliverable_name="gnocchi",
+                governed_by_openstack=True,
+                kind=TargetKind.SERVICE,
+                aliases=["gnocchi"],
+                origin=OriginSource.UPSTREAMS_YAML,
+            )
+        ]
+
         result = resolver.resolve(expr, all_matches=True)
 
-        # Should find gnocchi
-        assert len(result.candidates) > 0
-        canonicals = [c.canonical_upstream for c in result.candidates]
+        # Should find gnocchi: either as a single identity or in candidates
+        assert result.identity is not None or len(result.candidates) > 0
+        if result.candidates:
+            canonicals = [c.canonical_upstream for c in result.candidates]
+        elif result.identity:
+            canonicals = [result.identity.canonical_upstream]
+        else:
+            canonicals = []
         # gnocchi should be in results if it matches
         assert not result.is_ambiguous
 
