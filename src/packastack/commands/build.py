@@ -372,6 +372,10 @@ def build(
             dry_run=dry_run,
         )
     else:
+        # Treat top-level --dry-run as validate-plan for single-package mode
+        if dry_run:
+            validate_plan_only = True
+
         _build_single_mode(
             package=package,
             target=target,
@@ -620,7 +624,7 @@ def _run_build(
         run=run,
         cfg=cfg,
         paths=paths,
-        verbose_output=False,  # Only show warnings/errors during build planning
+        verbose_output=True,  # Show spinners and progress during planning
     )
     
     # Handle plan-only modes
