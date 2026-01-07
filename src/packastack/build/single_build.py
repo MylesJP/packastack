@@ -37,6 +37,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+import json
 
 from packastack.build.errors import (
     EXIT_BUILD_FAILED,
@@ -58,6 +59,7 @@ from packastack.build.tarball import _fetch_release_tarball
 from packastack.core.run import activity
 from packastack.core.spinner import activity_spinner
 from packastack.debpkg.gbp import run_command
+from packastack.reports.deps_satisfaction import write_dependency_satisfaction_reports
 from packastack.upstream.gitfetch import GitFetcher
 
 if TYPE_CHECKING:
@@ -174,6 +176,16 @@ class SingleBuildContext:
     build_deps: bool
     min_version_policy: str
     dep_report: bool
+    fail_on_cloud_archive_required: bool
+    fail_on_mir_required: bool
+    update_control_min_versions: bool
+    normalize_to_prev_lts_floor: bool
+    dry_run_control_edit: bool
+    fail_on_cloud_archive_required: bool
+    fail_on_mir_required: bool
+    update_control_min_versions: bool
+    normalize_to_prev_lts_floor: bool
+    dry_run_control_edit: bool
 
     # Paths
     paths: dict[str, Path]
@@ -192,6 +204,8 @@ class SingleBuildContext:
     ubuntu_index: PackageIndex | None = None
     ca_index: PackageIndex | None = None
     local_index: PackageIndex | None = None
+    prev_lts_codename: str | None = None
+    prev_lts_index: PackageIndex | None = None
     openstack_pkgs: dict[str, str] | None = None
 
     # Schroot
@@ -199,6 +213,8 @@ class SingleBuildContext:
 
     # Provenance
     provenance: BuildProvenance | None = None
+    dependency_reports: dict[str, Path] | None = None
+    upstream_min_versions: dict[str, str] | None = None
 
 
 # =============================================================================
@@ -233,6 +249,11 @@ class SetupInputs:
     min_version_policy: str
     dep_report: bool
     include_retired: bool
+    fail_on_cloud_archive_required: bool
+    fail_on_mir_required: bool
+    update_control_min_versions: bool
+    normalize_to_prev_lts_floor: bool
+    dry_run_control_edit: bool
     
     # Resolved values from planning
     resolved_build_type_str: str
@@ -283,6 +304,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     )
     from packastack.upstream.source import select_upstream_source
     from packastack.target.series import resolve_series
+    from packastack.target.distro_info import get_previous_lts
     from packastack.target.arch import get_host_arch
     from packastack.planning.type_selection import BuildType
     
@@ -417,6 +439,21 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     ubuntu_index = indexes.ubuntu
     ca_index = indexes.cloud_archive
     local_index = indexes.local_repo
+
+    # Load previous LTS index for dependency satisfaction checks
+    from packastack.apt.packages import load_package_index
+
+    prev_lts = get_previous_lts()
+    prev_lts_codename = prev_lts.codename if prev_lts else None
+    prev_lts_index = None
+    if prev_lts_codename:
+        try:
+            prev_lts_index = load_package_index(paths["ubuntu_archive_cache"], prev_lts_codename, pockets, components)
+            activity("plan", f"Previous LTS index ({prev_lts_codename}): {len(prev_lts_index.packages)} packages")
+            run.log_event({"event": "plan.prev_lts_index", "series": prev_lts_codename, "count": len(prev_lts_index.packages)})
+        except Exception as exc:
+            activity("warn", f"Failed to load previous LTS index ({prev_lts_codename}): {exc}")
+            run.log_event({"event": "plan.prev_lts_index_failed", "series": prev_lts_codename, "error": str(exc)})
     
     # Load OpenStack packages
     openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
@@ -484,6 +521,11 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         build_deps=inputs.build_deps,
         min_version_policy=inputs.min_version_policy,
         dep_report=inputs.dep_report,
+        fail_on_cloud_archive_required=inputs.fail_on_cloud_archive_required,
+        fail_on_mir_required=inputs.fail_on_mir_required,
+        update_control_min_versions=inputs.update_control_min_versions,
+        normalize_to_prev_lts_floor=inputs.normalize_to_prev_lts_floor,
+        dry_run_control_edit=inputs.dry_run_control_edit,
         paths=paths,
         local_repo=local_repo,
         tarball_cache_base=tarball_cache_base,
@@ -491,9 +533,11 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         upstream=upstream,
         resolution_source=resolution_source,
         prev_series=prev_series,
+        prev_lts_codename=prev_lts_codename,
         ubuntu_index=ubuntu_index,
         ca_index=ca_index,
         local_index=local_index,
+        prev_lts_index=prev_lts_index,
         openstack_pkgs=openstack_pkgs,
         schroot_name=schroot_name,
         provenance=provenance,
@@ -1066,6 +1110,8 @@ def validate_and_build_deps(
         save_satisfaction_report,
     )
     from packastack.upstream.tarball_cache import extract_tarball
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
 
     result = ValidateDepsResult()
     run = ctx.run
@@ -1105,6 +1151,29 @@ def validate_and_build_deps(
     result.upstream_repo_path = upstream_repo_path
     missing_deps_list: list[str] = []
     new_deps_to_build: list[str] = []
+    upstream_min_versions: dict[str, str] = {}
+
+    def _min_version_from_spec(spec: str) -> str | None:
+        if not spec:
+            return None
+        try:
+            spec_set = SpecifierSet(spec)
+        except Exception:
+            return None
+
+        mins: list[str] = []
+        for s in spec_set:
+            if s.operator in {">=", "==", ">"}:
+                mins.append(s.version)
+
+        if not mins:
+            return None
+
+        try:
+            mins.sort(key=Version)
+        except Exception:
+            pass
+        return mins[0]
 
     if upstream_repo_path and upstream_repo_path.exists():
         upstream_deps = extract_upstream_deps(upstream_repo_path)
@@ -1124,6 +1193,10 @@ def validate_and_build_deps(
             if not debian_name:
                 activity("validate-deps", f"  {python_dep} -> (unmapped)")
                 continue
+
+            min_ver = _min_version_from_spec(version_spec)
+            if min_ver:
+                upstream_min_versions[debian_name] = min_ver
 
             version, source, satisfied = resolve_dependency_with_spec(
                 debian_name,
@@ -1245,6 +1318,10 @@ def validate_and_build_deps(
     else:
         activity("validate-deps", "Skipping - no upstream repo available")
 
+    # Persist upstream minimum versions for later control min-version policy
+    if upstream_min_versions:
+        ctx.upstream_min_versions = upstream_min_versions
+
     result.missing_deps = missing_deps_list
     result.buildable_deps = new_deps_to_build
 
@@ -1255,6 +1332,189 @@ def validate_and_build_deps(
             return phase_result, result
 
     return PhaseResult.ok(), result
+
+
+# =============================================================================
+# Phase: Dependency satisfaction reporting (build-time)
+# =============================================================================
+
+
+def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
+    """Evaluate debian/control deps against dev and previous LTS and write reports."""
+
+    from packastack.debpkg.control import parse_control
+    from packastack.debpkg.control import format_dependency_list
+    from packastack.planning.control_min_versions import (
+        apply_min_version_policy,
+        decisions_to_report,
+    )
+    from packastack.planning.dependency_satisfaction import evaluate_dependencies
+
+    control_path = ctx.pkg_repo / "debian" / "control"
+    if not control_path.exists():
+        activity("deps", "debian/control not found; skipping dependency satisfaction report")
+        return PhaseResult.ok()
+
+    dev_index = ctx.ubuntu_index
+    prev_index = ctx.prev_lts_index
+    if dev_index is None:
+        activity("deps", "Ubuntu index unavailable; skipping dependency satisfaction")
+        return PhaseResult.ok()
+
+    source_pkg = parse_control(control_path)
+    build_dep_list = list(source_pkg.build_depends)
+    build_dep_indep = list(source_pkg.build_depends_indep)
+    build_deps = build_dep_list + build_dep_indep
+    runtime_deps = source_pkg.get_runtime_depends()
+
+    build_results, build_summary = evaluate_dependencies(build_deps, dev_index, prev_index, kind="build")
+    runtime_results, runtime_summary = evaluate_dependencies(runtime_deps, dev_index, prev_index, kind="runtime")
+
+    def _count_components(results: list) -> tuple[int, int]:
+        main_count = 0
+        universe_count = 0
+        for dep in results:
+            if dep.dev.satisfied:
+                if dep.dev.component in ("main", "", None):
+                    main_count += 1
+                else:
+                    universe_count += 1
+        return main_count, universe_count
+
+    dev_main, dev_universe = _count_components(build_results)
+    prev_main, prev_universe = (0, 0)
+    for dep in build_results:
+        if dep.prev_lts.satisfied:
+            if dep.prev_lts.component in ("main", "", None):
+                prev_main += 1
+            else:
+                prev_universe += 1
+
+    summary = {
+        "build_deps_total": build_summary.total,
+        "build_deps_dev_satisfied": build_summary.dev_satisfied,
+        "build_deps_prev_lts_satisfied": build_summary.prev_lts_satisfied,
+        "runtime_deps_total": runtime_summary.total,
+        "runtime_deps_dev_satisfied": runtime_summary.dev_satisfied,
+        "runtime_deps_prev_lts_satisfied": runtime_summary.prev_lts_satisfied,
+        "cloud_archive_required_count": build_summary.cloud_archive_required + runtime_summary.cloud_archive_required,
+        "mir_warning_count": build_summary.mir_warnings + runtime_summary.mir_warnings,
+        "dev_main_satisfied": dev_main,
+        "dev_universe_satisfied": dev_universe,
+        "prev_main_satisfied": prev_main,
+        "prev_universe_satisfied": prev_universe,
+    }
+
+    build_payload = [r.to_dict() for r in build_results]
+    runtime_payload = [r.to_dict() for r in runtime_results]
+
+    report = {
+        "run_id": ctx.run.run_id,
+        "target": {"source_package": ctx.pkg_name},
+        "openstack_target": ctx.openstack_target,
+        "ubuntu_series": ctx.resolved_ubuntu,
+        "previous_lts": ctx.prev_lts_codename,
+        "dependencies": {"build": build_payload, "runtime": runtime_payload},
+        "summary": summary,
+    }
+
+    reports_dir = Path(ctx.run.run_path) / "reports"
+    saved = write_dependency_satisfaction_reports(report, reports_dir)
+    ctx.dependency_reports = saved
+
+    # Optional control-file min-version normalization
+    if ctx.update_control_min_versions:
+        upstream_min_map = ctx.upstream_min_versions or {}
+        if upstream_min_map:
+            prev_versions = {dep.name: prev_index.get_version(dep.name) if prev_index else None for dep in build_deps}
+            updated_build, decisions_build = apply_min_version_policy(
+                existing=build_dep_list,
+                upstream_mins=upstream_min_map,
+                prev_lts_versions=prev_versions,
+                normalize=ctx.normalize_to_prev_lts_floor,
+                dry_run=ctx.dry_run_control_edit,
+            )
+            updated_indep, decisions_indep = apply_min_version_policy(
+                existing=build_dep_indep,
+                upstream_mins=upstream_min_map,
+                prev_lts_versions=prev_versions,
+                normalize=ctx.normalize_to_prev_lts_floor,
+                dry_run=ctx.dry_run_control_edit,
+            )
+
+            if not ctx.dry_run_control_edit:
+                # Rewrite Build-Depends/Build-Depends-Indep with updated ordering
+                text = control_path.read_text()
+
+                def _replace_field(body: str, field: str, value: str) -> str:
+                    import re
+
+                    pattern = rf"{field}:(?:[^\n]*\n(?:[ \t].*\n)*)"
+                    replacement = f"{field}: {value}\n"
+                    return re.sub(pattern, replacement, body, count=1)
+
+                build_field = format_dependency_list(updated_build)
+                indep_field = format_dependency_list(updated_indep)
+                text = _replace_field(text, "Build-Depends", build_field)
+                text = _replace_field(text, "Build-Depends-Indep", indep_field)
+                control_path.write_text(text)
+
+            # Write control min-version report
+            decisions = decisions_build + decisions_indep
+            cmv_report = decisions_to_report(decisions)
+            cmv_path = reports_dir / "control-min-versions.json"
+            cmv_path.write_text(json.dumps(cmv_report, indent=2))
+            if ctx.dependency_reports is not None:
+                ctx.dependency_reports["control_min_versions"] = cmv_path
+
+            ca_required = [d for d in decisions if d.cloud_archive_required]
+            if ca_required:
+                activity("deps", "[deps] Cloud-archive required (upstream min exceeds previous-lts):")
+                for d in ca_required:
+                    activity(
+                        "deps",
+                        f"[deps]   - {d.name} (>= {d.upstream_min_required}) prev-lts={d.prev_lts_version or 'none'}",
+                    )
+        else:
+            activity("deps", "[deps] Skipping control min-version update (no upstream minima available)")
+
+    activity("deps", "[deps] Dependency satisfaction:")
+    activity(
+        "deps",
+        f"[deps]   ubuntu-series ({ctx.resolved_ubuntu}):  {build_summary.dev_satisfied}/{build_summary.total} satisfied "
+        f"(main={dev_main}, universe={dev_universe})",
+    )
+    activity(
+        "deps",
+        f"[deps]   previous-lts ({ctx.prev_lts_codename or 'unknown'}):   {build_summary.prev_lts_satisfied}/{build_summary.total} satisfied "
+        f"(main={prev_main}, universe={prev_universe})",
+    )
+    activity(
+        "deps",
+        f"[deps]   cloud-archive required:    {summary['cloud_archive_required_count']} deps",
+    )
+    activity("deps", f"[deps]   MIR warnings (universe):   {summary['mir_warning_count']} deps")
+
+    cloud_required = [d for d in build_payload + runtime_payload if d.get("cloud_archive_required")]
+    if cloud_required:
+        activity("deps", "[deps] Cloud-archive required deps:")
+        for dep in cloud_required:
+            constraint = f"{dep.get('relation','')} {dep.get('version','')}".strip()
+            activity("deps", f"[deps]   - {dep.get('name')} {constraint}")
+
+    mir_list = [d for d in build_payload + runtime_payload if d.get("mir_warning")]
+    if mir_list:
+        activity("deps", "[deps] MIR warnings (universe):")
+        for dep in mir_list:
+            constraint = f"{dep.get('relation','')} {dep.get('version','')}".strip()
+            activity("deps", f"[deps]   - {dep.get('name')} {constraint}")
+
+    if ctx.fail_on_cloud_archive_required and summary["cloud_archive_required_count"]:
+        return PhaseResult.fail(EXIT_POLICY_BLOCKED, "Cloud-archive required for dependencies")
+    if ctx.fail_on_mir_required and summary["mir_warning_count"]:
+        return PhaseResult.fail(EXIT_POLICY_BLOCKED, "MIR required for dependencies")
+
+    return PhaseResult.ok()
 
 
 def _auto_build_deps(ctx: SingleBuildContext, deps_to_build: list[str]) -> PhaseResult:
@@ -1985,6 +2245,13 @@ def build_single_package(
     if not fetch_result_phase.success:
         outcome.exit_code = fetch_result_phase.exit_code
         outcome.error = fetch_result_phase.error
+        return outcome
+
+    # Dependency satisfaction reporting (build and runtime)
+    deps_report_result = report_dependency_satisfaction(ctx)
+    if not deps_report_result.success:
+        outcome.exit_code = deps_report_result.exit_code
+        outcome.error = deps_report_result.error
         return outcome
 
     # -------------------------------------------------------------------------

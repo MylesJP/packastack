@@ -14,7 +14,7 @@ from typing import Any
 import typer
 
 from packastack.apt.packages import load_package_index
-from packastack.commands.plan import _fetch_packaging_repos, _resolve_package_targets
+from packastack.commands.plan import _fetch_packaging_repos
 from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
@@ -22,7 +22,9 @@ from packastack.debpkg.control import parse_control
 from packastack.planning.dependency_satisfaction import evaluate_dependencies
 from packastack.reports.explain import write_explain_reports
 from packastack.target.distro_info import get_current_lts
+from packastack.target.resolution import TargetResolver, parse_target_expr
 from packastack.target.series import resolve_series
+from packastack.upstream.registry import UpstreamsRegistry
 from packastack.upstream.releases import get_current_development_series, is_snapshot_eligible
 
 EXIT_CONFIG_ERROR = 1
@@ -132,31 +134,49 @@ def explain(
             activity("resolve", f"Cloud Archive: {cloud_archive}")
         run.log_event({"event": "series.openstack_resolved", "target": openstack_target})
 
+        # Load registry
+        registry: UpstreamsRegistry | None = None
+        try:
+            registry = UpstreamsRegistry()
+        except Exception as e:
+            activity("warning", f"Failed to load registry: {e}")
+
+        # Parse target expression and resolve
         local_repo = paths["local_apt_repo"]
-        resolved_targets = _resolve_package_targets(
-            package,
-            local_repo,
-            releases_repo,
-            registry=None,
+        try:
+            expr = parse_target_expr(package)
+        except ValueError as e:
+            activity("error", f"Invalid target expression: {e}")
+            sys.exit(EXIT_CONFIG_ERROR)
+
+        resolver = TargetResolver(
+            registry=registry,
+            local_repo=local_repo,
+            releases_repo=releases_repo,
             openstack_target=openstack_target,
-            use_local=not offline,
-            run=run,
-            allow_prefix=True,
         )
 
-        if not resolved_targets:
+        # Resolve with all_matches to handle prefix/contains
+        result = resolver.resolve(expr, all_matches=True)
+
+        # Collect candidates
+        candidates = result.candidates if result.candidates else []
+        if result.identity:
+            candidates = [result.identity]
+
+        if not candidates:
             activity("error", f"No packages found matching: {package}")
             run.write_summary(status="failed", error="no matches", exit_code=EXIT_CONFIG_ERROR)
             sys.exit(EXIT_CONFIG_ERROR)
 
-        if len(resolved_targets) > 1 and not force:
-            matches = ", ".join(t.source_package for t in resolved_targets)
+        if len(candidates) > 1 and not force:
+            matches = ", ".join(identity.source_package for identity in candidates)
             activity("error", f"Multiple matches: {matches} (use --force to proceed)")
             run.write_summary(status="failed", error="multiple matches", exit_code=EXIT_CONFIG_ERROR)
             sys.exit(EXIT_CONFIG_ERROR)
 
-        target_info = resolved_targets[0]
-        activity("resolve", f"Target: {target_info.source_package} ({target_info.resolution_source})")
+        target_identity = candidates[0]
+        activity("resolve", f"Target: {target_identity.source_package} (from {target_identity.origin.value})")
 
         pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
         components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
@@ -173,22 +193,22 @@ def explain(
         # Fetch packaging repo
         packaging_cache = paths.get("build_root", paths["cache_root"] / "build") / "packaging-cache"
         packaging_paths = _fetch_packaging_repos(
-            packages=[target_info.source_package],
+            packages=[target_identity.source_package],
             dest_dir=packaging_cache,
             ubuntu_series=resolved_ubuntu,
             openstack_series=openstack_target,
             offline=offline,
             workers=1,
         )
-        packaging_path = packaging_paths.get(target_info.source_package)
+        packaging_path = packaging_paths.get(target_identity.source_package)
         if not packaging_path:
-            activity("error", f"Packaging repo missing for {target_info.source_package}")
+            activity("error", f"Packaging repo missing for {target_identity.source_package}")
             run.write_summary(status="failed", error="packaging repo missing", exit_code=EXIT_CONFIG_ERROR)
             sys.exit(EXIT_CONFIG_ERROR)
 
         control_path = packaging_path / "debian" / "control"
         if not control_path.exists():
-            activity("error", f"debian/control not found for {target_info.source_package}")
+            activity("error", f"debian/control not found for {target_identity.source_package}")
             run.write_summary(status="failed", error="control missing", exit_code=EXIT_CONFIG_ERROR)
             sys.exit(EXIT_CONFIG_ERROR)
 
@@ -246,16 +266,16 @@ def explain(
         eligible, reason, preferred_version = is_snapshot_eligible(
             releases_repo,
             openstack_target,
-            target_info.source_package,
+            target_identity.source_package,
         )
         selected_type = "snapshot" if eligible else "release"
 
         report = {
             "run_id": run.run_id,
             "target": {
-                "source_package": target_info.source_package,
-                "upstream_project": target_info.upstream_project,
-                "resolution_source": target_info.resolution_source,
+                "source_package": target_identity.source_package,
+                "upstream_project": target_identity.canonical_upstream,
+                "resolution_source": target_identity.origin.value,
             },
             "openstack_target": openstack_target,
             "ubuntu_series": resolved_ubuntu,

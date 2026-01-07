@@ -722,6 +722,14 @@ class UpstreamsRegistry:
                 retired.append(proj_key)
         return retired
 
+    def list_projects(self) -> list[str]:
+        """List all project keys in the registry.
+
+        Returns:
+            Sorted list of all project keys.
+        """
+        return sorted(self._load_result.projects.keys())
+
 
 def derive_git_url(project: str, host: str = "opendev") -> str:
     """Derive git URL for a project based on host.

@@ -46,6 +46,7 @@ projects:
   # - Signatures: signed git tags where available; none for snapshots
   #
   gnocchi:
+    canonical: gnocchixyz/gnocchi
     common_names: [gnocchi]
     upstream:
       type: git
@@ -81,6 +82,7 @@ projects:
   # It was pulled in for a previous requirement, but is no longer needed.
   #
   alembic:
+    canonical: sqlalchemy/alembic
     common_names: [alembic]
     retired: true
     upstream:
@@ -117,6 +119,7 @@ projects:
   # It is now synchronized from debian.
   #
   git-review:
+    canonical: opendev/git-review
     common_names: [git-review]
     retired: true
     upstream:
@@ -146,10 +149,10 @@ projects:
   # - Releases: git tags (not openstack/releases)
   # - Tarballs: PyPI (not official OpenStack tarballs)
   # - Signatures: signed git tags where available; none for snapshots
-  #
   # Note: Rally has been retired as an actively packaged OpenStack project.
   #
   rally:
+    canonical: openstack/rally
     common_names: [rally]
     retired: true
     upstream:

@@ -24,10 +24,12 @@ from typer import Typer
 
 from packastack.commands.build import build
 from packastack.commands.clean import clean
+from packastack.commands.completion import completion
 from packastack.commands.explain import explain
 from packastack.commands.init import init
 from packastack.commands.plan import plan
 from packastack.commands.refresh import refresh
+from packastack.commands.search import search
 
 app: Typer = Typer(
     name="packastack",
@@ -38,7 +40,9 @@ app: Typer = Typer(
 # Register commands
 app.command(name="build")(build)
 app.command(name="clean")(clean)
+app.command(name="completion")(completion)
 app.command(name="explain")(explain)
 app.command(name="init")(init)
 app.command(name="plan")(plan)
 app.command(name="refresh")(refresh)
+app.command(name="search")(search)

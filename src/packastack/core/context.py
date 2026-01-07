@@ -120,6 +120,14 @@ class BuildRequest:
     min_version_policy: str = "enforce"
     # Write dependency satisfaction report files during build
     dep_report: bool = True
+    # Fail build when previous LTS cannot satisfy deps (cloud-archive needed)
+    fail_on_cloud_archive_required: bool = False
+    # Fail build when dependencies are only in universe (need MIR)
+    fail_on_mir_required: bool = False
+    # Control-file min-version policy switches
+    update_control_min_versions: bool = False
+    normalize_to_prev_lts_floor: bool = False
+    dry_run_control_edit: bool = False
     no_cleanup: bool = False
     no_spinner: bool = False
     validate_plan_only: bool = False

@@ -74,15 +74,13 @@ from packastack.reports.plan_graph import (
 from packastack.reports.explain import write_plan_dependency_summary
 from packastack.upstream.gitfetch import GitFetcher
 from packastack.upstream.releases import (
-    find_projects_by_prefix,
     get_current_development_series,
     is_snapshot_eligible,
     load_openstack_packages,
-    load_project_releases,
-    project_to_package_name,
 )
 from packastack.upstream.retirement import RetirementChecker, RetirementStatus
-from packastack.upstream.registry import ProjectNotFoundError, UpstreamsRegistry
+from packastack.upstream.registry import UpstreamsRegistry
+from packastack.target.resolution import TargetResolver, parse_target_expr
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.core.run import RunContext, activity
 from packastack.target.series import resolve_series
@@ -522,69 +520,51 @@ def _resolve_package_targets(
     run: RunContextType,
     allow_prefix: bool = True,
 ) -> list[ResolvedTarget]:
-    """Resolve a common name to source package targets with registry support.
+    """Resolve a common name to source package targets using TargetResolver.
 
-    Resolution order (deduplicated):
-      1) Local apt repo (exact + prefix)
-      2) openstack/releases (exact + prefix)
-      3) upstreams registry (explicit entries, exact + prefix)
+    Uses the new TargetResolver system which provides:
+      - 6-tier deterministic resolution
+      - Loading from both upstreams.yaml and openstack/releases
+      - Shell-safe target expression grammar
     """
 
-    results: list[ResolvedTarget] = []
-    seen: set[str] = set()
+    # Parse target expression
+    try:
+        expr = parse_target_expr(common_name)
+    except ValueError as e:
+        run.log_event({"event": "resolve.parse_error", "input": common_name, "error": str(e)})
+        return []
 
-    def _add(pkg: str, upstream: str, source: str) -> None:
-        if pkg in seen:
-            return
-        seen.add(pkg)
-        results.append(ResolvedTarget(pkg, upstream, source))
+    # Create resolver
+    resolver = TargetResolver(
+        registry=registry,
+        local_repo=local_repo if use_local else None,
+        releases_repo=releases_repo,
+        openstack_target=openstack_target,
+    )
+
+    # Resolve with all_matches to handle prefix/contains
+    result = resolver.resolve(expr, all_matches=allow_prefix)
+
+    # Collect candidates
+    candidates = result.candidates if result.candidates else []
+    if result.identity:
+        candidates = [result.identity]
+
+    # Convert to ResolvedTarget format for backward compatibility
+    results: list[ResolvedTarget] = []
+    for identity in candidates:
+        results.append(ResolvedTarget(
+            source_package=identity.source_package,
+            upstream_project=identity.canonical_upstream,
+            resolution_source=identity.origin.value,
+        ))
         run.log_event({
             "event": "resolve.match",
-            "package": pkg,
-            "upstream": upstream,
-            "source": source,
+            "package": identity.source_package,
+            "upstream": identity.canonical_upstream,
+            "source": identity.origin.value,
         })
-
-    # 1) Local apt repo
-    if use_local and local_repo.exists():
-        for pkg_dir in sorted(local_repo.iterdir()):
-            if not pkg_dir.is_dir():
-                continue
-            name = pkg_dir.name
-            is_name_match = (
-                name == common_name
-                or name.startswith(f"{common_name}-")
-                or name.startswith(f"python3-{common_name}")
-            )
-            if is_name_match and (pkg_dir / "debian" / "control").exists():
-                _add(name, upstream=common_name, source="local")
-
-    # 2) openstack/releases exact + prefix
-    proj = load_project_releases(releases_repo, openstack_target, common_name)
-    if proj:
-        pkg_name = project_to_package_name(common_name, local_repo)
-        _add(pkg_name, upstream=common_name, source="releases_exact")
-
-    if allow_prefix:
-        prefix_matches = find_projects_by_prefix(releases_repo, openstack_target, common_name)
-        for m in prefix_matches:
-            pkg_name = project_to_package_name(m, local_repo)
-            _add(pkg_name, upstream=m, source="releases_prefix")
-
-    # 3) Registry explicit entries (exact + prefix)
-    if registry:
-        for proj_key in registry.find_projects(common_name, allow_prefix=allow_prefix):
-            try:
-                resolved = registry.resolve(proj_key, openstack_governed=False)
-            except ProjectNotFoundError:
-                continue
-
-            pkg_name = resolved.config.ubuntu.source_hint or proj_key
-            _add(
-                pkg_name,
-                upstream=proj_key,
-                source=f"registry:{resolved.resolution_source.value}",
-            )
 
     return results
 
@@ -623,6 +603,8 @@ def _enforce_retirement(
                 return EXIT_CONFIG_ERROR
 
     # OpenStack project-config based retirement
+    # NOTE: Skip retirement checks for packages from upstreams.yaml - these are
+    # intentionally included non-OpenStack or retired-but-still-supported projects
     if project_config_path:
         if not project_config_path.exists() and not offline:
             with activity_spinner("retire", "Cloning openstack/project-config repository"):
@@ -636,6 +618,15 @@ def _enforce_retirement(
             )
 
             for target in targets:
+                # Skip retirement check if package is from upstreams.yaml
+                if target.resolution_source == "upstreams.yaml":
+                    run.log_event({
+                        "event": "policy.retirement_check_skipped",
+                        "package": target.source_package,
+                        "reason": "explicit upstreams.yaml entry",
+                    })
+                    continue
+
                 deliverable = target.upstream_project
                 if target.source_package.startswith("python-"):
                     deliverable = target.source_package[7:]
