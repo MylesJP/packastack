@@ -661,6 +661,7 @@ def get_pkg_scripts_package_list() -> list[str]:
 
     Returns dependencies first (with python-openstacksdk and
     python-openstackclient at the front), followed by current-projects.
+    Oslo packages are prioritized before other python- packages.
 
     Returns:
         Ordered list of package names
@@ -692,8 +693,12 @@ def get_pkg_scripts_package_list() -> list[str]:
                 ordered_deps.append(dep)
                 dependencies.remove(dep)
 
-        # Add remaining dependencies, then projects
-        return ordered_deps + dependencies + projects
+        # Separate oslo packages from other dependencies
+        oslo_deps = [pkg for pkg in dependencies if pkg.startswith("python-oslo.")]
+        non_oslo_deps = [pkg for pkg in dependencies if not pkg.startswith("python-oslo.")]
+
+        # Add remaining dependencies: oslo first, then others, then projects
+        return ordered_deps + oslo_deps + non_oslo_deps + projects
 
     except Exception as e:
         raise ImporterError(f"Failed to fetch pkg-scripts package list: {e}") from e
