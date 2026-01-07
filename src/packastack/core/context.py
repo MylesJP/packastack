@@ -116,6 +116,10 @@ class BuildRequest:
     binary: bool = True
     builder: str = "sbuild"
     build_deps: bool = True
+    # Minimum-version enforcement policy for upstream deps: enforce, report, ignore
+    min_version_policy: str = "enforce"
+    # Write dependency satisfaction report files during build
+    dep_report: bool = True
     no_cleanup: bool = False
     no_spinner: bool = False
     validate_plan_only: bool = False

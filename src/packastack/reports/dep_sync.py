@@ -37,6 +37,36 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class DependencySatisfactionSummary:
+    """Aggregated view of dependency satisfaction for a package build."""
+
+    package: str
+    policy: str
+    total: int
+    satisfied: int
+    outdated: int
+    missing: int
+    overridden: int = 0
+    by_source: dict[str, int] = field(default_factory=dict)
+    missing_deps: list[str] = field(default_factory=list)
+    outdated_deps: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "package": self.package,
+            "policy": self.policy,
+            "total": self.total,
+            "satisfied": self.satisfied,
+            "outdated": self.outdated,
+            "missing": self.missing,
+            "overridden": self.overridden,
+            "by_source": dict(self.by_source),
+            "missing_deps": list(self.missing_deps),
+            "outdated_deps": list(self.outdated_deps),
+        }
+
+
+@dataclass
 class DependencySyncReport:
     """Report summarizing dependency synchronization results."""
 
@@ -124,6 +154,62 @@ def create_sync_report(
     report.packages_from_upstream_spec = upstream_spec_count
 
     return report
+
+
+def render_satisfaction_text(summary: DependencySatisfactionSummary) -> str:
+    """Render a dependency satisfaction summary as text."""
+
+    lines = []
+    lines.append(f"Dependency Satisfaction: {summary.package}")
+    lines.append("=" * 60)
+    lines.append(f"Policy: {summary.policy}")
+    lines.append(
+        f"Satisfied: {summary.satisfied}/{summary.total} | Outdated: {summary.outdated} | Missing: {summary.missing}"
+    )
+    if summary.overridden:
+        lines.append(f"Policy overrides applied: {summary.overridden}")
+
+    if summary.by_source:
+        lines.append("Sources:")
+        for src, count in sorted(summary.by_source.items()):
+            lines.append(f"  {src}: {count}")
+
+    if summary.outdated_deps:
+        lines.append("")
+        lines.append("Outdated (needs newer version):")
+        for dep in sorted(summary.outdated_deps):
+            lines.append(f"  {dep}")
+
+    if summary.missing_deps:
+        lines.append("")
+        lines.append("Missing (not found in any index):")
+        for dep in sorted(summary.missing_deps):
+            lines.append(f"  {dep}")
+
+    return "\n".join(lines)
+
+
+def render_satisfaction_json(summary: DependencySatisfactionSummary) -> str:
+    """Render a dependency satisfaction summary as JSON."""
+
+    return json.dumps(summary.to_dict(), indent=2)
+
+
+def save_satisfaction_report(
+    summary: DependencySatisfactionSummary,
+    output_dir: Path,
+) -> list[Path]:
+    """Save dependency satisfaction report in text and JSON formats."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base_name = f"dep-satisfaction-{summary.package}"
+    text_path = output_dir / f"{base_name}.txt"
+    json_path = output_dir / f"{base_name}.json"
+
+    text_path.write_text(render_satisfaction_text(summary))
+    json_path.write_text(render_satisfaction_json(summary))
+
+    return [text_path, json_path]
 
 
 def render_sync_report_text(report: DependencySyncReport) -> str:

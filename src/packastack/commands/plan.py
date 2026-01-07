@@ -34,6 +34,7 @@ import concurrent.futures
 import typer
 
 from packastack.core.config import load_config
+from packastack.debpkg.control import ParsedDependency
 from packastack.planning.graph import DependencyGraph, PlanResult
 from packastack.planning.graph_builder import (
     SOFT_DEPENDENCY_EXCLUSIONS,
@@ -53,6 +54,7 @@ from packastack.planning.type_selection import (
     get_default_parallel_workers,
     select_build_types_for_packages,
 )
+from packastack.planning.dependency_satisfaction import evaluate_dependencies
 from packastack.reports.type_selection import (
     render_compact_summary,
     render_console_table,
@@ -69,6 +71,7 @@ from packastack.reports.plan_graph import (
     render_build_order_list,
     write_plan_graph_reports,
 )
+from packastack.reports.explain import write_plan_dependency_summary
 from packastack.upstream.gitfetch import GitFetcher
 from packastack.upstream.releases import (
     find_projects_by_prefix,
@@ -83,6 +86,7 @@ from packastack.upstream.registry import ProjectNotFoundError, UpstreamsRegistry
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.core.run import RunContext, activity
 from packastack.target.series import resolve_series
+from packastack.target.distro_info import get_previous_lts
 from packastack.core.spinner import activity_spinner
 
 if TYPE_CHECKING:
@@ -743,6 +747,60 @@ def _build_dependency_graph(
     return result.graph, result.mir_candidates
 
 
+def _write_plan_dependency_summary(
+    graph: DependencyGraph,
+    ubuntu_index: PackageIndex,
+    cache_root: Path,
+    pockets: list[str],
+    components: list[str],
+    reports_dir: Path,
+    run: RunContextType,
+) -> dict[str, Path] | None:
+    """Generate dependency satisfaction summary for plan reports."""
+
+    prev_lts = get_previous_lts()
+    prev_codename = prev_lts.codename if prev_lts else ""
+    prev_index = None
+    if prev_codename:
+        prev_index = load_package_index(cache_root, prev_codename, pockets, components)
+
+    packages: list[dict[str, object]] = []
+    totals = {
+        "total": 0,
+        "cloud_archive_required": 0,
+        "mir_warnings": 0,
+    }
+
+    for node in sorted(graph.nodes):
+        deps = [ParsedDependency(name=d) for d in graph.edges.get(node, set())]
+        results, summary = evaluate_dependencies(deps, ubuntu_index, prev_index, kind="runtime")
+        packages.append({
+            "package": node,
+            "dependencies": summary.total,
+            "dev_satisfied": summary.dev_satisfied,
+            "prev_lts_satisfied": summary.prev_lts_satisfied,
+            "cloud_archive_required": summary.cloud_archive_required,
+            "mir_warnings": summary.mir_warnings,
+        })
+
+        totals["total"] += summary.total
+        totals["cloud_archive_required"] += summary.cloud_archive_required
+        totals["mir_warnings"] += summary.mir_warnings
+
+    summary_payload = {
+        "previous_lts": prev_codename,
+        "totals": totals,
+        "packages": packages,
+    }
+
+    try:
+        return write_plan_dependency_summary(summary_payload, reports_dir)
+    except Exception as exc:  # pragma: no cover - report generation failures are non-fatal
+        activity("warn", f"Could not write dependency summary: {exc}")
+        run.log_event({"event": "report.plan_dependency_summary_failed", "error": str(exc)})
+        return None
+
+
 def _format_graph(graph: DependencyGraph) -> list[str]:
     """Return a human-readable adjacency list for the graph."""
 
@@ -1150,6 +1208,16 @@ def _plan_all_packages(
             "html_path": str(graph_paths["html"]),
         })
 
+    dep_summary_paths = _write_plan_dependency_summary(
+        graph=dep_graph,
+        ubuntu_index=ubuntu_index,
+        cache_root=ubuntu_cache,
+        pockets=pockets,
+        components=components,
+        reports_dir=reports_dir,
+        run=run,
+    )
+
     # Print build order to console if requested
     # Support both legacy --print-graph and new --print-build-order flags
     show_build_order = print_build_order or print_graph
@@ -1209,6 +1277,7 @@ def _plan_all_packages(
             "html": str(report_paths["html"]),
             "plan_graph_json": str(graph_paths["json"]),
             "plan_graph_html": str(graph_paths["html"]),
+            **({"dependency_summary_json": str(dep_summary_paths["json"]), "dependency_summary_html": str(dep_summary_paths["html"])} if dep_summary_paths else {}),
         },
     )
 
@@ -1557,6 +1626,16 @@ def plan(
                 "html_path": str(graph_paths["html"]),
             })
 
+        dep_summary_paths = _write_plan_dependency_summary(
+            graph=graph,
+            ubuntu_index=ubuntu_index,
+            cache_root=ubuntu_cache,
+            pockets=pockets,
+            components=components,
+            reports_dir=reports_dir,
+            run=run,
+        )
+
         # Print graph to console if requested
         if print_graph:
             if plan_graph.node_count > graph_max_nodes and not graph_focus:
@@ -1628,6 +1707,7 @@ def plan(
             reports={
                 "plan_graph_json": str(graph_paths["json"]),
                 "plan_graph_html": str(graph_paths["html"]),
+                **({"dependency_summary_json": str(dep_summary_paths["json"]), "dependency_summary_html": str(dep_summary_paths["html"])} if dep_summary_paths else {}),
             },
         )
 

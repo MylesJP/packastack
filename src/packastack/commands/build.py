@@ -266,6 +266,16 @@ def build(
     binary: bool = typer.Option(True, "-b/-B", "--binary/--no-binary", help="Build binary packages with sbuild (default: on)"),
     builder: str = typer.Option("sbuild", "-x", "--builder", help="Builder for binary packages: sbuild or dpkg"),
     build_deps: bool = typer.Option(True, "-d/-D", "--build-deps/--no-build-deps", help="Auto-build missing dependencies"),
+    min_version_policy: str = typer.Option(
+        "enforce",
+        "--min-version-policy",
+        help="Minimum-version handling for upstream deps: enforce, report, or ignore",
+    ),
+    dep_report: bool = typer.Option(
+        True,
+        "--dep-report/--no-dep-report",
+        help="Write dependency satisfaction report files to the run directory",
+    ),
     no_cleanup: bool = typer.Option(False, "-k", "--no-cleanup", help="Don't cleanup workspace on success (keep)"),
     no_spinner: bool = typer.Option(False, "-q", "--no-spinner", help="Disable spinner output (quiet)"),
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmations"),
@@ -352,6 +362,8 @@ def build(
             binary=binary,
             builder=builder,
             build_deps=build_deps,
+            min_version_policy=min_version_policy,
+            dep_report=dep_report,
             no_cleanup=no_cleanup,
             no_spinner=no_spinner,
             yes=yes,
@@ -375,6 +387,8 @@ def _build_single_mode(
     binary: bool,
     builder: str,
     build_deps: bool,
+    min_version_policy: str,
+    dep_report: bool,
     no_cleanup: bool,
     no_spinner: bool,
     yes: bool,
@@ -388,6 +402,11 @@ def _build_single_mode(
         cleanup_on_exit = not no_cleanup
 
         try:
+            policy_value = (min_version_policy or "").lower()
+            if policy_value not in {"enforce", "report", "ignore"}:
+                activity("error", "--min-version-policy must be one of: enforce, report, ignore")
+                sys.exit(EXIT_CONFIG_ERROR)
+
             request = BuildRequest(
                 package=package,
                 target=target,
@@ -402,6 +421,8 @@ def _build_single_mode(
                 binary=binary,
                 builder=builder,
                 build_deps=build_deps,
+                min_version_policy=policy_value,
+                dep_report=dep_report,
                 no_cleanup=no_cleanup,
                 no_spinner=no_spinner,
                 validate_plan_only=validate_plan_only,
@@ -620,6 +641,8 @@ def _run_build(
             skip_repo_regen=request.skip_repo_regen,
             no_spinner=request.no_spinner,
             build_deps=request.build_deps,
+            min_version_policy=request.min_version_policy,
+            dep_report=request.dep_report,
             include_retired=request.include_retired,
             resolved_build_type_str=resolved_build_type_str,
             milestone_from_cli=milestone_from_cli,

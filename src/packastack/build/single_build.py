@@ -172,6 +172,8 @@ class SingleBuildContext:
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
+    min_version_policy: str
+    dep_report: bool
 
     # Paths
     paths: dict[str, Path]
@@ -228,6 +230,8 @@ class SetupInputs:
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
+    min_version_policy: str
+    dep_report: bool
     include_retired: bool
     
     # Resolved values from planning
@@ -478,6 +482,8 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         skip_repo_regen=inputs.skip_repo_regen,
         no_spinner=inputs.no_spinner,
         build_deps=inputs.build_deps,
+        min_version_policy=inputs.min_version_policy,
+        dep_report=inputs.dep_report,
         paths=paths,
         local_repo=local_repo,
         tarball_cache_base=tarball_cache_base,
@@ -1049,10 +1055,15 @@ def validate_and_build_deps(
     """
     from packastack.planning.type_selection import BuildType
     from packastack.planning.validated_plan import (
+        check_version_satisfies,
         extract_upstream_deps,
         map_python_to_debian,
         project_to_source_package,
         resolve_dependency_with_spec,
+    )
+    from packastack.reports.dep_sync import (
+        DependencySatisfactionSummary,
+        save_satisfaction_report,
     )
     from packastack.upstream.tarball_cache import extract_tarball
 
@@ -1060,6 +1071,12 @@ def validate_and_build_deps(
     run = ctx.run
 
     activity("validate-deps", "Validating upstream dependencies")
+
+    policy = getattr(ctx, "min_version_policy", "enforce")
+    enforce_min_versions = policy != "ignore"
+    overridden_specs = 0
+    source_counts: dict[str, int] = {"ubuntu": 0, "cloud-archive": 0, "local": 0}
+    outdated_deps: list[str] = []
 
     # Extract dependencies from upstream repo (if available)
     upstream_repo_path = None
@@ -1109,13 +1126,32 @@ def validate_and_build_deps(
                 continue
 
             version, source, satisfied = resolve_dependency_with_spec(
-                debian_name, version_spec, ctx.local_index, ctx.ca_index, ctx.ubuntu_index
+                debian_name,
+                version_spec,
+                ctx.local_index,
+                ctx.ca_index,
+                ctx.ubuntu_index,
+                enforce_min_versions=enforce_min_versions,
             )
+
+            spec_satisfied = check_version_satisfies(version_spec, version) if version else False
+            if version and source:
+                source_counts[source] = source_counts.get(source, 0) + 1
+
+            effective_satisfied = satisfied
+            if not enforce_min_versions and not spec_satisfied and version:
+                # Policy override: allow older than minimum
+                effective_satisfied = True
+                overridden_specs += 1
 
             spec_display = f" (req: {version_spec})" if version_spec else ""
             if version:
                 resolved_count += 1
-                status = "✓ SATISFIED" if satisfied else "✗ OUTDATED"
+                if spec_satisfied or not version_spec:
+                    status = "✓ SATISFIED"
+                else:
+                    status = "✗ OUTDATED"
+                    outdated_deps.append(debian_name)
                 activity(
                     "validate-deps",
                     f"  {python_dep}{spec_display} -> {debian_name} = {version} ({source}) [{status}]",
@@ -1128,7 +1164,7 @@ def validate_and_build_deps(
                         "debian_name": debian_name,
                         "version": version,
                         "source": source,
-                        "satisfied": satisfied,
+                        "satisfied": effective_satisfied,
                     }
                 )
             else:
@@ -1177,8 +1213,35 @@ def validate_and_build_deps(
 
                 run.log_event({"event": "validate-deps.buildable", "packages": buildable_deps})
                 new_deps_to_build.extend(buildable_deps)
-        else:
-            activity("validate-deps", "All dependencies resolved")
+
+        # Summary and report
+        total = len(upstream_deps.runtime)
+        outdated_count = len(outdated_deps)
+        missing_count = len(missing_deps_list)
+        satisfied_count = max(resolved_count - outdated_count, 0)
+
+        activity(
+            "validate-deps",
+            f"Summary (policy={policy}): {satisfied_count}/{total} satisfied, {outdated_count} need newer version, {missing_count} missing",
+        )
+
+        if ctx.dep_report and ctx.run and getattr(ctx.run, "run_path", None):
+            report_dir = Path(ctx.run.run_path) / "reports"
+            summary = DependencySatisfactionSummary(
+                package=ctx.pkg_name,
+                policy=policy,
+                total=total,
+                satisfied=satisfied_count,
+                outdated=outdated_count,
+                missing=missing_count,
+                overridden=overridden_specs,
+                by_source=source_counts,
+                missing_deps=missing_deps_list,
+                outdated_deps=outdated_deps,
+            )
+            report_paths = save_satisfaction_report(summary, report_dir)
+            for path in report_paths:
+                activity("validate-deps", f"Report written: {path}")
     else:
         activity("validate-deps", "Skipping - no upstream repo available")
 

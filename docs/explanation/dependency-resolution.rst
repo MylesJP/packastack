@@ -11,6 +11,8 @@ What gets built alongside
 -------------------------
 Build-deps are the only tagalongs PackaStack will auto-build, and only if ``--build-deps`` stays on (default). Missing build-deps get built first and published to your local repo so the main build can lean on them. Runtime deps are assumed to live in the archive or your repo—you own them if you want different versions. Cycles or gaps are shouted about during planning so you don’t waste sbuild minutes.
 
+Upstream version floors are enforced by default. Use ``--min-version-policy report`` to keep older archive versions while still flagging them as "outdated", or ``--min-version-policy ignore`` to treat them as satisfied. Either way, the build writes a dependency satisfaction report (text + JSON) alongside other run artifacts when ``--dep-report`` is left on.
+
 Packaging type propagation
 --------------------------
 Release vs snapshot vs milestone is a promise you make for the target only. Dependencies keep whatever versions the archive or your local repo provide unless you explicitly rebuild them. Flipping ``--snapshot`` does not cascade; PackaStack prefers stability for the rest of the graph.

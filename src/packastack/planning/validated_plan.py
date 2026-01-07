@@ -571,6 +571,7 @@ def resolve_dependency_with_spec(
     local_index: PackageIndex | None,
     cloud_archive_index: PackageIndex | None,
     ubuntu_index: PackageIndex,
+    enforce_min_versions: bool = True,
 ) -> tuple[str | None, str, bool]:
     """Resolve a dependency to a Debian package, checking version constraints.
 
@@ -590,7 +591,8 @@ def resolve_dependency_with_spec(
         Tuple of (version, source, satisfied) where:
         - version: The package version found (or None if not found)
         - source: "local", "cloud-archive", "ubuntu", or "" if not found
-        - satisfied: True if version satisfies the specifier
+        - satisfied: True if version satisfies the specifier (or always True when
+          enforce_min_versions is False)
     """
     if not dep_name:
         return None, "", True
@@ -600,21 +602,24 @@ def resolve_dependency_with_spec(
     # Check Ubuntu first
     version = ubuntu_index.get_version(dep_name)
     if version:
-        satisfied = check_version_satisfies(version_spec, version)
+        base_satisfied = check_version_satisfies(version_spec, version)
+        satisfied = base_satisfied if enforce_min_versions else True
         candidates.append((version, "ubuntu", satisfied))
 
     # Check cloud archive
     if cloud_archive_index:
         version = cloud_archive_index.get_version(dep_name)
         if version:
-            satisfied = check_version_satisfies(version_spec, version)
+            base_satisfied = check_version_satisfies(version_spec, version)
+            satisfied = base_satisfied if enforce_min_versions else True
             candidates.append((version, "cloud-archive", satisfied))
 
     # Check local
     if local_index:
         version = local_index.get_version(dep_name)
         if version:
-            satisfied = check_version_satisfies(version_spec, version)
+            base_satisfied = check_version_satisfies(version_spec, version)
+            satisfied = base_satisfied if enforce_min_versions else True
             candidates.append((version, "local", satisfied))
 
     if not candidates:

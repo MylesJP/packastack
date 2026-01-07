@@ -58,6 +58,8 @@ Builds an OpenStack package end-to-end: validates the plan, fetches sources, app
 - ``-o``, ``--offline``: disable PackaStack network fetches; requires cached tarballs and an existing schroot.
 - ``-b/-B``, ``--binary/--no-binary``: toggle building binary packages (default on); ``--builder`` selects ``sbuild`` (default) or ``dpkg``.
 - ``-d/-D``, ``--build-deps/--no-build-deps``: auto-build missing OpenStack dependencies discovered during validation (default on).
+- ``--min-version-policy``: control how minimum versions from upstream are handled during validation (``enforce`` default, ``report``, or ``ignore``).
+- ``--dep-report/--no-dep-report``: write dependency satisfaction reports (text+JSON) into the run directory.
 - ``--use-gbp-dch/--no-gbp-dch``: toggle using ``gbp dch`` for changelog entries (default on; falls back to older path only when disabled).
 - ``-v``, ``--validate-plan`` and ``-p``, ``--plan-upload``: stop after validation or show the upload plan without building.
 - ``-U``, ``--upload``: print upload commands.
