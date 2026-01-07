@@ -485,6 +485,19 @@ def run_plan_for_package(
         run.log_event({"event": "verify.missing", "missing": missing})
 
     # Build result
+    # Build PlanGraph for reporting and wave rendering
+    try:
+        plan_graph = PlanGraph.from_dependency_graph(
+            dep_graph=graph,
+            run_id=run.run_id,
+            target=openstack_target,
+            ubuntu_series=resolved_ubuntu,
+            type_report=None,
+            cycles=cycles,
+        )
+    except Exception:
+        plan_graph = None
+
     plan_result = PlanResult(
         build_order=build_order,
         upload_order=upload_order,
