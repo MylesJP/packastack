@@ -13,7 +13,7 @@ from typing import Any
 
 import typer
 
-from packastack.apt.packages import load_package_index
+from packastack.apt.packages import load_package_index, apply_ubuntu_source_fallbacks
 from packastack.commands.plan import _fetch_packaging_repos
 from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths
@@ -58,8 +58,8 @@ def _render_text(report: dict[str, Any]) -> str:
         f"{summary.get('build_deps_dev_satisfied',0)}/{summary.get('build_deps_total',0)} satisfied"
     )
     lines.append(
-        f"          previous-lts ({report.get('previous_lts','unknown')}):   "
-        f"{summary.get('build_deps_prev_lts_satisfied',0)}/{summary.get('build_deps_total',0)} satisfied"
+        f"          current-lts ({report.get('current_lts','unknown')}):   "
+        f"{summary.get('build_deps_current_lts_satisfied',0)}/{summary.get('build_deps_total',0)} satisfied"
     )
     lines.append(f"          cloud-archive required:    {summary.get('cloud_archive_required_count',0)} deps")
     lines.append(f"          MIR warnings:              {summary.get('mir_warning_count',0)} deps in universe")
@@ -119,8 +119,8 @@ def explain(
         current_lts = get_current_lts()
         current_lts_series = current_lts.series if current_lts else ""
         if current_lts_series:
-            activity("resolve", f"Previous LTS series: {current_lts_series}")
-        run.log_event({"event": "series.prev_lts", "series": current_lts_series})
+            activity("resolve", f"Current LTS series: {current_lts_series}")
+        run.log_event({"event": "series.current_lts", "series": current_lts_series})
 
         releases_repo = paths["openstack_releases_repo"]
         if target == "devel":
@@ -188,6 +188,19 @@ def explain(
         if current_lts_series:
             prev_index = load_package_index(ubuntu_cache, current_lts_series, pockets, components)
 
+        # Apply Ubuntu source-name fallbacks to the resolved target identity
+        try:
+            wrapper = type("_RT", (), {})()
+            wrapper.source_package = target_identity.source_package
+            wrapper.upstream_project = getattr(target_identity, "canonical_upstream", None)
+            wrapper.resolution_source = target_identity.origin.value
+            apply_ubuntu_source_fallbacks(dev_index, [wrapper], run)
+            # Reflect back any substitution
+            if wrapper.source_package != target_identity.source_package:
+                target_identity.source_package = wrapper.source_package
+        except Exception:
+            pass
+
         reports_dir = run.run_path / "reports"
 
         # Fetch packaging repo
@@ -254,10 +267,10 @@ def explain(
         summary = {
             "build_deps_total": build_summary.total,
             "build_deps_dev_satisfied": build_summary.dev_satisfied,
-            "build_deps_prev_lts_satisfied": build_summary.prev_lts_satisfied,
+            "build_deps_current_lts_satisfied": build_summary.prev_lts_satisfied,
             "runtime_deps_total": runtime_summary.total,
             "runtime_deps_dev_satisfied": runtime_summary.dev_satisfied,
-            "runtime_deps_prev_lts_satisfied": runtime_summary.prev_lts_satisfied,
+            "runtime_deps_current_lts_satisfied": runtime_summary.prev_lts_satisfied,
             "cloud_archive_required_count": build_summary.cloud_archive_required + runtime_summary.cloud_archive_required,
             "mir_warning_count": build_summary.mir_warnings + runtime_summary.mir_warnings,
         }
@@ -279,7 +292,7 @@ def explain(
             },
             "openstack_target": openstack_target,
             "ubuntu_series": resolved_ubuntu,
-            "previous_lts": current_lts_series,
+            "current_lts": current_lts_series,
             "cloud_archive": cloud_archive,
             "type_selection": {
                 "mode": "auto",

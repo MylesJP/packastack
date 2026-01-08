@@ -12,7 +12,7 @@ def sample_report():
         "target": {"source_package": "python-foo"},
         "openstack_target": "caracal",
         "ubuntu_series": "resolute",
-        "previous_lts": "flamingo",
+        "current_lts": "flamingo",
         "dependencies": {
             "build": [
                 {
@@ -30,10 +30,10 @@ def sample_report():
         "summary": {
             "build_deps_total": 1,
             "build_deps_dev_satisfied": 1,
-            "build_deps_prev_lts_satisfied": 1,
+            "build_deps_current_lts_satisfied": 1,
             "runtime_deps_total": 0,
             "runtime_deps_dev_satisfied": 0,
-            "runtime_deps_prev_lts_satisfied": 0,
+            "runtime_deps_current_lts_satisfied": 0,
             "cloud_archive_required_count": 0,
             "mir_warning_count": 0,
         },

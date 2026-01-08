@@ -86,11 +86,11 @@ th {{ background: #eef2f7; }}
 <header>
   <h2>packastack explain</h2>
   <div class='small'>Target: {report.get('target', {})}</div>
-  <div class='small'>Ubuntu series: {report.get('ubuntu_series')} &nbsp;|&nbsp; Previous LTS: {report.get('previous_lts')}</div>
+  <div class='small'>Ubuntu series: {report.get('ubuntu_series')} &nbsp;|&nbsp; Current LTS: {report.get('current_lts')}</div>
 </header>
 <div class='cards'>
   {card('Build deps (dev)', f"{summary.get('build_deps_dev_satisfied', 0)}/{summary.get('build_deps_total', 0)}")}
-  {card('Build deps (prev LTS)', f"{summary.get('build_deps_prev_lts_satisfied', 0)}/{summary.get('build_deps_total', 0)}")}
+  {card('Build deps (current LTS)', f"{summary.get('build_deps_current_lts_satisfied', 0)}/{summary.get('build_deps_total', 0)}")}
   {card('Cloud-archive required', summary.get('cloud_archive_required_count', 0))}
   {card('MIR warnings', summary.get('mir_warning_count', 0))}
 </div>
@@ -102,7 +102,7 @@ th {{ background: #eef2f7; }}
         <th>Package</th>
         <th>Constraint</th>
         <th>Ubuntu (dev)</th>
-        <th>Previous LTS</th>
+        <th>Current LTS</th>
         <th>Cloud-archive?</th>
         <th>MIR?</th>
       </tr>
@@ -120,7 +120,7 @@ th {{ background: #eef2f7; }}
         <th>Package</th>
         <th>Constraint</th>
         <th>Ubuntu (dev)</th>
-        <th>Previous LTS</th>
+        <th>Current LTS</th>
         <th>Cloud-archive?</th>
         <th>MIR?</th>
       </tr>
@@ -152,7 +152,7 @@ def write_explain_reports(report: dict[str, Any], reports_dir: Path) -> dict[str
 def render_plan_dependency_html(summary: dict[str, Any]) -> str:
     packages = summary.get("packages", [])
     totals = summary.get("totals", {})
-    prev = summary.get("previous_lts", "")
+    current_lts = summary.get("current_lts", "")
 
     rows = []
     for pkg in packages:
@@ -161,7 +161,7 @@ def render_plan_dependency_html(summary: dict[str, Any]) -> str:
             f"<td>{pkg.get('package')}</td>"
             f"<td>{pkg.get('dependencies')}</td>"
             f"<td>{pkg.get('dev_satisfied')}</td>"
-            f"<td>{pkg.get('prev_lts_satisfied')}</td>"
+            f"<td>{pkg.get('current_lts_satisfied')}</td>"
             f"<td>{pkg.get('cloud_archive_required')}</td>"
             f"<td>{pkg.get('mir_warnings')}</td>"
             "</tr>"
@@ -186,7 +186,7 @@ th {{ background: #eef2f7; }}
 </style></head>
 <body>
 <h2>Plan Dependency Summary</h2>
-<div>Previous LTS: {prev or 'unknown'}</div>
+<div>Current LTS: {current_lts or 'unknown'}</div>
 <div class='cards'>
   <div class='card'><div class='label'>Dependencies</div><div class='value'>{totals.get('total',0)}</div></div>
   <div class='card'><div class='label'>Cloud-archive required</div><div class='value'>{totals.get('cloud_archive_required',0)}</div></div>
@@ -194,7 +194,7 @@ th {{ background: #eef2f7; }}
 </div>
 <table>
   <thead>
-    <tr><th>Package</th><th>Deps</th><th>Dev satisfied</th><th>Prev LTS satisfied</th><th>Cloud-archive</th><th>MIR</th></tr>
+    <tr><th>Package</th><th>Deps</th><th>Dev satisfied</th><th>Current LTS satisfied</th><th>Cloud-archive</th><th>MIR</th></tr>
   </thead>
   <tbody>
     {''.join(rows)}

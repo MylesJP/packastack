@@ -227,6 +227,29 @@ class TestBuildSbuildCommand:
         cmd = build_sbuild_command(config)
         assert cmd[-1] == str(tmp_path / "pkg.dsc")
 
+    def test_lintian_fail_on_error_only(self, tmp_path: Path) -> None:
+        """Test that lintian is configured to fail only on errors, not warnings."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="noble",
+        )
+        cmd = build_sbuild_command(config)
+        # Check that --fail-on error is passed to lintian
+        # This ensures warnings don't fail the build
+        assert "--lintian-opts" in cmd
+        lintian_opts_indices = [i for i, x in enumerate(cmd) if x == "--lintian-opts"]
+        # There should be at least 2 --lintian-opts: one for --fail-on, one for error
+        assert len(lintian_opts_indices) >= 2
+        # Verify --fail-on is followed by error
+        for i, idx in enumerate(lintian_opts_indices[:-1]):
+            if cmd[idx + 1] == "--fail-on":
+                assert cmd[lintian_opts_indices[i + 1] + 1] == "error"
+                break
+        else:
+            # If we didn't find it in the loop, fail
+            assert "--fail-on" in cmd, "Expected --fail-on in lintian options"
+
 
 class TestGetDefaultChrootName:
     """Tests for get_default_chroot_name function."""

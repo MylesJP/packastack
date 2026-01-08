@@ -1109,3 +1109,75 @@ class TestMultiArchIndexes:
 
         # Should succeed and only include amd64 packages
         assert result.success is True
+
+
+class TestEnsureRepoInitialized:
+    """Tests for ensure_repo_initialized function."""
+
+    def test_creates_empty_index_files(self, tmp_path: Path) -> None:
+        """Test that ensure_repo_initialized creates all required index files."""
+        result = localrepo.ensure_repo_initialized(tmp_path, arch="amd64")
+
+        assert result is True
+
+        # Check that the directories were created
+        binary_amd64 = tmp_path / "dists" / "local" / "main" / "binary-amd64"
+        binary_all = tmp_path / "dists" / "local" / "main" / "binary-all"
+
+        assert binary_amd64.is_dir()
+        assert binary_all.is_dir()
+
+        # Check that empty Packages files exist
+        assert (binary_amd64 / "Packages").exists()
+        assert (binary_amd64 / "Packages.gz").exists()
+        assert (binary_all / "Packages").exists()
+        assert (binary_all / "Packages.gz").exists()
+
+        # Verify Packages files are empty
+        assert (binary_amd64 / "Packages").read_text() == ""
+        assert (binary_all / "Packages").read_text() == ""
+
+        # Verify Packages.gz decompresses to empty
+        with gzip.open(binary_amd64 / "Packages.gz", "rt") as f:
+            assert f.read() == ""
+        with gzip.open(binary_all / "Packages.gz", "rt") as f:
+            assert f.read() == ""
+
+    def test_does_not_overwrite_existing_indexes(self, tmp_path: Path) -> None:
+        """Test that ensure_repo_initialized doesn't overwrite existing indexes."""
+        # Create a directory structure with existing content
+        binary_amd64 = tmp_path / "dists" / "local" / "main" / "binary-amd64"
+        binary_amd64.mkdir(parents=True)
+        binary_all = tmp_path / "dists" / "local" / "main" / "binary-all"
+        binary_all.mkdir(parents=True)
+
+        packages_content = "Package: test\nVersion: 1.0\n"
+        (binary_amd64 / "Packages").write_text(packages_content)
+        with gzip.open(binary_amd64 / "Packages.gz", "wt") as f:
+            f.write(packages_content)
+        (binary_all / "Packages").write_text("")
+        with gzip.open(binary_all / "Packages.gz", "wt") as f:
+            f.write("")
+
+        # Run ensure_repo_initialized
+        result = localrepo.ensure_repo_initialized(tmp_path, arch="amd64")
+
+        assert result is True  # Success even when already initialized
+
+        # Verify content wasn't overwritten
+        assert (binary_amd64 / "Packages").read_text() == packages_content
+
+    def test_creates_arm64_indexes(self, tmp_path: Path) -> None:
+        """Test that ensure_repo_initialized works with arm64 architecture."""
+        result = localrepo.ensure_repo_initialized(tmp_path, arch="arm64")
+
+        assert result is True
+
+        # Check that the directories were created for arm64
+        binary_arm64 = tmp_path / "dists" / "local" / "main" / "binary-arm64"
+        binary_all = tmp_path / "dists" / "local" / "main" / "binary-all"
+
+        assert binary_arm64.is_dir()
+        assert binary_all.is_dir()
+        assert (binary_arm64 / "Packages").exists()
+        assert (binary_arm64 / "Packages.gz").exists()

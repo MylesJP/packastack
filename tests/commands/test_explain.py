@@ -121,11 +121,11 @@ def test_explain_command_renders_text(monkeypatch, tmp_path):
     reports_dir = tmp_path / "run" / "reports"
     assert (reports_dir / "explain.json").exists()
     assert (reports_dir / "explain.html").exists()
-    # Verify the saved report uses the LTS series (not codename) for previous_lts
+    # Verify the saved report uses the LTS series (not codename) for current_lts
     import json
 
     data = json.loads((reports_dir / "explain.json").read_text())
-    assert data.get("previous_lts") == "noble"
+    assert data.get("current_lts") == "noble"
     # Cloud archive should be constructed from the LTS series and OpenStack target
     assert data.get("cloud_archive") == "noble-caracal"
 
@@ -194,7 +194,7 @@ def test_explain_emits_resolve_lines(monkeypatch, tmp_path):
     assert result.exit_code == 0
     out = result.output
     assert "[resolve] Ubuntu series: resolute" in out
-    assert "[resolve] Previous LTS series: noble" in out
+    assert "[resolve] Current LTS series: noble" in out
     assert "[resolve] Cloud Archive: noble-gazpacho" in out
 
 
@@ -354,12 +354,12 @@ def test_render_text_includes_cloud_and_mir_lists():
         "summary": {
             "build_deps_dev_satisfied": 1,
             "build_deps_total": 2,
-            "build_deps_prev_lts_satisfied": 0,
+            "build_deps_current_lts_satisfied": 0,
             "cloud_archive_required_count": 1,
             "mir_warning_count": 1,
         },
         "ubuntu_series": "devel",
-        "previous_lts": "jammy",
+        "current_lts": "jammy",
         "cloud_archive_deps": [
             {"name": "foo", "relation": ">=", "version": "1.0"},
         ],

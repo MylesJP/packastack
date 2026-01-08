@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from packastack.apt.localrepo import ensure_repo_initialized
 from packastack.build.collector import (
     ArtifactReport,
     CollectedFile,
@@ -177,7 +178,9 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
         cmd.extend(["-c", config.chroot_name])
 
     # Local repo setup via chroot-setup-commands
+    # First ensure the repo has valid indexes (even if empty)
     if config.local_repo_root and config.local_repo_root.exists():
+        ensure_repo_initialized(config.local_repo_root, config.arch)
         setup_cmds = generate_chroot_setup_commands(config.local_repo_root)
         for setup_cmd in setup_cmds:
             cmd.extend(["--chroot-setup-commands", setup_cmd])
@@ -189,8 +192,11 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
     # Extra arguments
     cmd.extend(config.extra_args)
 
-    # Lintian tag suppression (e.g., inconsistent-maintainer for local builds)
-    # Each --lintian-opts passes one option to lintian
+    # Lintian configuration:
+    # 1. Only fail on errors, not warnings (--fail-on error)
+    #    This ensures lintian warnings don't cause the build to fail
+    # 2. Suppress specific tags as configured
+    cmd.extend(["--lintian-opts", "--fail-on", "--lintian-opts", "error"])
     if config.lintian_suppress_tags:
         for tag in config.lintian_suppress_tags:
             cmd.extend(["--lintian-opts", f"--suppress-tags={tag}"])

@@ -45,6 +45,7 @@ from packastack.apt.packages import (
     PackageIndex,
     load_package_index,
 )
+from packastack.apt.packages import apply_ubuntu_source_fallbacks
 from packastack.core.paths import resolve_paths
 from packastack.planning.package_discovery import discover_packages
 from packastack.planning.type_selection import (
@@ -86,7 +87,7 @@ from packastack.target.resolution import TargetResolver, parse_target_expr
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.core.run import RunContext, activity
 from packastack.target.series import resolve_series
-from packastack.target.distro_info import get_previous_lts
+from packastack.target.distro_info import get_current_lts
 from packastack.core.spinner import activity_spinner
 
 if TYPE_CHECKING:
@@ -273,6 +274,16 @@ def run_plan_for_package(
             activity("resolve", f"Target: {t.source_package} ({t.resolution_source})")
     run.log_event({"event": "resolve.targets", "targets": target_names})
 
+    # Normalize upstream_project for python-* prefixed resolved targets
+    # before policy checks so snapshot eligibility uses the canonical
+    # upstream deliverable name (e.g., 'stevedore' not 'python-stevedore').
+    try:
+        from packastack.apt.packages import apply_ubuntu_source_fallbacks
+
+        apply_ubuntu_source_fallbacks(None, resolved_targets, run)
+    except Exception:
+        pass
+
     # Retirement policy (registry + project-config)
     retirement_exit = _enforce_retirement(
         targets=resolved_targets,
@@ -303,12 +314,49 @@ def run_plan_for_package(
                     if t.resolution_source.startswith("registry"):
                         run.log_event({"event": "policy.skip_snapshot_registry", "package": t.source_package})
                         continue
+
+                    # Use the canonical upstream project name for snapshot
+                    # eligibility checks (e.g. oslo.context), not the
+                    # distribution source package name (e.g. python-oslo.context).
+                    upstream_name = getattr(t, "upstream_project", t.source_package)
+                    # Normalize canonical identifiers like "openstack/glance"
+                    # to the project name expected by releases (e.g. "glance").
+                    if isinstance(upstream_name, str) and "/" in upstream_name:
+                        upstream_name = upstream_name.split("/")[-1]
+                    # Strip common distribution prefixes (python3-/python-) so
+                    # that library packages map to their upstream project names
+                    # (e.g. python-stevedore -> stevedore) for policy checks.
+                    if isinstance(upstream_name, str) and (upstream_name.startswith("python3-") or upstream_name.startswith("python-")):
+                        upstream_name = upstream_name.removeprefix("python3-").removeprefix("python-")
                     eligible, reason, preferred_version = is_snapshot_eligible(
-                        releases_repo, openstack_target, t.source_package
+                        releases_repo, openstack_target, upstream_name
                     )
+
+                    # If the project wasn't found and the name looks like a
+                    # python- prefixed package, retry using the stripped
+                    # base name (e.g., python-stevedore -> stevedore).
+                    if not eligible and isinstance(upstream_name, str) and (
+                        upstream_name.startswith("python3-") or upstream_name.startswith("python-")
+                    ):
+                        alt = upstream_name.removeprefix("python3-").removeprefix("python-")
+                        try:
+                            alt_eligible, alt_reason, alt_pref = is_snapshot_eligible(
+                                releases_repo, openstack_target, alt
+                            )
+                            if alt_eligible:
+                                eligible, reason, preferred_version = alt_eligible, alt_reason, alt_pref
+                        except Exception:
+                            pass
+
                     if not eligible:
-                        policy_issues.append(f"{t.source_package}: {reason}")
-                        run.log_event({"event": "policy.blocked", "package": t.source_package, "reason": reason})
+                        # Use the normalized upstream name in policy messages
+                        policy_issues.append(f"{upstream_name}: {reason}")
+                        run.log_event({
+                            "event": "policy.blocked",
+                            "package": t.source_package,
+                            "upstream": upstream_name,
+                            "reason": reason,
+                        })
                         if preferred_version:
                             preferred_versions[t.source_package] = preferred_version
                     elif "Warning" in reason:
@@ -319,23 +367,56 @@ def run_plan_for_package(
                 if t.resolution_source.startswith("registry"):
                     run.log_event({"event": "policy.skip_snapshot_registry", "package": t.source_package})
                     continue
+                upstream_name = getattr(t, "upstream_project", t.source_package)
+                if isinstance(upstream_name, str) and "/" in upstream_name:
+                    upstream_name = upstream_name.split("/")[-1]
+                if isinstance(upstream_name, str) and (upstream_name.startswith("python3-") or upstream_name.startswith("python-")):
+                    upstream_name = upstream_name.removeprefix("python3-").removeprefix("python-")
                 eligible, reason, preferred_version = is_snapshot_eligible(
-                    releases_repo, openstack_target, t.source_package
+                    releases_repo, openstack_target, upstream_name
                 )
+                if not eligible and isinstance(upstream_name, str) and (
+                    upstream_name.startswith("python3-") or upstream_name.startswith("python-")
+                ):
+                    alt = upstream_name.removeprefix("python3-").removeprefix("python-")
+                    try:
+                        alt_eligible, alt_reason, alt_pref = is_snapshot_eligible(
+                            releases_repo, openstack_target, alt
+                        )
+                        if alt_eligible:
+                            eligible, reason, preferred_version = alt_eligible, alt_reason, alt_pref
+                    except Exception:
+                        pass
                 if not eligible:
-                    policy_issues.append(f"{t.source_package}: {reason}")
-                    run.log_event({"event": "policy.blocked", "package": t.source_package, "reason": reason})
+                    policy_issues.append(f"{upstream_name}: {reason}")
+                    run.log_event({
+                        "event": "policy.blocked",
+                        "package": t.source_package,
+                        "upstream": upstream_name,
+                        "reason": reason,
+                    })
                     if preferred_version:
                         preferred_versions[t.source_package] = preferred_version
 
-        if policy_issues and not request.force:
-            for issue in policy_issues:
-                activity("policy", f"Blocked: {issue}")
-            activity("policy", "Use --force to override policy checks")
-            return PlanResult([], [], {}, {}, []), EXIT_CONFIG_ERROR
-        elif policy_issues:
-            for issue in policy_issues:
-                activity("policy", f"Warning (forced): {issue}")
+        if policy_issues:
+            # If the build type was explicitly requested (not 'auto' or None),
+            # enforce policy unless --force is provided. When in 'auto' mode or
+            # when the caller left the build_type unspecified (None) each
+            # package will decide between release vs snapshot, so only warn
+            # rather than block the overall plan.
+            if request.build_type not in (None, "auto"):
+                if not request.force:
+                    for issue in policy_issues:
+                        activity("policy", f"Blocked: {issue}")
+                    activity("policy", "Use --force to override policy checks")
+                    return PlanResult([], [], {}, {}, []), EXIT_CONFIG_ERROR
+                else:
+                    for issue in policy_issues:
+                        activity("policy", f"Warning (forced): {issue}")
+            else:
+                # Auto/unspecified mode: surface as informational warnings and allow plan
+                for issue in policy_issues:
+                    activity("policy", f"Note: {issue}")
 
         if verbose_output:
             activity("policy", "Snapshot eligibility: OK")
@@ -388,6 +469,24 @@ def run_plan_for_package(
         "packages": len(ubuntu_index.packages),
         "sources": len(ubuntu_index.sources),
     })
+
+    # Apply Ubuntu source-name fallbacks for resolved targets so that
+    # planning uses the canonical source package names available in the
+    # Ubuntu archive (helps for library packages like stevedore).
+    try:
+        apply_ubuntu_source_fallbacks(ubuntu_index, resolved_targets, run)
+    except Exception:
+        # Non-fatal: fallback helper should not break planning
+        pass
+
+    # If fallbacks adjusted resolved_targets, reflect that in the
+    # targets list used for graph building and reporting.
+    try:
+        target_names = [t.source_package for t in resolved_targets]
+        targets = target_names
+        run.log_event({"event": "resolve.targets_adjusted", "targets": target_names})
+    except Exception:
+        pass
 
     if verbose_output:
         activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
@@ -487,12 +586,31 @@ def run_plan_for_package(
     # Build result
     # Build PlanGraph for reporting and wave rendering
     try:
+        # Perform per-package type selection for the build_order so the
+        # PlanGraph can annotate nodes with the chosen build type (snapshot
+        # vs release) which is useful for rendering waves.
+        try:
+            packages_tuples = [(pkg, _source_package_to_deliverable(pkg)) for pkg in build_order]
+            type_report = select_build_types_for_packages(
+                releases_repo=releases_repo,
+                series=openstack_target,
+                packages=packages_tuples,
+                run_id=run.run_id,
+                ubuntu_series=resolved_ubuntu,
+                type_mode=request.build_type,
+                parallel=1,
+                local_packages=set(build_order),
+                registry=registry,
+            )
+        except Exception:
+            type_report = None
+
         plan_graph = PlanGraph.from_dependency_graph(
             dep_graph=graph,
             run_id=run.run_id,
             target=openstack_target,
             ubuntu_series=resolved_ubuntu,
-            type_report=None,
+            type_report=type_report,
             cycles=cycles,
         )
     except Exception:
@@ -590,9 +708,19 @@ def _resolve_package_targets(
     # Convert to ResolvedTarget format for backward compatibility
     converted: list[ResolvedTarget] = []
     for identity in candidates:
+        # Normalize canonical upstream to a deliverable name suitable for
+        # policy checks. Prefer the canonical upstream if provided, but
+        # fall back to the source package and strip python prefixes and
+        # repository qualifiers like 'openstack/project'.
+        upstream = identity.canonical_upstream or identity.source_package
+        if isinstance(upstream, str) and "/" in upstream:
+            upstream = upstream.split("/")[-1]
+        if isinstance(upstream, str) and (upstream.startswith("python3-") or upstream.startswith("python-")):
+            upstream = upstream.removeprefix("python3-").removeprefix("python-")
+
         converted.append(ResolvedTarget(
             source_package=identity.source_package,
-            upstream_project=identity.canonical_upstream,
+            upstream_project=upstream,
             resolution_source=identity.origin.value,
         ))
         run.log_event({
@@ -773,6 +901,12 @@ def _build_dependency_graph(
     if exclude_packages:
         openstack_set -= exclude_packages
 
+    # Ensure the target packages themselves are always in the openstack set
+    # so they are marked needs_rebuild=True. This is critical when the target
+    # name differs from the releases repo key (e.g., 'stevedore' vs
+    # 'python-stevedore') due to Ubuntu source fallback adjustments.
+    openstack_set.update(targets)
+
     result = build_graph_from_index(
         packages=targets,
         package_index=ubuntu_index,
@@ -801,11 +935,11 @@ def _write_plan_dependency_summary(
 ) -> dict[str, Path] | None:
     """Generate dependency satisfaction summary for plan reports."""
 
-    prev_lts = get_previous_lts()
-    prev_codename = prev_lts.codename if prev_lts else ""
-    prev_index = None
-    if prev_codename:
-        prev_index = load_package_index(cache_root, prev_codename, pockets, components)
+    current_lts = get_current_lts()
+    current_lts_codename = current_lts.codename if current_lts else ""
+    current_lts_index = None
+    if current_lts_codename:
+        current_lts_index = load_package_index(cache_root, current_lts_codename, pockets, components)
 
     packages: list[dict[str, object]] = []
     totals = {
@@ -816,12 +950,12 @@ def _write_plan_dependency_summary(
 
     for node in sorted(graph.nodes):
         deps = [ParsedDependency(name=d) for d in graph.edges.get(node, set())]
-        results, summary = evaluate_dependencies(deps, ubuntu_index, prev_index, kind="runtime")
+        results, summary = evaluate_dependencies(deps, ubuntu_index, current_lts_index, kind="runtime")
         packages.append({
             "package": node,
             "dependencies": summary.total,
             "dev_satisfied": summary.dev_satisfied,
-            "prev_lts_satisfied": summary.prev_lts_satisfied,
+            "current_lts_satisfied": summary.prev_lts_satisfied,
             "cloud_archive_required": summary.cloud_archive_required,
             "mir_warnings": summary.mir_warnings,
         })
@@ -831,7 +965,7 @@ def _write_plan_dependency_summary(
         totals["mir_warnings"] += summary.mir_warnings
 
     summary_payload = {
-        "previous_lts": prev_codename,
+        "current_lts": current_lts_codename,
         "totals": totals,
         "packages": packages,
     }
@@ -1175,6 +1309,21 @@ def _plan_all_packages(
             "packages": len(ubuntu_index.packages),
             "sources": len(ubuntu_index.sources),
         })
+
+    # Apply Ubuntu source fallbacks for any previously resolved targets
+    try:
+        from packastack.apt.packages import apply_ubuntu_source_fallbacks
+
+        apply_ubuntu_source_fallbacks(ubuntu_index, resolved_targets, run)
+        # Refresh the targets list used for graph building
+        try:
+            target_names = [t.source_package for t in resolved_targets]
+            targets = target_names
+            run.log_event({"event": "resolve.targets_adjusted", "targets": target_names})
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 
@@ -1562,6 +1711,20 @@ def plan(
                 "packages": len(ubuntu_index.packages),
                 "sources": len(ubuntu_index.sources),
             })
+
+        # Apply Ubuntu source fallbacks for resolved targets in this code path
+        try:
+            from packastack.apt.packages import apply_ubuntu_source_fallbacks
+
+            apply_ubuntu_source_fallbacks(ubuntu_index, resolved_targets, run)
+            try:
+                target_names = [t.source_package for t in resolved_targets]
+                targets = target_names
+                run.log_event({"event": "resolve.targets_adjusted", "targets": target_names})
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 

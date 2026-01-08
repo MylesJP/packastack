@@ -637,6 +637,57 @@ def regenerate_all_indexes(repo_root: Path, arch: str = "amd64") -> tuple[IndexR
     return binary_result, source_result
 
 
+def ensure_repo_initialized(repo_root: Path, arch: str = "amd64") -> bool:
+    """Ensure the local repository is initialized with valid (possibly empty) indexes.
+
+    This creates the necessary directory structure and empty Packages.gz files
+    so that apt can use the repository even before any packages are published.
+    This is required for sbuild to successfully mount and use the local repo.
+
+    Args:
+        repo_root: Root directory of the local APT repository.
+        arch: Architecture to create indexes for.
+
+    Returns:
+        True if the repository was initialized successfully.
+    """
+    try:
+        # Create the pool directory
+        pool_dir = repo_root / "pool" / "main"
+        pool_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if indexes already exist for the given arch
+        binary_packages_gz = repo_root / "dists" / "local" / "main" / f"binary-{arch}" / "Packages.gz"
+        all_packages_gz = repo_root / "dists" / "local" / "main" / "binary-all" / "Packages.gz"
+
+        # If any required index is missing, regenerate all indexes
+        if not binary_packages_gz.exists() or not all_packages_gz.exists():
+            # regenerate_indexes handles creating empty indexes when pool is empty
+            result = regenerate_indexes(repo_root, arch)
+            if not result.success:
+                logger.warning("Failed to initialize binary indexes for %s: %s", arch, result.error)
+                return False
+
+            # Also create indexes for 'all' architecture if not the same
+            if arch != "all":
+                result_all = regenerate_indexes(repo_root, "all")
+                if not result_all.success:
+                    logger.warning("Failed to initialize binary-all indexes: %s", result_all.error)
+                    return False
+
+            # Initialize source indexes as well
+            source_result = regenerate_source_indexes(repo_root)
+            if not source_result.success:
+                logger.warning("Failed to initialize source indexes: %s", source_result.error)
+                # Source index failure is not fatal
+
+        return True
+
+    except Exception as e:
+        logger.warning("Failed to initialize local repository: %s", e)
+        return False
+
+
 def get_available_versions(repo_root: Path, package_name: str) -> list[str]:
     """Get all available versions of a package in the local repository.
 

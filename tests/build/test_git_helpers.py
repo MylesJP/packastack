@@ -13,7 +13,9 @@ from unittest.mock import patch
 import pytest
 
 from packastack.build.git_helpers import (
+    GitCommitError,
     ensure_no_merge_paths,
+    extract_upstream_version,
     get_git_author_env,
     maybe_disable_gpg_sign,
     maybe_enable_sphinxdoc,
@@ -245,3 +247,64 @@ class TestMaybeEnableSphinxdoc:
         
         result = maybe_enable_sphinxdoc(tmp_path)
         assert result is False
+
+
+class TestExtractUpstreamVersion:
+    """Tests for extract_upstream_version function."""
+
+    def test_strips_epoch_and_ubuntu_revision(self):
+        """Test extracting version from epoch:upstream-debian."""
+        assert extract_upstream_version("2:29.0.0-0ubuntu1") == "29.0.0"
+
+    def test_strips_ubuntu_revision_only(self):
+        """Test extracting version with no epoch."""
+        assert extract_upstream_version("1.2.3-1ubuntu2") == "1.2.3"
+
+    def test_handles_snapshot_version(self):
+        """Test extracting version from snapshot with git hash."""
+        result = extract_upstream_version("29.0.0+git2024010412345-0ubuntu1~snapshot")
+        assert result == "29.0.0+git2024010412345"
+
+    def test_handles_ppa_suffix(self):
+        """Test extracting version with ppa suffix."""
+        assert extract_upstream_version("1.2.3-1ubuntu2~ppa1") == "1.2.3"
+
+    def test_handles_build_suffix(self):
+        """Test extracting version with build suffix."""
+        assert extract_upstream_version("1.2.3-0ubuntu1~build1") == "1.2.3"
+
+    def test_returns_version_unchanged_if_no_ubuntu_revision(self):
+        """Test that version without Ubuntu revision works."""
+        assert extract_upstream_version("1.2.3") == "1.2.3"
+
+    def test_handles_complex_upstream_version(self):
+        """Test with complex upstream version containing dots and tildes."""
+        assert extract_upstream_version("2:3.14.0~rc1-0ubuntu1") == "3.14.0~rc1"
+
+
+class TestGitCommitError:
+    """Tests for GitCommitError exception."""
+
+    def test_basic_error(self):
+        """Test basic error message."""
+        error = GitCommitError("Commit failed")
+        assert str(error) == "Commit failed"
+        assert error.message == "Commit failed"
+        assert error.returncode == 1
+
+    def test_error_with_stderr(self):
+        """Test error with stderr output."""
+        error = GitCommitError("Commit failed", stderr="nothing to commit", returncode=1)
+        assert str(error) == "Commit failed: nothing to commit"
+        assert error.stderr == "nothing to commit"
+
+    def test_error_with_custom_returncode(self):
+        """Test error with custom return code."""
+        error = GitCommitError("Commit failed", returncode=128)
+        assert error.returncode == 128
+
+    def test_is_exception(self):
+        """Test that GitCommitError is an Exception."""
+        assert issubclass(GitCommitError, Exception)
+        with pytest.raises(GitCommitError):
+            raise GitCommitError("Test error")

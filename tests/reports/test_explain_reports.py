@@ -9,13 +9,13 @@ def test_write_explain_reports(tmp_path: Path) -> None:
         "target": {"source_package": "foo", "upstream_project": "foo", "resolution_source": "local"},
         "openstack_target": "devel",
         "ubuntu_series": "noble",
-        "previous_lts": "jammy",
+        "current_lts": "jammy",
         "type_selection": {"mode": "auto", "selected": "snapshot", "reason": "ok"},
         "dependencies": {"build": [], "runtime": []},
         "summary": {
             "build_deps_total": 0,
             "build_deps_dev_satisfied": 0,
-            "build_deps_prev_lts_satisfied": 0,
+            "build_deps_current_lts_satisfied": 0,
             "cloud_archive_required_count": 0,
             "mir_warning_count": 0,
         },
@@ -29,14 +29,14 @@ def test_write_explain_reports(tmp_path: Path) -> None:
 
 def test_write_plan_dependency_summary(tmp_path: Path) -> None:
     payload = {
-        "previous_lts": "jammy",
+        "current_lts": "jammy",
         "totals": {"total": 3, "cloud_archive_required": 1, "mir_warnings": 1},
         "packages": [
             {
                 "package": "foo",
                 "dependencies": 2,
                 "dev_satisfied": 2,
-                "prev_lts_satisfied": 1,
+                "current_lts_satisfied": 1,
                 "cloud_archive_required": 1,
                 "mir_warnings": 0,
             }

@@ -50,10 +50,11 @@ from packastack.build.errors import (
     EXIT_TOOL_MISSING,
 )
 from packastack.build.git_helpers import (
-    _ensure_no_merge_paths,
-    _get_git_author_env,
-    _maybe_disable_gpg_sign,
-    _maybe_enable_sphinxdoc,
+    GitCommitError,
+    ensure_no_merge_paths,
+    extract_upstream_version,
+    git_commit,
+    maybe_enable_sphinxdoc,
 )
 from packastack.build.tarball import _fetch_release_tarball
 from packastack.core.run import activity
@@ -204,8 +205,8 @@ class SingleBuildContext:
     ubuntu_index: PackageIndex | None = None
     ca_index: PackageIndex | None = None
     local_index: PackageIndex | None = None
-    prev_lts_codename: str | None = None
-    prev_lts_index: PackageIndex | None = None
+    current_lts_codename: str | None = None
+    current_lts_index: PackageIndex | None = None
     openstack_pkgs: dict[str, str] | None = None
 
     # Schroot
@@ -295,7 +296,10 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         resolve_upstream_registry,
     )
     from packastack.build.provenance import create_provenance
-    from packastack.build.type_resolution import build_type_from_string as _build_type_from_string
+    from packastack.build.type_resolution import (
+        build_type_from_string as _build_type_from_string,
+        resolve_build_type_auto,
+    )
     from packastack.upstream.releases import (
         get_previous_series,
         is_snapshot_eligible,
@@ -304,7 +308,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     )
     from packastack.upstream.source import select_upstream_source
     from packastack.target.series import resolve_series
-    from packastack.target.distro_info import get_previous_lts
+    from packastack.target.distro_info import get_current_lts
     from packastack.target.arch import get_host_arch
     from packastack.planning.type_selection import BuildType
     
@@ -367,11 +371,34 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     upstream_config = resolved_upstream.config
     resolution_source = resolved_upstream.resolution_source
     
-    # Build type already resolved before planning
-    build_type = _build_type_from_string(inputs.resolved_build_type_str)
-    milestone_str = inputs.milestone_from_cli
-    
-    run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
+    # Build type: if caller left it as "auto", resolve per-package here
+    if inputs.resolved_build_type_str == "auto":
+        try:
+            chosen, auto_milestone, reason = resolve_build_type_auto(
+                releases_repo=releases_repo,
+                series=openstack_target,
+                source_package=pkg_name,
+                deliverable=upstream_config.release_source.deliverable,
+                offline=inputs.offline,
+                run=run,
+            )
+        except Exception:
+            # Propagate exceptions as fatal for this package
+            raise
+        build_type = chosen
+        # milestone returned from auto resolver is rarely used; prefer CLI milestone
+        milestone_str = auto_milestone or inputs.milestone_from_cli
+        run.log_event({
+            "event": "resolve.build_type",
+            "type": build_type.value,
+            "milestone": milestone_str,
+            "auto_reason": reason,
+        })
+        activity("resolve", f"Chosen build type: {build_type.value} (auto: {reason})")
+    else:
+        build_type = _build_type_from_string(inputs.resolved_build_type_str)
+        milestone_str = inputs.milestone_from_cli
+        run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
     
     # Get previous series
     prev_series = get_previous_series(releases_repo, openstack_target)
@@ -440,20 +467,20 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     ca_index = indexes.cloud_archive
     local_index = indexes.local_repo
 
-    # Load previous LTS index for dependency satisfaction checks
+    # Load current LTS index for dependency satisfaction checks
     from packastack.apt.packages import load_package_index
 
-    prev_lts = get_previous_lts()
-    prev_lts_codename = prev_lts.codename if prev_lts else None
-    prev_lts_index = None
-    if prev_lts_codename:
+    current_lts = get_current_lts()
+    current_lts_codename = current_lts.codename if current_lts else None
+    current_lts_index = None
+    if current_lts_codename:
         try:
-            prev_lts_index = load_package_index(paths["ubuntu_archive_cache"], prev_lts_codename, pockets, components)
-            activity("plan", f"Previous LTS index ({prev_lts_codename}): {len(prev_lts_index.packages)} packages")
-            run.log_event({"event": "plan.prev_lts_index", "series": prev_lts_codename, "count": len(prev_lts_index.packages)})
+            current_lts_index = load_package_index(paths["ubuntu_archive_cache"], current_lts_codename, pockets, components)
+            activity("plan", f"Current LTS index ({current_lts_codename}): {len(current_lts_index.packages)} packages")
+            run.log_event({"event": "plan.current_lts_index", "series": current_lts_codename, "count": len(current_lts_index.packages)})
         except Exception as exc:
-            activity("warn", f"Failed to load previous LTS index ({prev_lts_codename}): {exc}")
-            run.log_event({"event": "plan.prev_lts_index_failed", "series": prev_lts_codename, "error": str(exc)})
+            activity("warn", f"Failed to load current LTS index ({current_lts_codename}): {exc}")
+            run.log_event({"event": "plan.current_lts_index_failed", "series": current_lts_codename, "error": str(exc)})
     
     # Load OpenStack packages
     openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
@@ -533,11 +560,11 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         upstream=upstream,
         resolution_source=resolution_source,
         prev_series=prev_series,
-        prev_lts_codename=prev_lts_codename,
+        current_lts_codename=current_lts_codename,
         ubuntu_index=ubuntu_index,
         ca_index=ca_index,
         local_index=local_index,
-        prev_lts_index=prev_lts_index,
+        current_lts_index=current_lts_index,
         openstack_pkgs=openstack_pkgs,
         schroot_name=schroot_name,
         provenance=provenance,
@@ -611,26 +638,25 @@ def fetch_packaging_repo(
     ctx.pkg_repo = pkg_repo
 
     # Protect packaging-only files from being removed during upstream merges
-    _ensure_no_merge_paths(pkg_repo, ["launchpad.yaml"])
+    ensure_no_merge_paths(pkg_repo, ["launchpad.yaml"])
 
     # Commit .gitattributes so it's active during import-orig merge
     gitattributes = pkg_repo / ".gitattributes"
     if gitattributes.exists():
-        try:
-            activity("fetch", "Committing .gitattributes for merge protection")
-            run_command(["git", "add", ".gitattributes"], cwd=pkg_repo)
-            commit_cmd = _maybe_disable_gpg_sign(
-                ["git", "commit", "-m", "Protect packaging files during merge"]
+        activity("fetch", "Committing .gitattributes for merge protection")
+        commit_result = git_commit(
+            pkg_repo,
+            ".gitattributes: protect launchpad.yaml during merge",
+            files=[".gitattributes"],
+        )
+        if commit_result.returncode == 0:
+            activity("fetch", "Committed .gitattributes protection")
+        else:
+            raise GitCommitError(
+                "Failed to commit .gitattributes",
+                stderr=commit_result.stderr,
+                returncode=commit_result.returncode,
             )
-            returncode, stdout, stderr = run_command(
-                commit_cmd, cwd=pkg_repo, env=_get_git_author_env()
-            )
-            if returncode == 0:
-                activity("fetch", ".gitattributes committed successfully")
-            else:
-                activity("fetch", f".gitattributes commit result: {returncode}")
-        except Exception as e:
-            activity("fetch", f".gitattributes commit failed: {e}")
 
     activity("fetch", f"Cloned to: {pkg_repo}")
     activity("fetch", f"Branches: {', '.join(fetch_result.branches[:5])}...")
@@ -713,33 +739,58 @@ def fetch_packaging_repo(
         else:
             activity("prepare", f"Updated debian/upstream/signing-key.asc for {ctx.openstack_target}")
 
-    # Commit watch file and signing key together before uscan runs
+    # Commit watch file update (separate commit per file)
     if watch_updated:
-        files_to_commit.append("debian/watch")
-    if signing_key_updated:
-        files_to_commit.append("debian/upstream/signing-key.asc")
-
-    if files_to_commit:
-        commit_parts = []
-        if watch_updated:
-            commit_parts.append("Update debian/watch")
-        if signing_key_updated:
-            if is_snapshot:
-                commit_parts.append("remove signing key for snapshot")
-            else:
-                commit_parts.append(f"update signing key for {ctx.openstack_target}")
-
-        commit_msg = " and ".join(commit_parts)
-        commit_cmd = _maybe_disable_gpg_sign(["git", "commit", "-m", commit_msg] + files_to_commit)
-
-        exit_code, stdout, stderr = run_command(commit_cmd, cwd=pkg_repo, env=_get_git_author_env())
-        if exit_code == 0:
-            activity("prepare", "Committed watch and signing key updates")
+        commit_result = git_commit(
+            pkg_repo,
+            "d/watch: update for new upstream",
+            files=["debian/watch"],
+        )
+        if commit_result.returncode == 0:
+            activity("prepare", "Committed watch file update")
         else:
-            activity("warn", f"Failed to commit updates: {stderr}")
+            raise GitCommitError(
+                "Failed to commit watch file update",
+                stderr=commit_result.stderr,
+                returncode=commit_result.returncode,
+            )
+
+    # Commit signing key update (separate commit per file)
+    if signing_key_updated:
+        if is_snapshot:
+            signing_key_msg = "d/u/signing-key.asc: remove for snapshot"
+        else:
+            signing_key_msg = f"d/u/signing-key.asc: update for {ctx.openstack_target}"
+        commit_result = git_commit(
+            pkg_repo,
+            signing_key_msg,
+            files=["debian/upstream/signing-key.asc"],
+        )
+        if commit_result.returncode == 0:
+            activity("prepare", "Committed signing key update")
+        else:
+            raise GitCommitError(
+                "Failed to commit signing key update",
+                stderr=commit_result.stderr,
+                returncode=commit_result.returncode,
+            )
 
     # Ensure sphinxdoc addon is enabled before patch application/commits
-    _maybe_enable_sphinxdoc(pkg_repo)
+    sphinxdoc_updated = maybe_enable_sphinxdoc(pkg_repo)
+    if sphinxdoc_updated:
+        commit_result = git_commit(
+            pkg_repo,
+            "d/rules: enable sphinxdoc to build documentation",
+            files=["debian/rules"],
+        )
+        if commit_result.returncode == 0:
+            activity("prepare", "Committed sphinxdoc enablement")
+        else:
+            raise GitCommitError(
+                "Failed to commit sphinxdoc enablement",
+                stderr=commit_result.stderr,
+                returncode=commit_result.returncode,
+            )
 
     result.watch_updated = watch_updated
     result.signing_key_updated = signing_key_updated
@@ -1356,7 +1407,7 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
         return PhaseResult.ok()
 
     dev_index = ctx.ubuntu_index
-    prev_index = ctx.prev_lts_index
+    current_lts_index = ctx.current_lts_index
     if dev_index is None:
         activity("deps", "Ubuntu index unavailable; skipping dependency satisfaction")
         return PhaseResult.ok()
@@ -1367,8 +1418,8 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     build_deps = build_dep_list + build_dep_indep
     runtime_deps = source_pkg.get_runtime_depends()
 
-    build_results, build_summary = evaluate_dependencies(build_deps, dev_index, prev_index, kind="build")
-    runtime_results, runtime_summary = evaluate_dependencies(runtime_deps, dev_index, prev_index, kind="runtime")
+    build_results, build_summary = evaluate_dependencies(build_deps, dev_index, current_lts_index, kind="build")
+    runtime_results, runtime_summary = evaluate_dependencies(runtime_deps, dev_index, current_lts_index, kind="runtime")
 
     def _count_components(results: list) -> tuple[int, int]:
         main_count = 0
@@ -1382,27 +1433,27 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
         return main_count, universe_count
 
     dev_main, dev_universe = _count_components(build_results)
-    prev_main, prev_universe = (0, 0)
+    current_lts_main, current_lts_universe = (0, 0)
     for dep in build_results:
         if dep.prev_lts.satisfied:
             if dep.prev_lts.component in ("main", "", None):
-                prev_main += 1
+                current_lts_main += 1
             else:
-                prev_universe += 1
+                current_lts_universe += 1
 
     summary = {
         "build_deps_total": build_summary.total,
         "build_deps_dev_satisfied": build_summary.dev_satisfied,
-        "build_deps_prev_lts_satisfied": build_summary.prev_lts_satisfied,
+        "build_deps_current_lts_satisfied": build_summary.prev_lts_satisfied,
         "runtime_deps_total": runtime_summary.total,
         "runtime_deps_dev_satisfied": runtime_summary.dev_satisfied,
-        "runtime_deps_prev_lts_satisfied": runtime_summary.prev_lts_satisfied,
+        "runtime_deps_current_lts_satisfied": runtime_summary.prev_lts_satisfied,
         "cloud_archive_required_count": build_summary.cloud_archive_required + runtime_summary.cloud_archive_required,
         "mir_warning_count": build_summary.mir_warnings + runtime_summary.mir_warnings,
         "dev_main_satisfied": dev_main,
         "dev_universe_satisfied": dev_universe,
-        "prev_main_satisfied": prev_main,
-        "prev_universe_satisfied": prev_universe,
+        "current_lts_main_satisfied": current_lts_main,
+        "current_lts_universe_satisfied": current_lts_universe,
     }
 
     build_payload = [r.to_dict() for r in build_results]
@@ -1413,7 +1464,7 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
         "target": {"source_package": ctx.pkg_name},
         "openstack_target": ctx.openstack_target,
         "ubuntu_series": ctx.resolved_ubuntu,
-        "previous_lts": ctx.prev_lts_codename,
+        "current_lts": ctx.current_lts_codename,
         "dependencies": {"build": build_payload, "runtime": runtime_payload},
         "summary": summary,
     }
@@ -1426,18 +1477,18 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     if ctx.update_control_min_versions:
         upstream_min_map = ctx.upstream_min_versions or {}
         if upstream_min_map:
-            prev_versions = {dep.name: prev_index.get_version(dep.name) if prev_index else None for dep in build_deps}
+            current_lts_versions = {dep.name: current_lts_index.get_version(dep.name) if current_lts_index else None for dep in build_deps}
             updated_build, decisions_build = apply_min_version_policy(
                 existing=build_dep_list,
                 upstream_mins=upstream_min_map,
-                prev_lts_versions=prev_versions,
+                prev_lts_versions=current_lts_versions,
                 normalize=ctx.normalize_to_prev_lts_floor,
                 dry_run=ctx.dry_run_control_edit,
             )
             updated_indep, decisions_indep = apply_min_version_policy(
                 existing=build_dep_indep,
                 upstream_mins=upstream_min_map,
-                prev_lts_versions=prev_versions,
+                prev_lts_versions=current_lts_versions,
                 normalize=ctx.normalize_to_prev_lts_floor,
                 dry_run=ctx.dry_run_control_edit,
             )
@@ -1486,8 +1537,8 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     )
     activity(
         "deps",
-        f"[deps]   previous-lts ({ctx.prev_lts_codename or 'unknown'}):   {build_summary.prev_lts_satisfied}/{build_summary.total} satisfied "
-        f"(main={prev_main}, universe={prev_universe})",
+        f"[deps]   current-lts ({ctx.current_lts_codename or 'unknown'}):   {build_summary.prev_lts_satisfied}/{build_summary.total} satisfied "
+        f"(main={current_lts_main}, universe={current_lts_universe})",
     )
     activity(
         "deps",
@@ -1856,18 +1907,23 @@ def import_and_patch(
         else:
             activity("patches", "Checked out master after patch export")
             activity("patches", "Committing refreshed patches on master")
-            run_command(["git", "add", "debian/patches"], cwd=pkg_repo)
-            commit_cmd = _maybe_disable_gpg_sign(["git", "commit", "-m", "Refresh patches"])
-            commit_rc, commit_out, commit_err = run_command(
-                commit_cmd, cwd=pkg_repo, env=_get_git_author_env()
-            )
-            if commit_rc == 0:
-                activity("patches", "Recorded refreshed patches commit")
-            else:
-                activity(
-                    "patches",
-                    f"Patch commit skipped: {commit_err or commit_out or 'no changes to commit'}",
+            patches_path = pkg_repo / "debian" / "patches"
+            if patches_path.exists():
+                commit_result = git_commit(
+                    pkg_repo,
+                    "d/patches/*: refresh patches",
+                    files=["debian/patches"],
                 )
+                if commit_result.returncode == 0:
+                    activity("patches", "Committed refreshed patches")
+                else:
+                    raise GitCommitError(
+                        "Failed to commit refreshed patches",
+                        stderr=commit_result.stderr,
+                        returncode=commit_result.returncode,
+                    )
+            else:
+                activity("patches", "No debian/patches to commit; skipping")
     else:
         activity("patches", "Skipping patch export/checkout (not a git repo)")
 
@@ -1904,19 +1960,27 @@ def import_and_patch(
 
         # Commit the changelog update
         if (pkg_repo / ".git").exists():
-            run_command(["git", "add", "debian/changelog"], cwd=pkg_repo)
-            commit_cmd = _maybe_disable_gpg_sign(
-                ["git", "commit", "-m", f"Update changelog for {new_version}"]
+            # Extract upstream version for commit message
+            upstream_ver = extract_upstream_version(new_version)
+            # Use "merging" for snapshots, "new upstream version" for releases
+            is_snapshot_version = "+git" in new_version or "~snapshot" in new_version
+            if is_snapshot_version:
+                changelog_msg = f"d/changelog: merging {upstream_ver}"
+            else:
+                changelog_msg = f"d/changelog: new upstream version {upstream_ver}"
+
+            commit_result = git_commit(
+                pkg_repo,
+                changelog_msg,
+                files=["debian/changelog"],
             )
-            commit_rc, commit_out, commit_err = run_command(
-                commit_cmd, cwd=pkg_repo, env=_get_git_author_env()
-            )
-            if commit_rc == 0:
+            if commit_result.returncode == 0:
                 activity("changelog", "Committed changelog update")
             else:
-                activity(
-                    "changelog",
-                    f"Changelog commit skipped: {commit_err or commit_out or 'no changes'}",
+                raise GitCommitError(
+                    "Failed to commit changelog update",
+                    stderr=commit_result.stderr,
+                    returncode=commit_result.returncode,
                 )
     else:
         activity("changelog", "Warning: failed to update changelog")
