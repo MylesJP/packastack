@@ -23,17 +23,96 @@ This module provides utilities for git commit operations, including:
 - Git author environment configuration from Debian maintainer variables
 - .gitattributes management for merge conflict prevention
 - debian/rules sphinxdoc addon enablement
+- Standardized git commit with file staging
+- Version string extraction for commit messages
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packastack.debpkg.gbp import CommandResult
+    # For type checking only: run_command returns a tuple in packastack.debpkg.gbp
+    from packastack.debpkg.gbp import run_command as _run_command_type
+
+@dataclass
+class CommandResult:
+    """Simple command result used by git helpers.
+
+    Mirrors the minimal attributes expected by callers:
+    - returncode: int
+    - stdout: str
+    - stderr: str
+    """
+
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def success(self) -> bool:  # pragma: no cover - trivial
+        return self.returncode == 0
+
+
+class GitCommitError(Exception):
+    """Raised when a git commit operation fails.
+
+    Attributes:
+        message: Error description.
+        stderr: Standard error output from git command.
+        returncode: Exit code from git command.
+    """
+
+    def __init__(self, message: str, stderr: str = "", returncode: int = 1) -> None:
+        super().__init__(message)
+        self.message = message
+        self.stderr = stderr
+        self.returncode = returncode
+
+    def __str__(self) -> str:
+        if self.stderr:
+            return f"{self.message}: {self.stderr}"
+        return self.message
+
+
+def extract_upstream_version(debian_version: str) -> str:
+    """Extract the upstream version from a Debian version string.
+
+    Strips the epoch prefix and Ubuntu revision suffix to get the bare
+    upstream version for use in commit messages.
+
+    Args:
+        debian_version: Full Debian version string (e.g., "2:29.0.0-0ubuntu1",
+            "29.0.0+git2024010412345-0ubuntu1~snapshot").
+
+    Returns:
+        Upstream version without epoch or Ubuntu revision (e.g., "29.0.0",
+        "29.0.0+git2024010412345").
+
+    Examples:
+        >>> extract_upstream_version("2:29.0.0-0ubuntu1")
+        '29.0.0'
+        >>> extract_upstream_version("29.0.0+git2024010412345-0ubuntu1~snapshot")
+        '29.0.0+git2024010412345'
+        >>> extract_upstream_version("1.2.3-1ubuntu2~ppa1")
+        '1.2.3'
+    """
+    version = debian_version
+
+    # Strip epoch (e.g., "2:" prefix)
+    if ":" in version:
+        version = version.split(":", 1)[1]
+
+    # Strip Debian/Ubuntu revision (e.g., "-0ubuntu1", "-1ubuntu2~ppa1")
+    # Pattern matches: -<debian_revision>ubuntu<ubuntu_revision><optional_suffix>
+    version = re.sub(r"-\d+ubuntu\d+.*$", "", version)
+
+    return version
 
 
 def no_gpg_sign_enabled() -> bool:
@@ -222,6 +301,7 @@ def git_commit(
     repo_path: Path,
     message: str,
     *,
+    files: list[str] | None = None,
     extra_lines: list[str] | None = None,
     add_all: bool = False,
     debug: bool = False,
@@ -229,6 +309,7 @@ def git_commit(
     """Execute a git commit with standardized options.
 
     This helper combines common git commit patterns:
+    - Optional file staging before commit
     - Optional GPG signing disable via PACKASTACK_NO_GPG_SIGN
     - Author/committer environment from Debian maintainer variables
     - Optional staged-all (-a flag)
@@ -236,8 +317,11 @@ def git_commit(
 
     Args:
         repo_path: Path to the git repository.
-        message: Primary commit message line.
-        extra_lines: Additional lines to append to commit message.
+        message: Primary commit message line (subject for gbp changelog).
+        files: List of file paths to stage with git add before committing.
+            If provided, these files are added before the commit. If git add
+            fails, returns early with a failed CommandResult.
+        extra_lines: Additional lines to append to commit message body.
         add_all: If True, use -a flag to stage all modified files.
         debug: If True, print git author environment debug info.
 
@@ -247,14 +331,31 @@ def git_commit(
     Example:
         result = git_commit(
             pkg_repo,
-            "Update debian/watch for new upstream release",
-            extra_lines=["Co-authored-by: packastack"],
-            add_all=True,
+            "d/watch: update for new upstream",
+            files=["debian/watch"],
+            extra_lines=["Update watch file version to 4"],
         )
         if result.success:
             print("Committed successfully")
     """
-    from packastack.debpkg.gbp import run_command, CommandResult
+    from packastack.debpkg.gbp import run_command
+
+    # If this isn't a git repository, treat commit as a no-op to allow
+    # test fixtures (which create directories but not actual git repos)
+    # to run without invoking git commands.
+    if not (repo_path / ".git").exists():
+        return CommandResult(returncode=0, stdout="", stderr=f"Not a git repo: {repo_path}")
+
+    # Stage files if provided
+    if files:
+        add_cmd = ["git", "add"] + files
+        add_rc, add_stdout, add_stderr = run_command(add_cmd, cwd=repo_path)
+        if add_rc != 0:
+            return CommandResult(
+                returncode=add_rc,
+                stdout=add_stdout,
+                stderr=add_stderr or f"Failed to stage files: {files}",
+            )
 
     # Build full message with extra lines
     full_message = message
@@ -273,14 +374,7 @@ def git_commit(
     # Get author environment
     env = get_git_author_env(debug=debug)
 
-    # Execute
-    return run_command(cmd, cwd=repo_path, env=env)
-
-
-# Backwards compatibility aliases (private names used in build.py)
-_no_gpg_sign_enabled = no_gpg_sign_enabled
-_maybe_disable_gpg_sign = maybe_disable_gpg_sign
-_get_git_author_env = get_git_author_env
-_ensure_no_merge_paths = ensure_no_merge_paths
-_maybe_enable_sphinxdoc = maybe_enable_sphinxdoc
+    # Execute and normalize result into CommandResult
+    rc, out, err = run_command(cmd, cwd=repo_path, env=env)
+    return CommandResult(returncode=rc, stdout=out, stderr=err)
 

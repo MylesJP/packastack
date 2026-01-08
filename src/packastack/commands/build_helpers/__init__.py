@@ -55,17 +55,14 @@ from packastack.build.errors import (
     phase_warning,
 )
 from packastack.build.git_helpers import (
+    GitCommitError,
     ensure_no_merge_paths,
+    extract_upstream_version,
     get_git_author_env,
+    git_commit,
     maybe_disable_gpg_sign,
     maybe_enable_sphinxdoc,
     no_gpg_sign_enabled,
-    # Backwards compatibility aliases
-    _ensure_no_merge_paths,
-    _get_git_author_env,
-    _maybe_disable_gpg_sign,
-    _maybe_enable_sphinxdoc,
-    _no_gpg_sign_enabled,
 )
 from packastack.build.tarball import (
     download_github_release_tarball,

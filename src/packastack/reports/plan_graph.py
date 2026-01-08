@@ -363,16 +363,28 @@ def render_waves(
         nodes = waves[wave_num]
         count = len(nodes)
         
-        # Format package list
+        # Format package list and annotate with chosen build type if available
+        def _annotate(n: str) -> str:
+            node = graph.nodes.get(n)
+            if node and node.build_type:
+                bt = node.build_type.lower()
+                if bt == "snapshot":
+                    return f"{n} (s)"
+                if bt == "milestone":
+                    return f"{n} (m)"
+                # default to release
+                return f"{n} (r)"
+            return n
+
         if count <= max_wave_packages:
-            pkg_list = ", ".join(nodes)
+            pkg_list = ", ".join(_annotate(n) for n in nodes)
             lines.append(f"  Wave {wave_num} ({count}): {pkg_list}")
         else:
             # Wrap into multiple lines
             lines.append(f"  Wave {wave_num} ({count}):")
             for i in range(0, count, max_wave_packages):
                 chunk = nodes[i:i+max_wave_packages]
-                lines.append(f"    {', '.join(chunk)}")
+                lines.append(f"    {', '.join(_annotate(n) for n in chunk)}")
     
     lines.append("")
     lines.append(f"Total: {len(waves)} waves, {total_packages} packages, {graph.edge_count} dependencies")

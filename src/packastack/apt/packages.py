@@ -322,6 +322,135 @@ def merge_package_indexes(*indexes: PackageIndex) -> PackageIndex:
     return merged
 
 
+def apply_ubuntu_source_fallbacks(
+    ubuntu_index: PackageIndex,
+    resolved_targets: list,
+    run: object | None = None,
+) -> None:
+    """Apply deterministic Ubuntu source-name fallbacks to resolved targets.
+
+    For any resolved target whose `source_package` is not present in
+    `ubuntu_index.sources`, try a sequence of candidate source names and
+    substitute the first match. The candidate order is:
+
+    1. base name with any leading python3-/python- prefix stripped
+    2. `python3-<base>`
+    3. `python-<base>`
+    4. the canonical upstream project name from the resolved target
+
+    The function mutates `resolved_targets` in-place and will add a
+    "+ub-fallback" marker to the target's `resolution_source` when a
+    substitution occurs. If `run` is provided it will be used to emit
+    structured events using `run.log_event(...)`.
+    """
+    # If ubuntu_index is None or has no sources, perform a limited
+    # normalization pass: convert python- / python3- prefixed source
+    # package names to an upstream_project (deliverable) by stripping
+    # the prefix. This helps policy checks that expect the OpenStack
+    # project name rather than a distribution source name.
+    if not resolved_targets:
+        return
+
+    has_index = bool(ubuntu_index and getattr(ubuntu_index, "sources", None))
+
+    if not has_index:
+        # Limited normalization only
+        for t in resolved_targets:
+            try:
+                src = t.source_package
+            except Exception:
+                continue
+
+            if isinstance(src, str) and (src.startswith("python3-") or src.startswith("python-")):
+                base = src.removeprefix("python3-").removeprefix("python-")
+                upl = getattr(t, "upstream_project", None)
+                # If upstream_project is missing or obviously a python-prefixed name,
+                # normalize it to the base deliverable name.
+                if not upl or (isinstance(upl, str) and (upl.startswith("python3-") or upl.startswith("python-") or upl == src)):
+                    try:
+                        t.upstream_project = base
+                    except Exception:
+                        pass
+                    if run is not None and hasattr(run, "log_event"):
+                        run.log_event({
+                            "event": "plan.ub_fallback_upstream_normalized",
+                            "original": src,
+                            "normalized": base,
+                        })
+        return
+
+    for t in resolved_targets:
+        try:
+            original = t.source_package
+        except Exception:
+            continue
+
+        if original in ubuntu_index.sources:
+            continue
+
+        # Derive base name by stripping common python prefixes
+        base = original
+        if base.startswith("python3-"):
+            base = base.removeprefix("python3-")
+        elif base.startswith("python-"):
+            base = base.removeprefix("python-")
+
+        candidates = [base, f"python3-{base}", f"python-{base}"]
+        # Finally, try the canonical upstream project name if present
+        upstream = getattr(t, "upstream_project", None)
+        if upstream and isinstance(upstream, str):
+            # Normalize 'openstack/<project>' to just the project name
+            if "/" in upstream:
+                upstream = upstream.split("/")[-1]
+            candidates.append(upstream)
+
+        tried = []
+        chosen = None
+        for c in candidates:
+            tried.append(c)
+            if c in ubuntu_index.sources:
+                chosen = c
+                break
+
+        if chosen:
+            t.source_package = chosen
+            # Mark resolution source to indicate the substitution
+            try:
+                t.resolution_source = f"{getattr(t, 'resolution_source', '')}+ub-fallback"
+            except Exception:
+                pass
+            # If upstream_project appears to be a python-prefixed name, normalize
+            # it to the deliverable base so downstream policy checks use the
+            # canonical upstream project identifier.
+            try:
+                upl = getattr(t, "upstream_project", None)
+                if isinstance(upl, str) and (upl.startswith("python3-") or upl.startswith("python-")):
+                    t.upstream_project = upl.removeprefix("python3-").removeprefix("python-")
+            except Exception:
+                pass
+            if run is not None and hasattr(run, "log_event"):
+                run.log_event({
+                    "event": "plan.ub_fallback_applied",
+                    "original": original,
+                    "chosen": chosen,
+                    "tried": tried,
+                })
+            # Emit a human-friendly activity if available
+            try:
+                from packastack.core.run import activity
+
+                activity("plan", f"Adjusted target {original} -> {chosen} using Ubuntu fallback")
+            except Exception:
+                pass
+        else:
+            if run is not None and hasattr(run, "log_event"):
+                run.log_event({
+                    "event": "plan.ub_fallback_not_found",
+                    "original": original,
+                    "tried": tried,
+                })
+
+
 if __name__ == "__main__":
     import sys
 

@@ -30,6 +30,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+import concurrent.futures
 
 import typer
 
@@ -100,9 +101,7 @@ from packastack.build.all_runner import (
     _run_sequential_builds,
 )
 from packastack.build.git_helpers import (
-    _ensure_no_merge_paths,
-    _get_git_author_env,
-    _maybe_disable_gpg_sign,
+    ensure_no_merge_paths,
 )
 from packastack.build.localrepo_helpers import (
     refresh_local_repo_indexes as _refresh_local_repo_indexes,
@@ -129,6 +128,7 @@ _build_dependency_graph = build_dependency_graph
 _build_upstream_versions_from_packaging = build_upstream_versions_from_packaging
 _get_parallel_batches = get_parallel_batches
 _run_single_build = run_single_build
+_ensure_no_merge_paths = ensure_no_merge_paths
 OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
 
 
@@ -274,7 +274,7 @@ def build(
     fail_on_cloud_archive_required: bool = typer.Option(
         False,
         "--fail-on-cloud-archive-required",
-        help="Fail build if any dependency requires Cloud Archive (previous LTS unsatisfied)",
+        help="Fail build if any dependency requires Cloud Archive (current LTS unsatisfied)",
     ),
     fail_on_mir_required: bool = typer.Option(
         False,
@@ -284,12 +284,12 @@ def build(
     update_control_min_versions: bool = typer.Option(
         True,
         "--update-control-min-versions/--no-update-control-min-versions",
-        help="Update debian/control minimum versions using previous LTS floor when compatible",
+        help="Update debian/control minimum versions using current LTS floor when compatible",
     ),
     normalize_to_prev_lts_floor: bool = typer.Option(
         False,
         "--normalize-to-prev-lts-floor",
-        help="Allow lowering constraints to previous LTS floor when safe (>= upstream min)",
+        help="Allow lowering constraints to current LTS floor when safe (>= upstream min)",
     ),
     dry_run_control_edit: bool = typer.Option(
         False,
@@ -617,14 +617,28 @@ def _run_build(
     # Pass resolved build type to planning to skip snapshot checks for release/milestone
     # Also skip local repo since packages haven't been cloned yet
     from dataclasses import replace
-    plan_request = replace(plan_request, build_type=resolved_build_type_str, skip_local=True)
+    # If the CLI asked for auto, leave plan_request.build_type as 'auto'
+    # so each package can decide individually. Only override when the
+    # user explicitly requested a non-auto build type.
+    if parsed_type_str == "auto":
+        plan_request = replace(plan_request, skip_local=True)
+    else:
+        plan_request = replace(plan_request, build_type=resolved_build_type_str, skip_local=True)
     
+    # Show spinners only when allowed and running in a real TTY to avoid
+    # polluting CI logs. Honor the `no_spinner` flag as well.
+    verbose_for_plan = True
+    try:
+        verbose_for_plan = (not request.no_spinner) and sys.__stdout__.isatty()
+    except Exception:
+        verbose_for_plan = False
+
     plan_result, plan_exit_code = run_plan_for_package(
         request=plan_request,
         run=run,
         cfg=cfg,
         paths=paths,
-        verbose_output=True,  # Show spinners and progress during planning
+        verbose_output=verbose_for_plan,
     )
     
     # Handle plan-only modes
@@ -671,8 +685,84 @@ def _run_build(
         setup_build_context,
     )
 
+    # Print plan waves before building (helps users understand parallel batches)
+    if getattr(plan_result, "plan_graph", None) is not None:
+        try:
+            waves_output = render_waves(plan_result.plan_graph)
+            print(f"\n{waves_output}", file=sys.__stdout__, flush=True)
+        except Exception:
+            # Best-effort: ignore render errors
+            pass
+
     activity("build", f"Building {len(plan_result.build_order)} package(s) in dependency order")
-    
+
+    # If multiple packages are present, run by wave batches in parallel by
+    # spawning per-package subprocess builds to isolate each package's work.
+    if len(plan_result.build_order) > 1 and getattr(plan_result, "plan_graph", None) is not None:
+        from packastack.planning.type_selection import get_default_parallel_workers
+
+        parallel_workers = get_default_parallel_workers()
+        if parallel_workers <= 0:
+            parallel_workers = 1
+
+        waves = getattr(plan_result.plan_graph, "waves", {})
+        batch_num = 0
+        for wave_num in sorted(waves.keys()):
+            batch = waves[wave_num]
+            batch_num += 1
+            if not batch:
+                continue
+
+            activity("build", f"Wave {batch_num}: {len(batch)} packages (parallel={min(parallel_workers, len(batch))})")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                futures: dict[concurrent.futures.Future, str] = {}
+                for pkg in batch:
+                    # Pass through 'auto' when CLI requested auto so each
+                    # package can resolve its own build type. Otherwise use
+                    # the resolved global type (release/snapshot/milestone).
+                    build_type_arg = resolved_build_type_str if parsed_type_str != "auto" else "auto"
+                    fut = executor.submit(
+                        run_single_build,
+                        package=pkg,
+                        target=request.target,
+                        ubuntu_series=request.ubuntu_series,
+                        cloud_archive=request.cloud_archive,
+                        build_type=build_type_arg,
+                        binary=request.binary,
+                        force=request.force,
+                        run_dir=run.run_path,
+                    )
+                    futures[fut] = pkg
+
+                any_failures = False
+                for fut in concurrent.futures.as_completed(futures):
+                    pkg = futures[fut]
+                    try:
+                        success, failure_type, message, log_path = fut.result()
+                        if success:
+                            activity("build", f"[ok]    {pkg}")
+                        else:
+                            any_failures = True
+                            activity("build", f"[fail]  {pkg}: {message}")
+                            if log_path:
+                                activity("build", f"        Log: {log_path}")
+                    except Exception as e:
+                        any_failures = True
+                        activity("build", f"[fail]  {pkg}: {e}")
+
+                if any_failures and not request.force:
+                    activity("report", "Stopping: failures in wave and not running with --force")
+                    return EXIT_ALL_BUILD_FAILED
+
+            try:
+                _refresh_local_repo_indexes(paths.get("local_apt_repo"), get_host_arch(), run, phase="build")
+            except Exception:
+                pass
+
+        activity("build", f"All {len(plan_result.build_order)} packages processed")
+        return EXIT_SUCCESS
+
     for pkg_idx, pkg_name in enumerate(plan_result.build_order, 1):
         activity("build", f"[{pkg_idx}/{len(plan_result.build_order)}] Building: {pkg_name}")
         
@@ -699,7 +789,10 @@ def _run_build(
             normalize_to_prev_lts_floor=request.normalize_to_prev_lts_floor,
             dry_run_control_edit=request.dry_run_control_edit,
             include_retired=request.include_retired,
-            resolved_build_type_str=resolved_build_type_str,
+            # Preserve 'auto' when the CLI requested auto so per-package
+            # selection can occur during setup. Otherwise pass the resolved
+            # build type determined earlier.
+            resolved_build_type_str=(parsed_type_str if parsed_type_str == "auto" else resolved_build_type_str),
             milestone_from_cli=milestone_from_cli,
             paths=paths,
             cfg=cfg,
