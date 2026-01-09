@@ -178,8 +178,18 @@ def copy_file_with_checksum(source: Path, dest_dir: Path) -> CollectedFile:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / source.name
 
+    # If source and dest are already the same file, no copy needed
+    if dest.exists() and dest.samefile(source):
+        return CollectedFile(
+            source_path=source.resolve(),
+            copied_path=dest.resolve(),
+            sha256=compute_sha256(dest),
+            size=dest.stat().st_size,
+            mtime=source.stat().st_mtime,
+        )
+
     # Handle potential name collision
-    if dest.exists() and not dest.samefile(source):
+    if dest.exists():
         # Add timestamp to avoid overwriting
         stem = source.stem
         suffix = source.suffix
