@@ -51,6 +51,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ubuntu_archive": "http://archive.ubuntu.com/ubuntu",
         "ubuntu_openstack_git": "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source",
     },
+    "git": {
+        "launchpad_username": None,  # Set to your Launchpad username for SSH push access
+    },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
 }
 
