@@ -1977,12 +1977,29 @@ def import_and_patch(
     git_sha = snapshot_result.git_sha if snapshot_result else ""
     signature_verified = False  # Will be updated from ctx if available
 
+    # Look up Launchpad bug from config
+    lp_bug = None
+    if ctx.cfg:
+        lp_bugs = ctx.cfg.get("launchpad_bugs", {})
+        # Try to find bug for this series and build type
+        build_type_str = ctx.build_type.value if ctx.build_type else "release"
+        # Check for special client library build type
+        if build_type_str == "release" and ("client" in ctx.package.lower() or ctx.package.startswith("python-")):
+            # Try release-client first, then fall back to release
+            key = f"{ctx.openstack_target}:release-client"
+            lp_bug = lp_bugs.get(key)
+        if not lp_bug:
+            key = f"{ctx.openstack_target}:{build_type_str}"
+            lp_bug = lp_bugs.get(key)
+
     changes = generate_changelog_message(
         ctx.build_type.value if ctx.build_type else "release",
         ctx.upstream.version if ctx.upstream else "",
         git_sha,
         signature_verified,
         "",  # signature_warning
+        lp_bug=lp_bug,
+        openstack_series=ctx.openstack_target,
     )
 
     if update_changelog(
@@ -2003,12 +2020,8 @@ def import_and_patch(
         if (pkg_repo / ".git").exists():
             # Extract upstream version for commit message
             upstream_ver = extract_upstream_version(new_version)
-            # Use "merging" for snapshots, "new upstream version" for releases
-            is_snapshot_version = "+git" in new_version or "~snapshot" in new_version
-            if is_snapshot_version:
-                changelog_msg = f"d/changelog: merging {upstream_ver}"
-            else:
-                changelog_msg = f"d/changelog: new upstream version {upstream_ver}"
+            # Use simple commit message to avoid duplication in changelog
+            changelog_msg = f"d/changelog: release {upstream_ver}"
 
             commit_result = git_commit(
                 pkg_repo,

@@ -54,6 +54,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "git": {
         "launchpad_username": None,  # Set to your Launchpad username for SSH push access
     },
+    "launchpad_bugs": {
+        # Map OpenStack series and build type to Launchpad bug numbers
+        # Format: "<series>:<build_type>" -> bug_number
+        # Example: "gazpacho:release": 2116155
+        # Valid build types: snapshot, milestone, release, release-client
+    },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
 }
 

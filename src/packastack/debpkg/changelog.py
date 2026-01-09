@@ -490,6 +490,8 @@ def generate_changelog_message(
     git_ref: str = "",
     signature_verified: bool = False,
     signature_warning: str = "",
+    lp_bug: int | None = None,
+    openstack_series: str | None = None,
 ) -> list[str]:
     """Generate changelog entry messages for a build.
 
@@ -499,20 +501,26 @@ def generate_changelog_message(
         git_ref: Git ref for snapshots.
         signature_verified: Whether upstream signature was verified.
         signature_warning: Warning message about signature.
+        lp_bug: Optional Launchpad bug number to reference.
+        openstack_series: OpenStack series name (e.g., "Gazpacho").
 
     Returns:
         List of changelog entry lines.
     """
     changes: list[str] = []
 
+    # Build the main changelog message
+    lp_ref = f" (LP: #{lp_bug})" if lp_bug else ""
+    series_name = f" for OpenStack {openstack_series.capitalize()}" if openstack_series else ""
+
     if build_type == "release":
-        changes.append(f"New upstream release {upstream_version}.")
+        changes.append(f"New upstream release{series_name}.{lp_ref}")
     elif build_type == "snapshot":
-        changes.append(f"New upstream snapshot from {git_ref}.")
+        changes.append(f"New upstream snapshot from {git_ref}{series_name}.{lp_ref}")
     elif build_type == "milestone":
-        changes.append(f"New upstream milestone {upstream_version}.")
+        changes.append(f"New upstream milestone {upstream_version}{series_name}.{lp_ref}")
     else:
-        changes.append(f"New upstream version {upstream_version}.")
+        changes.append(f"New upstream version {upstream_version}{series_name}.{lp_ref}")
 
     # Note: We no longer include signature verification status in changelog
     # as it's redundant - the build process validates signatures and users
