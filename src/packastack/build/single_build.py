@@ -2022,6 +2022,8 @@ def import_and_patch(
             upstream_ver = extract_upstream_version(new_version)
             # Use simple commit message to avoid duplication in changelog
             changelog_msg = f"d/changelog: release {upstream_ver}"
+            if lp_bug:
+                changelog_msg += f" (LP: #{lp_bug})"
 
             commit_result = git_commit(
                 pkg_repo,
