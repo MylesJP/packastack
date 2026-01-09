@@ -174,7 +174,9 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
         cmd.extend(["--arch", config.arch])
 
     # Chroot name (if specified, otherwise sbuild uses default)
-    if config.chroot_name:
+    # Note: Only use -c if no distribution is specified, as -c overrides
+    # the distribution name in .changes files causing lintian errors
+    if config.chroot_name and not config.distribution:
         cmd.extend(["-c", config.chroot_name])
 
     # Local repo setup via chroot-setup-commands
@@ -196,7 +198,8 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
     # 1. Only fail on errors, not warnings (--fail-on error)
     #    This ensures lintian warnings don't cause the build to fail
     # 2. Suppress specific tags as configured
-    cmd.extend(["--lintian-opts", "--fail-on", "--lintian-opts", "error"])
+    # Note: Each --lintian-opts takes ONE argument which is passed to lintian
+    cmd.extend(["--lintian-opts", "--fail-on=error"])
     if config.lintian_suppress_tags:
         for tag in config.lintian_suppress_tags:
             cmd.extend(["--lintian-opts", f"--suppress-tags={tag}"])
