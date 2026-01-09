@@ -190,6 +190,7 @@ class SingleBuildContext:
 
     # Paths
     paths: dict[str, Path]
+    cfg: dict[str, Any] | None = None
     workspace: Path | None = None
     pkg_repo: Path | None = None
     local_repo: Path | None = None
@@ -226,14 +227,14 @@ class SingleBuildContext:
 @dataclass
 class SetupInputs:
     """Inputs for setting up a single package build context.
-    
+
     These are the values available at the start of the per-package loop,
     before any package-specific resolution has been done.
     """
-    
+
     # Package identity
     pkg_name: str
-    
+
     # Request values
     target: str
     ubuntu_series: str
@@ -255,36 +256,36 @@ class SetupInputs:
     update_control_min_versions: bool
     normalize_to_prev_lts_floor: bool
     dry_run_control_edit: bool
-    
+
     # Resolved values from planning
     resolved_build_type_str: str
     milestone_from_cli: str
-    
+
     # Paths and config
     paths: dict[str, Path]
     cfg: dict[str, Any]
-    
+
     # Run context
     run: Any  # RunContext
 
 
 def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildContext | None]:
     """Set up the build context by running pre-build phases.
-    
+
     This function runs phases 1-6:
     1. Retirement check
-    2. Registry resolution  
+    2. Registry resolution
     3. Policy check
     4. Load package indexes
     5. Check tools
     6. Ensure schroot ready
-    
+
     If any phase fails, returns (failure_result, None).
     On success, returns (ok_result, populated_context).
-    
+
     Args:
         inputs: Setup inputs with request values and paths.
-        
+
     Returns:
         Tuple of (PhaseResult, SingleBuildContext or None).
     """
@@ -311,18 +312,18 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     from packastack.target.distro_info import get_current_lts
     from packastack.target.arch import get_host_arch
     from packastack.planning.type_selection import BuildType
-    
+
     run = inputs.run
     paths = inputs.paths
     cfg = inputs.cfg
     pkg_name = inputs.pkg_name
-    
+
     # Derive project name from package name
     if pkg_name.startswith("python-"):
         package = pkg_name[7:]
     else:
         package = pkg_name
-    
+
     # Resolve series
     resolved_ubuntu = resolve_series(inputs.ubuntu_series)
     releases_repo = paths["openstack_releases_repo"]
@@ -331,10 +332,10 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     else:
         openstack_target = inputs.target
     local_repo = paths["local_apt_repo"]
-    
+
     activity("resolve", f"Package: {pkg_name}")
     run.log_event({"event": "resolve.package", "name": pkg_name})
-    
+
     # -------------------------------------------------------------------------
     # Phase 1: Retirement check
     # -------------------------------------------------------------------------
@@ -351,7 +352,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     )
     if not retirement_result.success:
         return retirement_result, None
-    
+
     # -------------------------------------------------------------------------
     # Phase 2: Registry resolution
     # -------------------------------------------------------------------------
@@ -364,13 +365,13 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     )
     if not registry_result.success:
         return registry_result, None
-    
+
     # Extract values from registry resolution result
     registry = registry_info.registry
     resolved_upstream = registry_info.resolved
     upstream_config = resolved_upstream.config
     resolution_source = resolved_upstream.resolution_source
-    
+
     # Build type: if caller left it as "auto", resolve per-package here
     if inputs.resolved_build_type_str == "auto":
         try:
@@ -399,13 +400,13 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         build_type = _build_type_from_string(inputs.resolved_build_type_str)
         milestone_str = inputs.milestone_from_cli
         run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
-    
+
     # Get previous series
     prev_series = get_previous_series(releases_repo, openstack_target)
     if prev_series:
         activity("resolve", f"Previous series: {prev_series}")
     run.log_event({"event": "resolve.prev_series", "prev": prev_series, "target": openstack_target})
-    
+
     # Initialize provenance
     provenance = create_provenance(pkg_name, run.run_id)
     provenance.registry_version = registry.version
@@ -418,12 +419,12 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     provenance.release_source.deliverable = upstream_config.release_source.deliverable
     if registry.override_applied:
         provenance.registry_override_path = registry.override_path
-    
+
     # -------------------------------------------------------------------------
     # Phase 3: Policy check
     # -------------------------------------------------------------------------
     activity("policy", "Checking snapshot eligibility")
-    
+
     if build_type == BuildType.SNAPSHOT:
         eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, package)
         if not eligible:
@@ -441,9 +442,9 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         elif "Warning" in reason:
             activity("policy", f"Warning: {reason}")
         run.log_event({"event": "policy.snapshot", "eligible": eligible, "reason": reason})
-    
+
     activity("policy", "Policy check: OK")
-    
+
     # -------------------------------------------------------------------------
     # Phase 4: Load package indexes
     # -------------------------------------------------------------------------
@@ -462,7 +463,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     )
     if not result.success:
         return result, None
-    
+
     ubuntu_index = indexes.ubuntu
     ca_index = indexes.cloud_archive
     local_index = indexes.local_repo
@@ -481,18 +482,18 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         except Exception as exc:
             activity("warn", f"Failed to load current LTS index ({current_lts_codename}): {exc}")
             run.log_event({"event": "plan.current_lts_index_failed", "series": current_lts_codename, "error": str(exc)})
-    
+
     # Load OpenStack packages
     openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
     activity("plan", f"OpenStack packages: {len(openstack_pkgs)} in {openstack_target}")
-    
+
     # -------------------------------------------------------------------------
     # Phase 5: Check tools
     # -------------------------------------------------------------------------
     result, _ = check_tools(need_sbuild=inputs.binary, run=run)
     if not result.success:
         return result, None
-    
+
     # -------------------------------------------------------------------------
     # Phase 6: Ensure schroot ready
     # -------------------------------------------------------------------------
@@ -509,7 +510,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     if not result.success:
         return result, None
     schroot_name = schroot_info.schroot_name
-    
+
     # Select upstream source
     upstream = select_upstream_source(
         releases_repo,
@@ -518,12 +519,12 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         build_type,
         milestone_str,
     )
-    
+
     # Calculate tarball cache base
     tarball_cache_base = paths.get("upstream_tarballs")
     if tarball_cache_base is None:
         tarball_cache_base = paths["cache_root"] / "upstream-tarballs"
-    
+
     # -------------------------------------------------------------------------
     # Build the context
     # -------------------------------------------------------------------------
@@ -554,6 +555,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         normalize_to_prev_lts_floor=inputs.normalize_to_prev_lts_floor,
         dry_run_control_edit=inputs.dry_run_control_edit,
         paths=paths,
+        cfg=cfg,
         local_repo=local_repo,
         tarball_cache_base=tarball_cache_base,
         upstream_config=upstream_config,
@@ -569,7 +571,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         schroot_name=schroot_name,
         provenance=provenance,
     )
-    
+
     return PhaseResult.ok(), ctx
 
 
@@ -618,7 +620,8 @@ def fetch_packaging_repo(
         pass
 
     # Clone packaging repo
-    fetcher = GitFetcher()
+    launchpad_username = ctx.cfg.get("git", {}).get("launchpad_username")
+    fetcher = GitFetcher(launchpad_username=launchpad_username)
     with activity_spinner("fetch", f"Cloning packaging repository: {ctx.pkg_name}"):
         fetch_result = fetcher.fetch_and_checkout(
             ctx.pkg_name,
@@ -636,27 +639,6 @@ def fetch_packaging_repo(
     pkg_repo = fetch_result.path
     result.pkg_repo = pkg_repo
     ctx.pkg_repo = pkg_repo
-
-    # Protect packaging-only files from being removed during upstream merges
-    ensure_no_merge_paths(pkg_repo, ["launchpad.yaml"])
-
-    # Commit .gitattributes so it's active during import-orig merge
-    gitattributes = pkg_repo / ".gitattributes"
-    if gitattributes.exists():
-        activity("fetch", "Committing .gitattributes for merge protection")
-        commit_result = git_commit(
-            pkg_repo,
-            ".gitattributes: protect launchpad.yaml during merge",
-            files=[".gitattributes"],
-        )
-        if commit_result.returncode == 0:
-            activity("fetch", "Committed .gitattributes protection")
-        else:
-            raise GitCommitError(
-                "Failed to commit .gitattributes",
-                stderr=commit_result.stderr,
-                returncode=commit_result.returncode,
-            )
 
     activity("fetch", f"Cloned to: {pkg_repo}")
     activity("fetch", f"Branches: {', '.join(fetch_result.branches[:5])}...")
@@ -1773,13 +1755,14 @@ def import_and_patch(
         else:
             import_version = None
 
+        # Import without merging - we'll handle the merge manually to preserve packaging files
         import_result = import_orig(
             pkg_repo,
             upstream_tarball,
             upstream_version=import_version,
             upstream_branch=upstream_branch_name,
             pristine_tar=True,
-            merge=True,
+            merge=False,  # Don't let gbp do the merge
         )
 
         if import_result.success:
@@ -1791,6 +1774,64 @@ def import_and_patch(
                     "version": import_result.upstream_version,
                 }
             )
+            
+            # Now manually merge the upstream tag, preserving packaging files
+            upstream_tag = import_result.upstream_version
+            if upstream_tag:
+                activity("import-orig", f"Merging upstream tag '{upstream_tag}' with -Xtheirs strategy")
+                
+                # Check if tag is already merged
+                check_merged = ["git", "branch", "--contains", upstream_tag]
+                merged_rc, merged_out, _ = run_command(check_merged, cwd=pkg_repo)
+                
+                if merged_rc == 0 and "master" in merged_out:
+                    activity("import-orig", f"Tag '{upstream_tag}' already merged into master")
+                else:
+                    # Perform merge with -Xtheirs to prefer upstream for conflicts
+                    merge_cmd = ["git", "merge", "-Xtheirs", "-m", f"Merging upstream release {upstream_tag}", upstream_tag]
+                    merge_rc, merge_out, merge_err = run_command(merge_cmd, cwd=pkg_repo)
+                    
+                    if merge_rc == 0:
+                        activity("import-orig", "Upstream tag merged successfully")
+                        
+                        # Restore packaging-only files that may have been deleted
+                        packaging_files = [".launchpad.yaml", ".gitattributes"]
+                        for pfile in packaging_files:
+                            file_path = pkg_repo / pfile
+                            # Check if file exists in HEAD but was deleted in merge
+                            check_cmd = ["git", "ls-tree", "HEAD", pfile]
+                            check_rc, check_out, _ = run_command(check_cmd, cwd=pkg_repo)
+                            
+                            if check_rc == 0 and check_out.strip() and not file_path.exists():
+                                # File existed before merge but is now missing - restore it
+                                restore_cmd = ["git", "checkout", "HEAD", "--", pfile]
+                                restore_rc, restore_out, restore_err = run_command(restore_cmd, cwd=pkg_repo)
+                                
+                                if restore_rc == 0:
+                                    activity("import-orig", f"Restored {pfile} after merge")
+                                    # Stage the restored file
+                                    stage_cmd = ["git", "add", pfile]
+                                    run_command(stage_cmd, cwd=pkg_repo)
+                                else:
+                                    activity("import-orig", f"Warning: Could not restore {pfile}: {restore_err}")
+                        
+                        # Amend the merge commit if we restored any files
+                        amend_cmd = ["git", "commit", "--amend", "--no-edit"]
+                        amend_rc, _, _ = run_command(amend_cmd, cwd=pkg_repo)
+                        if amend_rc == 0:
+                            activity("import-orig", "Updated merge commit with restored packaging files")
+                        
+                        run.log_event({"event": "import-orig.merge_complete", "tag": upstream_tag})
+                    else:
+                        activity("import-orig", f"Merge failed: {merge_err or merge_out}")
+                        if not ctx.force:
+                            run.write_summary(
+                                status="failed",
+                                error="Failed to merge upstream tag",
+                                exit_code=EXIT_FETCH_FAILED,
+                            )
+                            return PhaseResult.fail(EXIT_FETCH_FAILED, "Merge failed")
+                        run.log_event({"event": "import-orig.merge_failed", "error": merge_err or merge_out})
         else:
             activity("import-orig", f"Import failed: {import_result.output}")
             if not ctx.force:
@@ -2382,14 +2423,14 @@ def build_single_package(
     # -------------------------------------------------------------------------
     if ctx.provenance:
         from packastack.build.provenance import write_provenance
-        
+
         # Update provenance with final details
         ctx.provenance.verification.result = (
             "verified" if prepare_data.signature_verified else "skipped"
         )
         if prepare_data.signature_warning:
             ctx.provenance.verification.result = "not_applicable"
-        
+
         # Write provenance file
         try:
             provenance_path = write_provenance(ctx.provenance, run.run_path)

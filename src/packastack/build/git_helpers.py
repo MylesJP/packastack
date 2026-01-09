@@ -204,18 +204,14 @@ def get_git_author_env(*, debug: bool = True) -> dict[str, str]:
 def ensure_no_merge_paths(repo_path: Path, paths: list[str]) -> bool:
     """Ensure specified paths use merge=ours strategy in .gitattributes.
 
-    This protects packaging-only files (e.g., launchpad.yaml, .gitattributes)
-    from being deleted when merging upstream content that lacks them.
-
-    The function:
-    1. Reads existing .gitattributes if present
-    2. Adds "path merge=ours" entries for any missing paths
-    3. Always protects .gitattributes itself
-    4. Writes the updated file if changes were made
+    This creates a .gitattributes file documenting that certain files should
+    be preserved during merges. While PackaStack now explicitly restores these
+    files after merge, this serves as documentation and provides protection
+    for manual merges.
 
     Args:
         repo_path: Path to the git repository.
-        paths: List of file paths to protect with merge=ours.
+        paths: List of file paths to document for merge protection.
 
     Returns:
         True if .gitattributes was modified, False otherwise.
