@@ -352,6 +352,8 @@ def import_orig(
     This imports the tarball, creates/updates the upstream branch,
     and optionally stores it in the pristine-tar branch.
 
+    If the upstream tag already exists, skips the import and returns success.
+
     Args:
         repo_path: Path to the git repository.
         tarball_path: Path to the upstream tarball (.tar.gz, .tar.xz, etc.).
@@ -363,6 +365,18 @@ def import_orig(
     Returns:
         ImportOrigResult with success status.
     """
+    # Check if upstream tag already exists (e.g., from previous push)
+    if upstream_version:
+        check_tag_cmd = ["git", "tag", "-l", upstream_version]
+        tag_rc, tag_out, _ = run_command(check_tag_cmd, cwd=repo_path)
+        if tag_rc == 0 and tag_out.strip() == upstream_version:
+            # Tag exists, skip import
+            return ImportOrigResult(
+                success=True,
+                output=f"Upstream tag '{upstream_version}' already exists, skipping import",
+                upstream_version=upstream_version,
+            )
+
     cmd = ["gbp", "import-orig", "--no-interactive"]
 
     # Specify upstream branch if provided
