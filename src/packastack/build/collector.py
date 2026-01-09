@@ -239,29 +239,29 @@ def matches_package(
     # Generate candidate prefixes to match against
     # This handles common binary package naming patterns
     candidates = [pkg_lower]
-    
+
     # Handle underscore/hyphen variants
     if "-" in pkg_lower:
         candidates.append(pkg_lower.replace("-", "_"))
     if "_" in pkg_lower:
         candidates.append(pkg_lower.replace("_", "-"))
-    
+
     # Handle Python package naming: python-X -> python3-X
     # Also handle python-X-Y -> python3-X-Y patterns
     if pkg_lower.startswith("python-"):
         base = pkg_lower[7:]  # Remove "python-" prefix
         candidates.append(f"python3-{base}")
         candidates.append(f"python3_{base}")
-    
+
     # Check if any candidate prefix matches
     name_matches = any(name_lower.startswith(c) for c in candidates)
-    
+
     # If version is specified, check for it
     if version:
         # Remove epoch for filename matching
         clean_version = version.split(":")[-1] if ":" in version else version
         version_matches = clean_version in filename
-        
+
         # If we have version info, we can be more lenient:
         # - If name matches AND version matches -> definitely a match
         # - If name doesn't match but version matches -> likely a related binary package
@@ -273,7 +273,7 @@ def matches_package(
             # Version match alone is acceptable for related binaries
             # but only if the version string is specific enough (contains full version)
             return version_matches
-    
+
     return name_matches
 
 
