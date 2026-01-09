@@ -67,15 +67,18 @@ class GitFetcher:
         self,
         base_url: str = LAUNCHPAD_BASE_URL,
         lock_timeout: int = LOCK_TIMEOUT,
+        launchpad_username: str | None = None,
     ) -> None:
         """Initialize the fetcher.
 
         Args:
             base_url: Base URL for git repositories.
             lock_timeout: Maximum seconds to wait for a lock.
+            launchpad_username: Launchpad username for SSH push access.
         """
         self.base_url = base_url.rstrip("/")
         self.lock_timeout = lock_timeout
+        self.launchpad_username = launchpad_username
 
     def build_url(self, package: str) -> str:
         """Build the git URL for a package.
@@ -207,6 +210,8 @@ class GitFetcher:
                 # Update existing repository
                 try:
                     repo = git.Repo(pkg_path)
+                    # Ensure SSH remote if username is configured
+                    self._ensure_ssh_remote(repo, package)
                     origin = repo.remotes.origin
                     origin.fetch(prune=True)
                     result.updated = True
@@ -222,6 +227,9 @@ class GitFetcher:
                         kwargs["depth"] = depth
                     git.Repo.clone_from(url, pkg_path, **kwargs)
                     result.cloned = True
+                    # Convert to SSH remote if username is configured
+                    repo = git.Repo(pkg_path)
+                    self._ensure_ssh_remote(repo, package)
                 except git.GitCommandError as e:
                     result.error = f"Clone failed: {e}"
                     return result
@@ -241,6 +249,30 @@ class GitFetcher:
             self._release_lock(lock_path)
 
         return result
+
+    def _ensure_ssh_remote(self, repo: git.Repo, package: str) -> None:
+        """Ensure the origin remote uses SSH if username is configured.
+
+        Converts HTTPS URLs to SSH format for push access.
+
+        Args:
+            repo: Git repository object.
+            package: Package name.
+        """
+        if not self.launchpad_username:
+            return
+
+        origin = repo.remotes.origin
+        current_url = list(origin.urls)[0]
+
+        # Check if already using SSH
+        if current_url.startswith("git+ssh://") or current_url.startswith("ssh://"):
+            return
+
+        # Convert HTTPS to SSH
+        if "git.launchpad.net/~ubuntu-openstack-dev" in current_url:
+            ssh_url = f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}"
+            origin.set_url(ssh_url)
 
     def _list_branches(self, repo_path: Path) -> list[str]:
         """List all remote branches in a repository.
