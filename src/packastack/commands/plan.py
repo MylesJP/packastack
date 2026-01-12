@@ -491,8 +491,29 @@ def run_plan_for_package(
     if verbose_output:
         activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 
+    # Phase: prepare - Regenerate local repo indexes to pick up manually-added debs
+    from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+    from packastack.target.arch import get_host_arch
+    
+    if local_repo.exists():
+        try:
+            refresh_local_repo_indexes(local_repo, get_host_arch(), run, phase="prepare")
+        except Exception as e:
+            activity("warn", f"Failed to regenerate local repo indexes: {e}")
+            run.log_event({"event": "prepare.index_regen_failed", "error": str(e)})
+
     # Load local index if available
     local_index: PackageIndex | None = None
+    if local_repo.exists():
+        from packastack.apt.packages import load_local_repo_index
+        try:
+            local_index = load_local_repo_index(local_repo, get_host_arch())
+            total_local = len(local_index.packages)
+            if verbose_output:
+                activity("plan", f"Loaded {total_local} packages from local repo")
+            run.log_event({"event": "plan.local_index_loaded", "packages": total_local})
+        except Exception as e:
+            activity("warn", f"Failed to load local repo index: {e}")
 
     # Build dependency graph
     if verbose_output:
@@ -906,6 +927,28 @@ def _build_dependency_graph(
     # name differs from the releases repo key (e.g., 'stevedore' vs
     # 'python-stevedore') due to Ubuntu source fallback adjustments.
     openstack_set.update(targets)
+
+    # Filter out packages that are already present in the local repo
+    # This matches user expectation that "if it's in the repo, start using it"
+    # To force a rebuild, users can clean the repo or use --force-rebuild (TODO)
+    if local_index:
+        # Determine source packages present in local repo
+        # local_index.sources is a dict mapping source_name -> [binary_names]
+        local_built_sources = set(local_index.sources.keys())
+        
+        # Determine valid candidates for skipping
+        # We only skip if the package is NOT a direct target
+        # (Users usually expect the thing they asked to build to actually build)
+        candidates_to_skip = local_built_sources - set(targets)
+        
+        # Remove from openstack_set so needs_rebuild becomes False
+        skipped = openstack_set & candidates_to_skip
+        if skipped:
+            run.log_event({"event": "plan.skip_rebuild_local", "packages": list(skipped)})
+            activity("plan", f"Skipping rebuild for {len(skipped)} packages present in local repo:")
+            for pkg in sorted(skipped):
+                activity("plan", f"  - {pkg}")
+            openstack_set -= skipped
 
     result = build_graph_from_index(
         packages=targets,
@@ -1700,6 +1743,17 @@ def plan(
 
         activity("policy", "Snapshot eligibility: OK")
 
+        # Phase: prepare - Regenerate local repo indexes to pick up manually-added debs
+        from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+        from packastack.target.arch import get_host_arch
+        
+        if local_repo.exists():
+            try:
+                refresh_local_repo_indexes(local_repo, get_host_arch(), run, phase="prepare")
+            except Exception as e:
+                activity("warn", f"Failed to regenerate local repo indexes: {e}")
+                run.log_event({"event": "prepare.index_regen_failed", "error": str(e)})
+
         # Phase: plan - Build dependency graph
         with activity_spinner("plan", "Loading Ubuntu package index"):
             pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
@@ -1728,8 +1782,18 @@ def plan(
 
         activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 
-        # Load local index if available (simplified - just use empty for now)
+        # Load local index if available
         local_index: PackageIndex | None = None
+        if local_repo.exists():
+            from packastack.apt.packages import load_local_repo_index
+            from packastack.target.arch import get_host_arch
+            try:
+                local_index = load_local_repo_index(local_repo, get_host_arch())
+                total_local = len(local_index.packages)
+                activity("plan", f"Loaded {total_local} packages from local repo")
+                run.log_event({"event": "plan.local_index_loaded", "packages": total_local})
+            except Exception as e:
+                activity("warn", f"Failed to load local repo index: {e}")
 
         with activity_spinner("plan", "Building dependency graph"):
             graph, mir_candidates = _build_dependency_graph(

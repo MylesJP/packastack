@@ -616,15 +616,12 @@ def _run_build(
 
     plan_request = request.to_plan_request()
     # Pass resolved build type to planning to skip snapshot checks for release/milestone
-    # Also skip local repo since packages haven't been cloned yet
     from dataclasses import replace
     # If the CLI asked for auto, leave plan_request.build_type as 'auto'
     # so each package can decide individually. Only override when the
     # user explicitly requested a non-auto build type.
-    if parsed_type_str == "auto":
-        plan_request = replace(plan_request, skip_local=True)
-    else:
-        plan_request = replace(plan_request, build_type=resolved_build_type_str, skip_local=True)
+    if parsed_type_str != "auto":
+        plan_request = replace(plan_request, build_type=resolved_build_type_str)
 
     # Show spinners only when allowed and running in a real TTY to avoid
     # polluting CI logs. Honor the `no_spinner` flag as well.
