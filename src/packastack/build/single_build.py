@@ -1774,26 +1774,26 @@ def import_and_patch(
                     "version": import_result.upstream_version,
                 }
             )
-            
+
             # Now manually merge the upstream tag, preserving packaging files
             upstream_tag = import_result.upstream_version
             if upstream_tag:
                 activity("import-orig", f"Merging upstream tag '{upstream_tag}' with -Xtheirs strategy")
-                
+
                 # Check if tag is already merged
                 check_merged = ["git", "branch", "--contains", upstream_tag]
                 merged_rc, merged_out, _ = run_command(check_merged, cwd=pkg_repo)
-                
+
                 if merged_rc == 0 and "master" in merged_out:
                     activity("import-orig", f"Tag '{upstream_tag}' already merged into master")
                 else:
                     # Perform merge with -Xtheirs to prefer upstream for conflicts
                     merge_cmd = ["git", "merge", "-Xtheirs", "-m", f"Merging upstream release {upstream_tag}", upstream_tag]
                     merge_rc, merge_out, merge_err = run_command(merge_cmd, cwd=pkg_repo)
-                    
+
                     if merge_rc == 0:
                         activity("import-orig", "Upstream tag merged successfully")
-                        
+
                         # Restore packaging-only files that may have been deleted
                         packaging_files = [".launchpad.yaml", ".gitattributes"]
                         for pfile in packaging_files:
@@ -1801,12 +1801,12 @@ def import_and_patch(
                             # Check if file exists in HEAD but was deleted in merge
                             check_cmd = ["git", "ls-tree", "HEAD", pfile]
                             check_rc, check_out, _ = run_command(check_cmd, cwd=pkg_repo)
-                            
+
                             if check_rc == 0 and check_out.strip() and not file_path.exists():
                                 # File existed before merge but is now missing - restore it
                                 restore_cmd = ["git", "checkout", "HEAD", "--", pfile]
                                 restore_rc, restore_out, restore_err = run_command(restore_cmd, cwd=pkg_repo)
-                                
+
                                 if restore_rc == 0:
                                     activity("import-orig", f"Restored {pfile} after merge")
                                     # Stage the restored file
@@ -1814,13 +1814,13 @@ def import_and_patch(
                                     run_command(stage_cmd, cwd=pkg_repo)
                                 else:
                                     activity("import-orig", f"Warning: Could not restore {pfile}: {restore_err}")
-                        
+
                         # Amend the merge commit if we restored any files
                         amend_cmd = ["git", "commit", "--amend", "--no-edit"]
                         amend_rc, _, _ = run_command(amend_cmd, cwd=pkg_repo)
                         if amend_rc == 0:
                             activity("import-orig", "Updated merge commit with restored packaging files")
-                        
+
                         run.log_event({"event": "import-orig.merge_complete", "tag": upstream_tag})
                     else:
                         activity("import-orig", f"Merge failed: {merge_err or merge_out}")

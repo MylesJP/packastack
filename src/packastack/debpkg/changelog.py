@@ -285,7 +285,7 @@ def update_changelog(
             name = os.environ.get("DEBFULLNAME", os.environ.get("NAME", "Packastack"))
             email = os.environ.get("DEBEMAIL", os.environ.get("EMAIL", "packastack@ubuntu.com"))
             maintainer = f"{name} <{email}>"
-    
+
     # Debug logging
     import sys
     print(f"[update_changelog] maintainer={maintainer}", file=sys.stderr)
@@ -328,7 +328,7 @@ def _update_changelog_gbp_dch(
     if match:
         env["DEBFULLNAME"] = match.group(1)
         env["DEBEMAIL"] = match.group(2)
-    
+
     # Debug logging
     print(f"[changelog-debug] maintainer={maintainer}", file=sys.stderr)
     print(f"[changelog-debug] DEBFULLNAME in env={env.get('DEBFULLNAME')}", file=sys.stderr)
@@ -367,7 +367,7 @@ def _update_changelog_gbp_dch(
         for change in changes:
             append_cmd = [
                 "dch",
-                "--maintmaint", 
+                "--maintmaint",
                 "--append",
                 "--",
                 change
