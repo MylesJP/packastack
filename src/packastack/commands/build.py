@@ -50,6 +50,7 @@ from packastack.core.run import RunContext, activity
 from packastack.planning.build_all_state import (
     BuildAllState,
     FailureType,
+    PackageState,
     PackageStatus,
     create_initial_state,
     load_state,
@@ -570,30 +571,30 @@ def _run_build(
     # =========================================================================
     from packastack.planning.type_selection import BuildType
     from packastack.upstream.releases import get_current_development_series
-    
+
     # Parse CLI build type options
     parsed_type_str, milestone_from_cli = _resolve_build_type_from_cli(
         request.build_type_str, request.milestone
     )
-    
+
     # Resolve build type early (especially for auto)
     resolved_build_type_str: str | None = None
     if parsed_type_str == "auto":
         # Need to resolve auto before planning
         releases_repo = paths["openstack_releases_repo"]
         resolved_ubuntu = resolve_series(request.ubuntu_series)
-        
+
         # Resolve OpenStack target
         if request.target == "devel":
             openstack_target = get_current_development_series(releases_repo) or request.target
         else:
             openstack_target = request.target
-        
+
         # Infer deliverable name from package
         deliverable = request.package
         if request.package.startswith("python-"):
             deliverable = request.package[7:]
-        
+
         build_type_resolved, milestone_resolved, _reason = _resolve_build_type_auto(
             releases_repo=releases_repo,
             series=openstack_target,
@@ -607,12 +608,12 @@ def _run_build(
     else:
         resolved_build_type_str = parsed_type_str
         activity("resolve", f"Build type: {resolved_build_type_str}")
-    
+
     # =========================================================================
     # PHASE: Planning (reuse plan command logic)
     # =========================================================================
     from packastack.commands.plan import run_plan_for_package
-    
+
     plan_request = request.to_plan_request()
     # Pass resolved build type to planning to skip snapshot checks for release/milestone
     # Also skip local repo since packages haven't been cloned yet
@@ -624,7 +625,7 @@ def _run_build(
         plan_request = replace(plan_request, skip_local=True)
     else:
         plan_request = replace(plan_request, build_type=resolved_build_type_str, skip_local=True)
-    
+
     # Show spinners only when allowed and running in a real TTY to avoid
     # polluting CI logs. Honor the `no_spinner` flag as well.
     verbose_for_plan = True
@@ -640,7 +641,29 @@ def _run_build(
         paths=paths,
         verbose_output=verbose_for_plan,
     )
-    
+
+    # When build_deps=False, explicit package builds must NOT expand to dependencies
+    # This prevents the parallel builder from endlessly recursing when subprocesses
+    # compute their own plans.
+    if not request.build_deps and plan_result.build_order:
+        # Filter the build order to include only the requested package
+        # The requested package name might be an alias (e.g. openstack-dashboard -> horizon),
+        # so we check if request.package is in the list, or just trust the topological sort's tail.
+        # But for exactness, we match the requested package if it exists in the build order.
+        target_in_plan = next((p for p in plan_result.build_order if p == request.package), None)
+        
+        # If the requested name isn't exactly in the plan (aliasing), we assume the
+        # user wants to build the single package that resulted from the plan logic.
+        # Since we ran plan_for_package(request.package), the result should focus on it.
+        # We take the *last* element as it's topologically the target.
+        if not target_in_plan and plan_result.build_order:
+            target_in_plan = plan_result.build_order[-1]
+            
+        if target_in_plan:
+            plan_result = replace(plan_result, build_order=[target_in_plan])
+            # Also clear the graph so parallel builder logic isn't triggered
+            plan_result = replace(plan_result, plan_graph=None)
+
     # Handle plan-only modes
     if request.validate_plan_only or request.plan_upload:
         # Prefer waves output when available; fall back to enumerated lists
@@ -657,9 +680,9 @@ def _run_build(
             activity("report", f"Upload order: {len(plan_result.upload_order)} packages")
             for i, pkg in enumerate(plan_result.upload_order, 1):
                 activity("report", f"  {i}. {pkg}")
-        
+
         return plan_exit_code
-    
+
     # Honor plan exit codes unless --force
     if plan_exit_code != EXIT_SUCCESS:
         if request.force:
@@ -671,13 +694,13 @@ def _run_build(
                 exit_code=plan_exit_code,
             )
             return plan_exit_code
-    
+
     # Get the resolved package names from plan result
     if not plan_result.build_order:
         activity("error", "No packages to build")
         run.write_summary(status="failed", error="No packages in build order", exit_code=EXIT_CONFIG_ERROR)
         return EXIT_CONFIG_ERROR
-    
+
     # Build all packages in dependency order using extracted orchestrator
     from packastack.build.single_build import (
         SetupInputs,
@@ -696,76 +719,65 @@ def _run_build(
 
     activity("build", f"Building {len(plan_result.build_order)} package(s) in dependency order")
 
-    # If multiple packages are present, run by wave batches in parallel by
-    # spawning per-package subprocess builds to isolate each package's work.
+    # If multiple packages are present, use state-aware parallel build runner
     if len(plan_result.build_order) > 1 and getattr(plan_result, "plan_graph", None) is not None:
         from packastack.planning.type_selection import get_default_parallel_workers
+        from packastack.planning.graph import DependencyGraph
 
         parallel_workers = get_default_parallel_workers()
         if parallel_workers <= 0:
             parallel_workers = 1
 
-        waves = getattr(plan_result.plan_graph, "waves", {})
-        batch_num = 0
-        for wave_num in sorted(waves.keys()):
-            batch = waves[wave_num]
-            batch_num += 1
-            if not batch:
-                continue
+        # Initialize state for tracking build progress
+        state = BuildAllState(
+            run_id=run.run_id,
+            target=request.target,
+            ubuntu_series=request.ubuntu_series,
+            build_type=resolved_build_type_str,
+            started_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            build_order=plan_result.build_order,
+            total_packages=len(plan_result.build_order),
+            keep_going=True,
+            parallel=parallel_workers,
+        )
 
-            activity("build", f"Wave {batch_num}: {len(batch)} packages (parallel={min(parallel_workers, len(batch))})")
+        # Add packages to state
+        for pkg in plan_result.build_order:
+            state.packages[pkg] = PackageState(name=pkg)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-                futures: dict[concurrent.futures.Future, str] = {}
-                for pkg in batch:
-                    # Pass through 'auto' when CLI requested auto so each
-                    # package can resolve its own build type. Otherwise use
-                    # the resolved global type (release/snapshot/milestone).
-                    build_type_arg = resolved_build_type_str if parsed_type_str != "auto" else "auto"
-                    fut = executor.submit(
-                        run_single_build,
-                        package=pkg,
-                        target=request.target,
-                        ubuntu_series=request.ubuntu_series,
-                        cloud_archive=request.cloud_archive,
-                        build_type=build_type_arg,
-                        binary=request.binary,
-                        force=request.force,
-                        run_dir=run.run_path,
-                    )
-                    futures[fut] = pkg
+        # Build dependency graph from plan_graph
+        graph = DependencyGraph()
+        for node_name in plan_result.plan_graph.nodes:
+            graph.add_node(node_name)
+        for edge in plan_result.plan_graph.edges:
+            graph.add_edge(edge.from_node, edge.to_node)
 
-                any_failures = False
-                for fut in concurrent.futures.as_completed(futures):
-                    pkg = futures[fut]
-                    try:
-                        success, failure_type, message, log_path = fut.result()
-                        if success:
-                            activity("build", f"[ok]    {pkg}")
-                        else:
-                            any_failures = True
-                            activity("build", f"[fail]  {pkg}: {message}")
-                            if log_path:
-                                activity("build", f"        Log: {log_path}")
-                    except Exception as e:
-                        any_failures = True
-                        activity("build", f"[fail]  {pkg}: {e}")
+        # Use state-aware parallel build runner
+        # Pass through 'auto' when CLI requested auto so each package can decide
+        build_type_arg = resolved_build_type_str if parsed_type_str != "auto" else "auto"
 
-                if any_failures and not request.force:
-                    activity("report", "Stopping: failures in wave and not running with --force")
-                    return EXIT_ALL_BUILD_FAILED
+        exit_code = _run_parallel_builds(
+            state=state,
+            graph=graph,
+            run_dir=run.run_path,
+            state_dir=run.run_path,
+            target=request.target,
+            ubuntu_series=request.ubuntu_series,
+            cloud_archive=request.cloud_archive,
+            build_type=build_type_arg,
+            binary=request.binary,
+            force=request.force,
+            parallel=parallel_workers,
+            local_repo=paths.get("local_apt_repo"),
+            run=run,
+        )
 
-            try:
-                _refresh_local_repo_indexes(paths.get("local_apt_repo"), get_host_arch(), run, phase="build")
-            except Exception:
-                pass
-
-        activity("build", f"All {len(plan_result.build_order)} packages processed")
-        return EXIT_SUCCESS
+        return exit_code
 
     for pkg_idx, pkg_name in enumerate(plan_result.build_order, 1):
         activity("build", f"[{pkg_idx}/{len(plan_result.build_order)}] Building: {pkg_name}")
-        
+
         # Create setup inputs for the orchestrator
         setup_inputs = SetupInputs(
             pkg_name=pkg_name,
@@ -798,7 +810,7 @@ def _run_build(
             cfg=cfg,
             run=run,
         )
-        
+
         # Run setup phases (retirement, registry, policy, indexes, tools, schroot)
         setup_result, ctx = setup_build_context(setup_inputs)
         if not setup_result.success:
@@ -806,7 +818,7 @@ def _run_build(
 
         # Run the package build using the orchestrator
         outcome = build_single_package(ctx, workspace_ref=request.workspace_ref)
-        
+
         if not outcome.success:
             run.write_summary(
                 status="failed",
@@ -814,7 +826,7 @@ def _run_build(
                 exit_code=outcome.exit_code,
             )
             return outcome.exit_code
-        
+
         # Show upload commands if requested
         if request.upload and outcome.artifacts:
             # Find the .changes file
@@ -822,7 +834,7 @@ def _run_build(
             if changes_files:
                 activity("report", "Upload commands:")
                 activity("report", f"  dput ppa:ubuntu-openstack-dev/proposed {changes_files[0]}")
-        
+
         # Write final summary
         run.write_summary(
             status="success",
@@ -840,7 +852,7 @@ def _run_build(
 
         activity("report", f"Package {pkg_idx}/{len(plan_result.build_order)} complete: {pkg_name}")
         activity("report", f"Logs: {run.run_path}")
-    
+
     # All packages built successfully
     activity("build", f"Successfully built all {len(plan_result.build_order)} package(s)")
     return EXIT_SUCCESS

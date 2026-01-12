@@ -159,20 +159,19 @@ def get_parallel_batches(
     Returns:
         List of batches, each batch is a list of package names.
     """
+    batches = []
+
     # Get remaining packages to build
     remaining = {
         name for name, pkg_state in state.packages.items()
         if pkg_state.status == PackageStatus.PENDING
     }
 
-    # Get already built packages
-    built = {
+    # Get already processed packages (success, failed, or blocked)
+    processed = {
         name for name, pkg_state in state.packages.items()
-        if pkg_state.status == PackageStatus.SUCCESS
+        if pkg_state.status in (PackageStatus.SUCCESS, PackageStatus.FAILED, PackageStatus.BLOCKED, PackageStatus.SKIPPED)
     }
-
-    batches: list[list[str]] = []
-    processed: set[str] = set(built)
 
     while remaining:
         # Find packages whose dependencies are all processed
@@ -234,6 +233,7 @@ def run_single_build(
         "--yes",  # No prompts
         "--no-cleanup",  # Keep workspace for debugging
         "--skip-repo-regen",  # Coordinator handles repo regeneration
+        "--no-build-deps",  # Coordinator handles dependencies
     ]
 
     if cloud_archive:

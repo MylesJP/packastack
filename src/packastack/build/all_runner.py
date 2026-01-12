@@ -148,7 +148,7 @@ def _run_build_all(
     state: BuildAllState | None = None
     graph: DependencyGraph | None = None
     cycles: list[list[str]] = []
-    
+
     if resume:
         if resume_run_id:
             resume_state_dir = runs_root / resume_run_id / "state"
@@ -281,10 +281,10 @@ def _run_build_all(
 
         # Build dependency graph using the same function as plan --all
         activity("all", "Building dependency graph...")
-        
+
         # Import the plan command's graph builder for consistency
         from packastack.commands.plan import _build_dependency_graph as plan_build_graph
-        
+
         graph, mir_candidates = plan_build_graph(
             targets=discovery.packages,
             local_repo=local_repo,
@@ -296,15 +296,15 @@ def _run_build_all(
             ubuntu_series=resolved_ubuntu,
             openstack_series=openstack_target,
         )
-        
+
         run.log_event({
             "event": "build_all.graph_built",
             "nodes": len(graph.nodes),
             "edges": sum(len(e) for e in graph.edges.values()),
         })
-        
+
         activity("all", f"Graph: {len(graph.nodes)} packages, {sum(len(e) for e in graph.edges.values())} dependencies")
-        
+
         # Report MIR candidates if any
         if mir_candidates:
             activity("all", f"MIR candidates: {sum(len(d) for d in mir_candidates.values())} dependencies")
@@ -392,7 +392,7 @@ def _run_build_all(
             graph = DependencyGraph()
             for pkg in state.build_order:
                 graph.add_node(pkg)
-        
+
         # Use the same PlanGraph and render_waves as the plan command
         plan_graph = PlanGraph.from_dependency_graph(
             dep_graph=graph,
@@ -402,7 +402,7 @@ def _run_build_all(
             type_report=None,
             cycles=cycles,
         )
-        
+
         waves_output = render_waves(plan_graph, focus=None)
         print(f"\n{waves_output}", file=sys.__stdout__, flush=True)
         return EXIT_SUCCESS
