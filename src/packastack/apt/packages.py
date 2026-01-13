@@ -61,6 +61,11 @@ def compare_versions(v1: str, v2: str) -> int:
          0 if v1 == v2
          1 if v1 > v2
     """
+    # Skip comparison if either version contains Debian substitution variables
+    # (e.g., ${binary:Version}). These can't be compared meaningfully.
+    if "${" in v1 or "${" in v2:
+        return 0  # Treat as equal when substitution variables are present
+    
     ver1 = Version(v1)
     ver2 = Version(v2)
     if ver1 < ver2:
@@ -82,6 +87,12 @@ def version_satisfies(available: str, relation: str, required: str) -> bool:
         True if the available version satisfies the constraint.
     """
     if not relation or not required:
+        return True
+    
+    # If the required version contains Debian substitution variables
+    # (e.g., ${binary:Version}), we can't evaluate it meaningfully.
+    # Treat as satisfied since the actual version is unknown.
+    if "${" in required:
         return True
 
     cmp = compare_versions(available, required)
