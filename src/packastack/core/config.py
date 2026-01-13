@@ -46,6 +46,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "refresh_ttl": "6h",
         "mir_policy": "warn",
         "cloud_archive": None,
+        "upload_ppa": None,  # PPA to auto-upload to (e.g., "mylesjp/gazpacho-devel")
     },
     "mirrors": {
         "ubuntu_archive": "http://archive.ubuntu.com/ubuntu",

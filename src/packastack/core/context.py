@@ -134,6 +134,7 @@ class BuildRequest:
     plan_upload: bool = False
     upload: bool = False
     skip_repo_regen: bool = False
+    ppa_upload: bool = False
     workspace_ref: Callable[[Path], None] | None = None
 
     def to_plan_request(self) -> PlanRequest:

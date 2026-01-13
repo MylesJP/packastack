@@ -307,6 +307,7 @@ def build(
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmations"),
     include_retired: bool = typer.Option(False, "--include-retired", help="Build retired upstream projects (default: refuse)"),
     skip_repo_regen: bool = typer.Option(False, "--skip-repo-regen", hidden=True, help="Skip local repo regeneration (internal use)"),
+    ppa_upload: bool = typer.Option(False, "--ppa-upload", help="Upload to configured PPA on success"),
     # --all mode options
     all_packages: bool = typer.Option(False, "-a", "--all", help="Build all discovered packages in dependency order"),
     keep_going: bool = typer.Option(True, "--keep-going/--fail-fast", help="Continue on failure (default: keep-going) [--all only]"),
@@ -404,6 +405,7 @@ def build(
             yes=yes,
             include_retired=include_retired,
             skip_repo_regen=skip_repo_regen,
+            ppa_upload=ppa_upload,
         )
 
 
@@ -434,6 +436,7 @@ def _build_single_mode(
     yes: bool,
     include_retired: bool,
     skip_repo_regen: bool = False,
+    ppa_upload: bool = False,
 ) -> None:
     """Build a single package."""
     with RunContext("build") as run:
@@ -474,6 +477,7 @@ def _build_single_mode(
                 plan_upload=plan_upload,
                 upload=upload,
                 skip_repo_regen=skip_repo_regen,
+                ppa_upload=ppa_upload,
                 workspace_ref=lambda w: _set_workspace(w, locals()),
             )
             exit_code = _run_build(run=run, request=request)
@@ -545,6 +549,61 @@ def _build_all_mode(
 def _set_workspace(w: Path, local_vars: dict) -> None:
     """Helper to set workspace in outer scope."""
     local_vars["workspace"] = w
+
+
+def _upload_to_ppa(changes_file: Path, ppa: str, run: RunContextType) -> bool:
+    """Upload a source package to a PPA using dput.
+
+    Args:
+        changes_file: Path to the .changes file.
+        ppa: PPA specification (e.g., "mylesjp/gazpacho-devel").
+        run: RunContext for logging.
+
+    Returns:
+        True if upload succeeded, False otherwise.
+    """
+    import subprocess
+
+    if not changes_file.exists():
+        activity("warn", f"Changes file not found: {changes_file}")
+        return False
+
+    # Build dput command
+    cmd = ["dput", f"ppa:{ppa}", str(changes_file)]
+    
+    activity("report", f"Uploading to PPA {ppa}...")
+    activity("report", f"  Command: {' '.join(cmd)}")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            activity("report", f"Successfully uploaded to ppa:{ppa}")
+            run.log_event({"event": "build.ppa_upload_success", "ppa": ppa, "changes_file": str(changes_file)})
+            return True
+        else:
+            activity("warn", f"PPA upload failed with exit code {result.returncode}")
+            if result.stdout:
+                activity("warn", f"  stdout: {result.stdout}")
+            if result.stderr:
+                activity("warn", f"  stderr: {result.stderr}")
+            run.log_event({
+                "event": "build.ppa_upload_failed",
+                "ppa": ppa,
+                "exit_code": result.returncode,
+                "error": result.stderr or result.stdout,
+            })
+            return False
+    except FileNotFoundError:
+        activity("warn", "dput is not installed. Install with: sudo apt install dput")
+        return False
+    except subprocess.TimeoutExpired:
+        activity("warn", "PPA upload timed out (300 seconds)")
+        return False
+    except Exception as e:
+        activity("warn", f"PPA upload failed: {e}")
+        run.log_event({"event": "build.ppa_upload_error", "error": str(e)})
+        return False
 
 
 def _run_build(
@@ -831,6 +890,17 @@ def _run_build(
             if changes_files:
                 activity("report", "Upload commands:")
                 activity("report", f"  dput ppa:ubuntu-openstack-dev/proposed {changes_files[0]}")
+
+        # Upload to PPA if configured
+        if request.ppa_upload and outcome.artifacts:
+            changes_files = [a for a in outcome.artifacts if a.suffix == ".changes"]
+            if changes_files:
+                upload_ppa = cfg.get("defaults", {}).get("upload_ppa")
+                if upload_ppa:
+                    _upload_to_ppa(changes_files[0], upload_ppa, run)
+                else:
+                    activity("warn", "PPA upload requested but 'upload_ppa' not configured in ~/.packastack/config.yaml")
+                    activity("warn", "Set 'defaults.upload_ppa' to enable (e.g., 'mylesjp/gazpacho-devel')")
 
         # Write final summary
         run.write_summary(
