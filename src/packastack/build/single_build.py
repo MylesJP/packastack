@@ -657,6 +657,7 @@ def fetch_packaging_repo(
         check_watch_mismatch,
         fix_oslo_watch_pattern,
         parse_watch_file,
+        remove_pgp_options_from_watch,
         update_signing_key,
         upgrade_watch_version,
     )
@@ -714,6 +715,14 @@ def fetch_packaging_repo(
 
     is_snapshot = ctx.build_type == BuildType.SNAPSHOT
     releases_repo = ctx.paths.get("openstack_releases_repo")
+
+    # For snapshot builds, remove PGP signature verification options from watch file
+    # since there are no official signed tarballs for snapshots
+    if is_snapshot:
+        if remove_pgp_options_from_watch(watch_path):
+            activity("prepare", "Removed PGP options from debian/watch for snapshot build")
+            watch_updated = True
+
     if update_signing_key(pkg_repo, releases_repo, ctx.openstack_target, is_snapshot):
         signing_key_updated = True
         if is_snapshot:
