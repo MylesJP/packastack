@@ -32,12 +32,12 @@ Where PhaseResult contains success/exit_code and Data contains phase-specific ou
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-import json
 
 from packastack.build.errors import (
     EXIT_BUILD_FAILED,
@@ -51,7 +51,6 @@ from packastack.build.errors import (
 )
 from packastack.build.git_helpers import (
     GitCommitError,
-    ensure_no_merge_paths,
     extract_upstream_version,
     git_commit,
     maybe_enable_sphinxdoc,
@@ -68,7 +67,6 @@ if TYPE_CHECKING:
     from packastack.build.provenance import BuildProvenance
     from packastack.core.run import RunContext
     from packastack.planning.type_selection import BuildType
-    from packastack.upstream.registry import ResolvedUpstream
     from packastack.upstream.source import SnapshotAcquisitionResult, UpstreamSource
 
 
@@ -299,19 +297,21 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     from packastack.build.provenance import create_provenance
     from packastack.build.type_resolution import (
         build_type_from_string as _build_type_from_string,
+    )
+    from packastack.build.type_resolution import (
         resolve_build_type_auto,
     )
+    from packastack.planning.type_selection import BuildType
+    from packastack.target.arch import get_host_arch
+    from packastack.target.distro_info import get_current_lts
+    from packastack.target.series import resolve_series
     from packastack.upstream.releases import (
+        get_current_development_series,
         get_previous_series,
         is_snapshot_eligible,
         load_openstack_packages,
-        get_current_development_series,
     )
     from packastack.upstream.source import select_upstream_source
-    from packastack.target.series import resolve_series
-    from packastack.target.distro_info import get_current_lts
-    from packastack.target.arch import get_host_arch
-    from packastack.planning.type_selection import BuildType
 
     run = inputs.run
     paths = inputs.paths
@@ -375,11 +375,32 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     # Build type: if caller left it as "auto", resolve per-package here
     if inputs.resolved_build_type_str == "auto":
         try:
+            # Determine the correct project name for checking releases
+            # Priority: 1) deliverable if exists in releases, 2) pkg_name, 3) URL-derived name
+            from packastack.upstream.releases import load_project_releases
+
+            deliverable_name = upstream_config.release_source.deliverable
+
+            # Try deliverable first
+            if deliverable_name:
+                test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
+                if test_releases:
+                    # Deliverable exists in releases, use it
+                    pass
+                else:
+                    # Deliverable doesn't exist, try pkg_name
+                    test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
+                    if test_releases:
+                        deliverable_name = pkg_name
+            else:
+                # No deliverable set, use pkg_name
+                deliverable_name = pkg_name
+
             chosen, auto_milestone, reason = resolve_build_type_auto(
                 releases_repo=releases_repo,
                 series=openstack_target,
                 source_package=pkg_name,
-                deliverable=upstream_config.release_source.deliverable,
+                deliverable=deliverable_name,
                 offline=inputs.offline,
                 run=run,
             )
@@ -426,7 +447,25 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     activity("policy", "Checking snapshot eligibility")
 
     if build_type == BuildType.SNAPSHOT:
-        eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, package)
+        # Determine the correct project name for checking releases
+        # Priority: deliverable if exists in releases, otherwise pkg_name
+        from packastack.upstream.releases import load_project_releases
+
+        deliverable_name = upstream_config.release_source.deliverable
+        project_name = deliverable_name
+
+        # Check if deliverable exists in releases
+        if deliverable_name:
+            test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
+            if not test_releases:
+                # Deliverable doesn't exist, try pkg_name
+                test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
+                if test_releases:
+                    project_name = pkg_name
+        else:
+            project_name = pkg_name
+
+        eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, project_name)
         if not eligible:
             activity("policy", f"Blocked: {reason}")
             if preferred:
@@ -820,7 +859,7 @@ def prepare_upstream_source(
     )
     from packastack.debpkg.launchpad_yaml import update_launchpad_yaml_series
     from packastack.planning.type_selection import BuildType
-    from packastack.upstream.releases import load_series_info
+    from packastack.upstream.releases import load_project_releases, load_series_info
     from packastack.upstream.source import (
         SnapshotAcquisitionResult,
         SnapshotRequest,
@@ -829,7 +868,11 @@ def prepare_upstream_source(
         apply_signature_policy,
         select_upstream_source,
     )
-    from packastack.upstream.tarball_cache import TarballCacheEntry, cache_tarball, find_cached_tarball
+    from packastack.upstream.tarball_cache import (
+        TarballCacheEntry,
+        cache_tarball,
+        find_cached_tarball,
+    )
 
     result = PrepareResult()
     run = ctx.run
@@ -961,8 +1004,24 @@ def prepare_upstream_source(
 
             # Clone upstream and generate snapshot tarball
             upstream_work_dir = ctx.workspace / "upstream"
+            # Determine the correct project name for cloning upstream
+            # Priority: deliverable if exists in releases, otherwise pkg_name
+            # This ensures we clone from the correct OpenDev repository
+            deliverable_name = ctx.upstream_config.release_source.deliverable
+            project_name = deliverable_name
+
+            if deliverable_name:
+                test_releases = load_project_releases(releases_repo, ctx.openstack_target, deliverable_name)
+                if not test_releases:
+                    # Deliverable doesn't exist in releases, try pkg_name
+                    test_releases = load_project_releases(releases_repo, ctx.openstack_target, ctx.pkg_name)
+                    if test_releases:
+                        project_name = ctx.pkg_name
+            else:
+                project_name = ctx.pkg_name
+
             snapshot_request = SnapshotRequest(
-                project=ctx.package,
+                project=project_name,
                 base_version=base_version,
                 branch=upstream_branch,
                 git_ref="HEAD",
@@ -1139,6 +1198,9 @@ def validate_and_build_deps(
     Returns:
         Tuple of (PhaseResult, ValidateDepsResult).
     """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import Version
+
     from packastack.planning.type_selection import BuildType
     from packastack.planning.validated_plan import (
         check_version_satisfies,
@@ -1152,8 +1214,6 @@ def validate_and_build_deps(
         save_satisfaction_report,
     )
     from packastack.upstream.tarball_cache import extract_tarball
-    from packaging.specifiers import SpecifierSet
-    from packaging.version import Version
 
     result = ValidateDepsResult()
     run = ctx.run
@@ -1384,8 +1444,7 @@ def validate_and_build_deps(
 def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     """Evaluate debian/control deps against dev and previous LTS and write reports."""
 
-    from packastack.debpkg.control import parse_control
-    from packastack.debpkg.control import format_dependency_list
+    from packastack.debpkg.control import format_dependency_list, parse_control
     from packastack.planning.control_min_versions import (
         apply_min_version_policy,
         decisions_to_report,
@@ -2076,7 +2135,6 @@ def build_packages(
     Returns:
         Tuple of (PhaseResult, BuildResult).
     """
-    from packastack.apt import localrepo
     from packastack.build.mode import Builder
     from packastack.build.sbuild import SbuildConfig, is_sbuild_available, run_sbuild
     from packastack.debpkg.changelog import get_current_version, parse_version
