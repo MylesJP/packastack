@@ -754,17 +754,20 @@ def acquire_upstream_snapshot(
 
     if describe_result:
         if describe_result.is_exact_tag:
-            # Exactly at a tag - use that version directly
-            upstream_version = describe_result.base_version
+            # Exactly at a tag - use +git to indicate post-release snapshot
+            # For example: 7.2.0+git20240115.abc1234 sorts after 7.2.0
+            upstream_version = f"{describe_result.base_version}+git{date_str}.{short_sha}"
         else:
-            # Commits after tag: tag+git{date}.{count}.{sha}
+            # Commits after tag: use +git for post-release development
+            # For example: 7.2.0+git20240115.5.abc1234 sorts after 7.2.0
             upstream_version = (
                 f"{describe_result.base_version}+git{date_str}."
                 f"{describe_result.commit_count}.{describe_result.short_sha}"
             )
     else:
         # Fallback to old format if git describe fails
-        upstream_version = f"{request.base_version}~git{date_str}.{short_sha}"
+        upstream_version = f"{request.base_version}+git{date_str}.{short_sha}"
+
 
     # Step 4: Generate orig tarball
     tarball_result = generate_snapshot_tarball(

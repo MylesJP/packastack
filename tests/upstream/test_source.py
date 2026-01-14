@@ -943,7 +943,7 @@ class TestAcquireUpstreamSnapshot:
             assert result.success is True
             assert result.git_sha_short == "abc1234"
             assert result.git_date == "20241227"
-            # New format: tag+git{date}.{count}.{sha}
+            # Snapshot format: base_version+git{date}.{count}.{sha}
             assert result.upstream_version == "29.0.0+git20241227.50.abc1234"
             assert result.cloned is True
 
@@ -979,8 +979,8 @@ class TestAcquireUpstreamSnapshot:
             )
 
             assert result.success is True
-            # Exactly at tag - use tag version directly
-            assert result.upstream_version == "30.0.0"
+            # Exactly at tag - use +git for post-release snapshot
+            assert result.upstream_version == "30.0.0+git20241227.abc1234"
 
     def test_git_describe_fallback(self, tmp_path: Path) -> None:
         """Test fallback to old format when git describe fails."""
@@ -1008,9 +1008,9 @@ class TestAcquireUpstreamSnapshot:
                 output_dir=output_dir,
             )
 
-            assert result.success is True
-            # Fallback to old format
-            assert result.upstream_version == "29.0.0~git20241227.abc1234"
+        assert result.success is True
+        # Fallback to old format
+        assert result.upstream_version == "29.0.0+git20241227.abc1234"
 
     def test_clone_failure(self, tmp_path: Path) -> None:
         """Test acquisition when clone fails."""
@@ -1282,7 +1282,7 @@ class TestAcquireUpstreamSnapshotEdgeCases:
                 output_dir=output_dir,
             )
 
-            # New format: tag+git{date}.{count}.{sha}
+            # Snapshot format: base_version+git{date}.{count}.{sha}
             assert result.upstream_version == "29.0.0+git20241227.75.abc1234"
             assert result.git_sha == "abc1234567890abcdef1234"
             assert result.git_sha_short == "abc1234"

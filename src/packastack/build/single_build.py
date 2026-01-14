@@ -2060,9 +2060,19 @@ def import_and_patch(
             key = f"{ctx.openstack_target}:{build_type_str}"
             lp_bug = lp_bugs.get(key)
 
+    # Determine upstream version for changelog message
+    # For snapshots, use the version from snapshot_result
+    # For releases/milestones, use the version from ctx.upstream
+    if snapshot_result and snapshot_result.upstream_version:
+        upstream_version_for_changelog = snapshot_result.upstream_version
+    elif ctx.upstream:
+        upstream_version_for_changelog = ctx.upstream.version
+    else:
+        upstream_version_for_changelog = ""
+
     changes = generate_changelog_message(
         ctx.build_type.value if ctx.build_type else "release",
-        ctx.upstream.version if ctx.upstream else "",
+        upstream_version_for_changelog,
         git_sha,
         signature_verified,
         "",  # signature_warning
@@ -2070,15 +2080,34 @@ def import_and_patch(
         openstack_series=ctx.openstack_target,
     )
 
-    if update_changelog(
+    # For snapshot builds, use dch directly instead of gbp dch
+    # gbp dch doesn't handle UNRELEASED entries properly for snapshots
+    use_gbp = ctx.build_type != BuildType.SNAPSHOT
+
+    changelog_updated, changelog_error = update_changelog(
         debian_dir / "changelog",
         ctx.pkg_name,
         new_version,
         ctx.resolved_ubuntu,
         changes,
-        prefer_gbp=True,
-    ):
-        activity("changelog", "Updated debian/changelog")
+        prefer_gbp=use_gbp,
+    )
+
+    if not changelog_updated:
+        error_msg = f"Failed to update debian/changelog to version {new_version}: {changelog_error}"
+        activity("changelog", f"ERROR: {error_msg}")
+        run.log_event({"event": "changelog.update_failed", "version": new_version, "error": changelog_error})
+        if not ctx.force:
+            run.write_summary(
+                status="failed",
+                error=error_msg,
+                exit_code=EXIT_PATCH_FAILED,
+            )
+            return PhaseResult.fail(EXIT_PATCH_FAILED, error_msg)
+        activity("changelog", "Continuing despite changelog update failure (--force enabled)")
+
+    if changelog_updated:
+        activity("changelog", f"Updated debian/changelog to {new_version}")
         run.log_event({
             "event": "changelog.updated",
             "version": new_version,
@@ -2100,15 +2129,13 @@ def import_and_patch(
             )
             if commit_result.returncode == 0:
                 activity("changelog", "Committed changelog update")
+                run.log_event({"event": "changelog.committed", "message": changelog_msg})
             else:
                 raise GitCommitError(
                     "Failed to commit changelog update",
                     stderr=commit_result.stderr,
                     returncode=commit_result.returncode,
                 )
-    else:
-        activity("changelog", "Warning: failed to update changelog")
-        run.log_event({"event": "changelog.update_failed"})
 
     return PhaseResult.ok()
 

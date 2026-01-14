@@ -234,7 +234,7 @@ def update_changelog(
     maintainer: str | None = None,
     urgency: str = "medium",
     prefer_gbp: bool = False,
-) -> bool:
+) -> tuple[bool, str]:
     """Update debian/changelog with a new entry.
 
     Args:
@@ -245,9 +245,10 @@ def update_changelog(
         changes: List of changelog entry lines.
         maintainer: Maintainer name and email (default: from environment).
         urgency: Package urgency level.
+        prefer_gbp: Whether to prefer gbp dch over dch/python-debian.
 
     Returns:
-        True if update succeeded.
+        Tuple of (success: bool, error_message: str). error_message is empty on success.
     """
     def _detect_existing_maintainer() -> str | None:
         # Prefer the maintainer from the current top changelog entry to avoid
@@ -291,19 +292,24 @@ def update_changelog(
     print(f"[update_changelog] maintainer={maintainer}", file=sys.stderr)
     print(f"[update_changelog] prefer_gbp={prefer_gbp}", file=sys.stderr)
 
-    if prefer_gbp and _update_changelog_gbp_dch(
-        changelog_path, version, distribution, changes, maintainer, urgency
-    ):
-        return True
+    if prefer_gbp:
+        success, error = _update_changelog_gbp_dch(
+            changelog_path, version, distribution, changes, maintainer, urgency
+        )
+        if success:
+            return True, ""
+        # Fall through to try other methods if gbp dch fails
 
     if Changelog is not None:
-        return _update_changelog_python_debian(
+        success, error = _update_changelog_python_debian(
             changelog_path, package, version, distribution, changes, maintainer, urgency
         )
+        return success, error
     else:
-        return _update_changelog_dch(
+        success, error = _update_changelog_dch(
             changelog_path, package, version, distribution, changes, maintainer, urgency
         )
+        return success, error
 
 
 def _update_changelog_gbp_dch(
@@ -313,11 +319,14 @@ def _update_changelog_gbp_dch(
     changes: list[str],
     maintainer: str,
     urgency: str,
-) -> bool:
+) -> tuple[bool, str]:
     """Update changelog using gbp dch, appending custom change lines.
 
     gbp dch creates the stanza and handles version/distribution wiring; we
     then append our provided change lines with dch for consistency.
+
+    Returns:
+        Tuple of (success, error_message).
     """
     import sys
 
@@ -359,7 +368,8 @@ def _update_changelog_gbp_dch(
         )
 
         if result.returncode != 0:
-            return False
+            error_msg = f"gbp dch failed (rc={result.returncode}): {result.stderr or result.stdout}"
+            return False, error_msg
 
         # Add the custom changes (like "New upstream release") using dch
         # Use --maintmaint to use the specified maintainer instead of
@@ -380,11 +390,12 @@ def _update_changelog_gbp_dch(
                 text=True,
             )
             if append_result.returncode != 0:
-                return False
+                error_msg = f"dch --append failed: {append_result.stderr or append_result.stdout}"
+                return False, error_msg
 
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as e:
+        return False, f"Exception in _update_changelog_gbp_dch: {e}"
 
 
 def _update_changelog_python_debian(
@@ -395,8 +406,12 @@ def _update_changelog_python_debian(
     changes: list[str],
     maintainer: str,
     urgency: str,
-) -> bool:
-    """Update changelog using python-debian library."""
+) -> tuple[bool, str]:
+    """Update changelog using python-debian library.
+
+    Returns:
+        Tuple of (success, error_message).
+    """
     try:
         # Read existing changelog
         if changelog_path.exists():
@@ -423,9 +438,9 @@ def _update_changelog_python_debian(
         with changelog_path.open("w", encoding="utf-8") as f:
             cl.write_to_open_file(f)
 
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as e:
+        return False, f"python-debian changelog update failed: {e}"
 
 
 def _update_changelog_dch(
@@ -436,8 +451,14 @@ def _update_changelog_dch(
     changes: list[str],
     maintainer: str,
     urgency: str,
-) -> bool:
-    """Update changelog using dch command."""
+) -> tuple[bool, str]:
+    """Update changelog using dch command.
+
+    Returns:
+        Tuple of (success, error_message).
+    """
+    import sys
+
     try:
         # Use dch to create new version
         cmd = [
@@ -459,6 +480,13 @@ def _update_changelog_dch(
             env["DEBFULLNAME"] = match.group(1)
             env["DEBEMAIL"] = match.group(2)
 
+        # Debug logging
+        print(f"[dch-debug] Running command: {' '.join(cmd)}", file=sys.stderr)
+        print(f"[dch-debug] Working directory: {changelog_path.parent.parent}", file=sys.stderr)
+        print(f"[dch-debug] DEBFULLNAME={env.get('DEBFULLNAME')}", file=sys.stderr)
+        print(f"[dch-debug] DEBEMAIL={env.get('DEBEMAIL')}", file=sys.stderr)
+        print(f"[dch-debug] Changes: {changes}", file=sys.stderr)
+
         result = subprocess.run(
             cmd,
             cwd=changelog_path.parent.parent,  # Run from package root
@@ -467,21 +495,37 @@ def _update_changelog_dch(
             text=True,
         )
 
+        print(f"[dch-debug] Return code: {result.returncode}", file=sys.stderr)
+        if result.stdout:
+            print(f"[dch-debug] stdout: {result.stdout}", file=sys.stderr)
+        if result.stderr:
+            print(f"[dch-debug] stderr: {result.stderr}", file=sys.stderr)
+
         if result.returncode != 0:
-            return False
+            error_msg = f"dch --newversion failed (rc={result.returncode}): {result.stderr or result.stdout}"
+            return False, error_msg
 
         # Add additional changes
         for change in changes[1:]:
-            subprocess.run(
+            append_result = subprocess.run(
                 ["dch", "--append", "--", change],
                 cwd=changelog_path.parent.parent,
                 env=env,
                 capture_output=True,
+                text=True,
             )
+            if append_result.returncode != 0:
+                error_msg = f"dch --append failed: {append_result.stderr or append_result.stdout}"
+                print(f"[dch-debug] Failed to append change: {change}", file=sys.stderr)
+                print(f"[dch-debug] stderr: {append_result.stderr}", file=sys.stderr)
+                return False, error_msg
 
-        return True
-    except Exception:
-        return False
+        return True, ""
+    except Exception as e:
+        print(f"[dch-debug] Exception in _update_changelog_dch: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return False, f"Exception in _update_changelog_dch: {e}"
 
 
 def generate_changelog_message(
