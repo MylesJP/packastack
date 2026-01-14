@@ -28,18 +28,18 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
-from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from packastack.upstream.releases import (
+    ProjectRelease,
+    load_openstack_packages,
     load_project_releases,
     load_series_info,
-    load_openstack_packages,
-    ProjectRelease,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +99,7 @@ class ReasonCode(str, Enum):
     PRE_FINAL_NO_RELEASE = "PRE_FINAL_NO_RELEASE"  # Pre-final and no release
     NOT_IN_RELEASES = "NOT_IN_RELEASES"  # Project not in openstack/releases
     SNAPSHOT_FORCED = "SNAPSHOT_FORCED"  # User forced snapshot mode
+    CLIENT_LIBRARY_NO_SNAPSHOT = "CLIENT_LIBRARY_NO_SNAPSHOT"  # Clients/oslo packages always use releases
 
     # Retirement reasons
     RETIRED_PROJECT = "RETIRED_PROJECT"  # Project is retired upstream
@@ -153,7 +154,7 @@ class UpstreamResolution:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UpstreamResolution":
+    def from_dict(cls, data: dict[str, Any]) -> UpstreamResolution:
         """Create from dictionary."""
         return cls(
             authority=UpstreamAuthority(data.get("authority", "none")),
@@ -196,7 +197,7 @@ class WatchInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WatchInfo":
+    def from_dict(cls, data: dict[str, Any]) -> WatchInfo:
         """Create from dictionary."""
         return cls(
             parsed=data.get("parsed", False),
@@ -253,7 +254,7 @@ class TypeSelectionResult:
     package_status: PackageStatus = PackageStatus.ACTIVE
     upstream_resolution: UpstreamResolution | None = None
     watch_info: WatchInfo | None = None
-    retirement_info: "RetirementInfo | None" = None
+    retirement_info: RetirementInfo | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -645,6 +646,11 @@ def select_build_type(
     has_beta_rc_final = project.has_beta_rc_or_final() if project else False
     latest_version = project.get_latest_version() or "" if project else ""
 
+    # Policy: Client libraries and oslo packages should never be built as snapshots
+    # They should always use released tarballs to reduce maintenance burden
+    is_client_or_library = kind in (DeliverableKind.CLIENT, DeliverableKind.LIBRARY)
+    should_prevent_snapshot = is_client_or_library and not force_snapshot
+
     # Helper to add watch/uscan info to result
     def _add_watch_info(result: TypeSelectionResult) -> TypeSelectionResult:
         """Add watch file, uscan information, and retirement info to result."""
@@ -656,9 +662,7 @@ def select_build_type(
 
         # Only run uscan for RELEASE builds or NOT_IN_RELEASES with fallback
         should_run_uscan = False
-        if result.chosen_type == BuildType.RELEASE:
-            should_run_uscan = True
-        elif (
+        if result.chosen_type == BuildType.RELEASE or (
             result.reason_code == ReasonCode.NOT_IN_RELEASES
             and watch_config.fallback_for_not_in_releases
         ):
@@ -671,7 +675,6 @@ def select_build_type(
         from packastack.debpkg.watch import (
             DetectedWatchMode,
             UscanResult,
-            UscanStatus,
             cache_uscan_result,
             get_cached_uscan_result,
             parse_watch_file,
@@ -762,6 +765,24 @@ def select_build_type(
         ))
 
     if project is None:
+        # For clients and libraries not in releases, use debian/watch (RELEASE mode)
+        # instead of falling back to SNAPSHOT
+        if should_prevent_snapshot:
+            return _add_watch_info(TypeSelectionResult(
+                source_package=source_package,
+                deliverable=deliverable,
+                release_model="",
+                deliverable_kind=kind,
+                kind_confidence=kind_confidence,
+                has_release_for_cycle=False,
+                has_beta_rc_final=False,
+                latest_version="",
+                cycle_stage=cycle_stage,
+                chosen_type=BuildType.RELEASE,
+                reason_code=ReasonCode.CLIENT_LIBRARY_NO_SNAPSHOT,
+                reason_human=f"Client/library package '{deliverable}' uses debian/watch (no snapshots)",
+                package_status=package_status,
+            ))
         return _add_watch_info(TypeSelectionResult(
             source_package=source_package,
             deliverable=deliverable,
@@ -798,6 +819,23 @@ def select_build_type(
             ))
         else:
             # Rare: post-final but no release (edge case)
+            # For clients/libraries, try debian/watch instead of snapshot
+            if should_prevent_snapshot:
+                return _add_watch_info(TypeSelectionResult(
+                    source_package=source_package,
+                    deliverable=deliverable,
+                    release_model=release_model,
+                    deliverable_kind=kind,
+                    kind_confidence=kind_confidence,
+                    has_release_for_cycle=False,
+                    has_beta_rc_final=False,
+                    latest_version="",
+                    cycle_stage=cycle_stage,
+                    chosen_type=BuildType.RELEASE,
+                    reason_code=ReasonCode.CLIENT_LIBRARY_NO_SNAPSHOT,
+                    reason_human="Post-final client/library uses debian/watch (no snapshots)",
+                    package_status=package_status,
+                ))
             return _add_watch_info(TypeSelectionResult(
                 source_package=source_package,
                 deliverable=deliverable,
@@ -939,6 +977,23 @@ def select_build_type(
         ))
 
     # No releases at all
+    # For clients/libraries, use debian/watch instead of snapshot
+    if should_prevent_snapshot:
+        return _add_watch_info(TypeSelectionResult(
+            source_package=source_package,
+            deliverable=deliverable,
+            release_model=release_model,
+            deliverable_kind=kind,
+            kind_confidence=kind_confidence,
+            has_release_for_cycle=False,
+            has_beta_rc_final=False,
+            latest_version="",
+            cycle_stage=cycle_stage,
+            chosen_type=BuildType.RELEASE,
+            reason_code=ReasonCode.CLIENT_LIBRARY_NO_SNAPSHOT,
+            reason_human="Client/library package uses debian/watch (no snapshots)",
+            package_status=package_status,
+        ))
     return _add_watch_info(TypeSelectionResult(
         source_package=source_package,
         deliverable=deliverable,
@@ -1034,7 +1089,7 @@ def select_build_types_for_packages(
     watch_config: WatchConfig | None = None,
     packaging_repos: dict[str, Path] | None = None,
     uscan_cache_path: Path | None = None,
-    retirement_checker: "RetirementChecker | None" = None,
+    retirement_checker: RetirementChecker | None = None,
     registry: Any | None = None,
     progress_callback: Callable[[int], None] | None = None,
 ) -> TypeSelectionReport:
@@ -1062,7 +1117,7 @@ def select_build_types_for_packages(
     """
     # Import cache functions
     from packastack.debpkg.watch import load_uscan_cache, save_uscan_cache
-    from packastack.upstream.retirement import RetirementStatus, MappingConfidence
+    from packastack.upstream.retirement import MappingConfidence, RetirementStatus
 
     cycle_stage = determine_cycle_stage(releases_repo, series) if releases_repo else CycleStage.UNKNOWN
 
@@ -1070,7 +1125,7 @@ def select_build_types_for_packages(
         run_id=run_id,
         target=series,
         ubuntu_series=ubuntu_series,
-        generated_at_utc=datetime.now(timezone.utc).isoformat(),
+        generated_at_utc=datetime.now(UTC).isoformat(),
         type_mode=type_mode,
         cycle_stage=cycle_stage,
     )
@@ -1084,9 +1139,7 @@ def select_build_types_for_packages(
             stale_keys: list[str] = []
             for pkg, entry in uscan_cache.items():
                 repo_path = packaging_repos.get(pkg)
-                if not repo_path or not repo_path.exists():
-                    stale_keys.append(pkg)
-                elif entry.packaging_repo_path and entry.packaging_repo_path != str(repo_path):
+                if not repo_path or not repo_path.exists() or (entry.packaging_repo_path and entry.packaging_repo_path != str(repo_path)):
                     stale_keys.append(pkg)
             for key in stale_keys:
                 uscan_cache.pop(key, None)
@@ -1107,7 +1160,7 @@ def select_build_types_for_packages(
         pkg_status_map[src_pkg] = PackageStatus.DEFUNCT
 
     # Check retirement status for packages
-    retirement_map: dict[str, "RetirementInfo"] = {}
+    retirement_map: dict[str, RetirementInfo] = {}
     if retirement_checker:
         for src_pkg, _ in packages:
             retirement_info = retirement_checker.check(src_pkg)
