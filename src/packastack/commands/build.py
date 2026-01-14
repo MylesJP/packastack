@@ -25,69 +25,23 @@ packages, and produces upload orders.
 
 from __future__ import annotations
 
+import contextlib
+import glob
+import os
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-import concurrent.futures
 
 import typer
 
 # Core packastack imports
-from packastack.apt import localrepo
-from packastack.apt.packages import (
-    PackageIndex,
-    load_cloud_archive_index,
-    load_local_repo_index,
-    load_package_index,
-    merge_package_indexes,
-)
-from packastack.core.config import load_config
-from packastack.core.context import BuildAllRequest, BuildRequest
-from packastack.core.paths import resolve_paths
-from packastack.core.run import RunContext, activity
-from packastack.planning.build_all_state import (
-    BuildAllState,
-    FailureType,
-    PackageState,
-    PackageStatus,
-    create_initial_state,
-    load_state,
-    save_state,
-)
-from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
-from packastack.planning.graph import DependencyGraph
-from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
-from packastack.planning.package_discovery import discover_packages
-from packastack.planning.type_selection import get_default_parallel_workers
-from packastack.reports.plan_graph import PlanGraph, render_waves
-from packastack.target.arch import get_host_arch
-from packastack.target.series import resolve_series
-from packastack.upstream.releases import (
-    get_current_development_series,
-    get_previous_series,
-    is_snapshot_eligible,
-    load_openstack_packages,
-)
-
 # Build module imports
 from packastack.build import (
-    EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
-    EXIT_CYCLE_DETECTED,
-    EXIT_DISCOVERY_FAILED,
-    EXIT_FETCH_FAILED,
-    EXIT_GRAPH_ERROR,
-    EXIT_MISSING_PACKAGES,
-    EXIT_PATCH_FAILED,
-    EXIT_POLICY_BLOCKED,
-    EXIT_REGISTRY_ERROR,
-    EXIT_RESUME_ERROR,
-    EXIT_RETIRED_PROJECT,
     EXIT_SUCCESS,
-    EXIT_TOOL_MISSING,
 )
 from packastack.build.all_helpers import (
     build_dependency_graph,
@@ -99,22 +53,31 @@ from packastack.build.all_helpers import (
 from packastack.build.all_runner import (
     _run_build_all,
     _run_parallel_builds,
-    _run_sequential_builds,
 )
 from packastack.build.git_helpers import (
     ensure_no_merge_paths,
 )
-from packastack.build.localrepo_helpers import (
-    refresh_local_repo_indexes as _refresh_local_repo_indexes,
-)
 from packastack.build.provenance import summarize_provenance
-from packastack.build.tools import check_required_tools
 from packastack.build.type_resolution import (
     build_type_from_string,
     resolve_build_type_auto,
     resolve_build_type_from_cli,
 )
 from packastack.commands.init import _clone_or_update_project_config
+from packastack.core.config import load_config
+from packastack.core.context import BuildAllRequest, BuildRequest
+from packastack.core.paths import resolve_paths
+from packastack.core.run import RunContext, activity
+from packastack.planning.build_all_state import (
+    BuildAllState,
+    PackageState,
+)
+from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
+from packastack.reports.plan_graph import render_waves
+from packastack.target.series import resolve_series
+from packastack.upstream.releases import (
+    get_current_development_series,
+)
 
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
@@ -131,6 +94,37 @@ _get_parallel_batches = get_parallel_batches
 _run_single_build = run_single_build
 _ensure_no_merge_paths = ensure_no_merge_paths
 OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
+
+
+def _find_most_recent_workspace(build_root: Path, package: str) -> Path | None:
+    """Find the most recent workspace directory for a package.
+
+    Searches for workspace directories matching pattern:
+        {build_root}/*/package/
+
+    Returns the most recent one based on directory modification time.
+
+    Args:
+        build_root: Root directory containing build workspaces
+        package: Package name to search for
+
+    Returns:
+        Path to most recent workspace, or None if not found
+    """
+    pattern = str(build_root / "*" / package)
+    matching = glob.glob(pattern)
+
+    if not matching:
+        return None
+
+    # Filter to directories only and sort by modification time (most recent first)
+    dirs = [Path(p) for p in matching if os.path.isdir(p)]
+    if not dirs:
+        return None
+
+    # Sort by modification time, most recent first
+    dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return dirs[0]
 
 
 def _filter_retired_packages(
@@ -319,6 +313,7 @@ def build(
     parallel: int = typer.Option(0, "-j", "--parallel", help="Parallel workers (0=auto) [--all only]"),
     packages_file: str = typer.Option("", "--packages-file", help="File with package names (one per line) [--all only]"),
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show plan without building [--all only]"),
+    resume_workspace: bool = typer.Option(False, "--resume", help="Resume build using most recent workspace for this package"),
 ) -> None:
     """Build OpenStack packages for Ubuntu.
 
@@ -406,6 +401,7 @@ def build(
             include_retired=include_retired,
             skip_repo_regen=skip_repo_regen,
             ppa_upload=ppa_upload,
+            resume_workspace=resume_workspace,
         )
 
 
@@ -437,6 +433,7 @@ def _build_single_mode(
     include_retired: bool,
     skip_repo_regen: bool = False,
     ppa_upload: bool = False,
+    resume_workspace: bool = False,
 ) -> None:
     """Build a single package."""
     with RunContext("build") as run:
@@ -478,6 +475,7 @@ def _build_single_mode(
                 upload=upload,
                 skip_repo_regen=skip_repo_regen,
                 ppa_upload=ppa_upload,
+                resume_workspace=resume_workspace,
                 workspace_ref=lambda w: _set_workspace(w, locals()),
             )
             exit_code = _run_build(run=run, request=request)
@@ -494,10 +492,8 @@ def _build_single_mode(
             # Cleanup on success only
             if cleanup_on_exit and exit_code == EXIT_SUCCESS and workspace and workspace.exists():
                 activity("report", f"Cleaning up workspace: {workspace}")
-                try:
+                with contextlib.suppress(Exception):
                     shutil.rmtree(workspace)
-                except Exception:
-                    pass
             elif workspace and workspace.exists():
                 activity("report", f"Workspace preserved: {workspace}")
 
@@ -570,13 +566,13 @@ def _upload_to_ppa(changes_file: Path, ppa: str, run: RunContextType) -> bool:
 
     # Build dput command
     cmd = ["dput", f"ppa:{ppa}", str(changes_file)]
-    
+
     activity("report", f"Uploading to PPA {ppa}...")
     activity("report", f"  Command: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        
+
         if result.returncode == 0:
             activity("report", f"Successfully uploaded to ppa:{ppa}")
             run.log_event({"event": "build.ppa_upload_success", "ppa": ppa, "changes_file": str(changes_file)})
@@ -628,8 +624,6 @@ def _run_build(
     # =========================================================================
     # PHASE: Resolve build type (before planning to avoid policy blocks)
     # =========================================================================
-    from packastack.planning.type_selection import BuildType
-    from packastack.upstream.releases import get_current_development_series
 
     # Parse CLI build type options
     parsed_type_str, milestone_from_cli = _resolve_build_type_from_cli(
@@ -641,7 +635,7 @@ def _run_build(
     if parsed_type_str == "auto":
         # Need to resolve auto before planning
         releases_repo = paths["openstack_releases_repo"]
-        resolved_ubuntu = resolve_series(request.ubuntu_series)
+        resolve_series(request.ubuntu_series)
 
         # Resolve OpenStack target
         if request.target == "devel":
@@ -654,7 +648,7 @@ def _run_build(
         if request.package.startswith("python-"):
             deliverable = request.package[7:]
 
-        build_type_resolved, milestone_resolved, _reason = _resolve_build_type_auto(
+        build_type_resolved, _milestone_resolved, _reason = _resolve_build_type_auto(
             releases_repo=releases_repo,
             series=openstack_target,
             source_package=request.package,
@@ -707,14 +701,14 @@ def _run_build(
         # so we check if request.package is in the list, or just trust the topological sort's tail.
         # But for exactness, we match the requested package if it exists in the build order.
         target_in_plan = next((p for p in plan_result.build_order if p == request.package), None)
-        
+
         # If the requested name isn't exactly in the plan (aliasing), we assume the
         # user wants to build the single package that resulted from the plan logic.
         # Since we ran plan_for_package(request.package), the result should focus on it.
         # We take the *last* element as it's topologically the target.
         if not target_in_plan and plan_result.build_order:
             target_in_plan = plan_result.build_order[-1]
-            
+
         if target_in_plan:
             plan_result = replace(plan_result, build_order=[target_in_plan])
             # Also clear the graph so parallel builder logic isn't triggered
@@ -777,8 +771,8 @@ def _run_build(
 
     # If multiple packages are present, use state-aware parallel build runner
     if len(plan_result.build_order) > 1 and getattr(plan_result, "plan_graph", None) is not None:
-        from packastack.planning.type_selection import get_default_parallel_workers
         from packastack.planning.graph import DependencyGraph
+        from packastack.planning.type_selection import get_default_parallel_workers
 
         parallel_workers = get_default_parallel_workers()
         if parallel_workers <= 0:
@@ -834,6 +828,26 @@ def _run_build(
     for pkg_idx, pkg_name in enumerate(plan_result.build_order, 1):
         activity("build", f"[{pkg_idx}/{len(plan_result.build_order)}] Building: {pkg_name}")
 
+        # Handle --resume: find and use existing workspace
+        resume_workspace_path: Path | None = None
+        if request.resume_workspace:
+            build_root = paths.get("build_root", paths["cache_root"] / "build")
+            resume_workspace_path = _find_most_recent_workspace(build_root, pkg_name)
+
+            if resume_workspace_path:
+                activity("resume", f"Resuming from existing workspace: {resume_workspace_path}")
+                run.log_event({
+                    "event": "resume.workspace_found",
+                    "workspace": str(resume_workspace_path),
+                    "package": pkg_name,
+                })
+            else:
+                activity("resume", f"No existing workspace found for {pkg_name}, starting fresh build")
+                run.log_event({
+                    "event": "resume.no_workspace",
+                    "package": pkg_name,
+                })
+
         # Create setup inputs for the orchestrator
         setup_inputs = SetupInputs(
             pkg_name=pkg_name,
@@ -865,6 +879,7 @@ def _run_build(
             paths=paths,
             cfg=cfg,
             run=run,
+            resume_workspace_path=resume_workspace_path,
         )
 
         # Run setup phases (retirement, registry, policy, indexes, tools, schroot)

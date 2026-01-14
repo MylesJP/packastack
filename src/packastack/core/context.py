@@ -34,9 +34,10 @@ Mutable context:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING
 
 from packastack.planning.type_selection import BuildType
 
@@ -135,6 +136,7 @@ class BuildRequest:
     upload: bool = False
     skip_repo_regen: bool = False
     ppa_upload: bool = False
+    resume_workspace: bool = False
     workspace_ref: Callable[[Path], None] | None = None
 
     def to_plan_request(self) -> PlanRequest:

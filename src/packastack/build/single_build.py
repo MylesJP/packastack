@@ -32,6 +32,7 @@ Where PhaseResult contains success/exit_code and Data contains phase-specific ou
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -46,6 +47,7 @@ from packastack.build.errors import (
     EXIT_MISSING_PACKAGES,
     EXIT_PATCH_FAILED,
     EXIT_POLICY_BLOCKED,
+    EXIT_RESUME_ERROR,
     EXIT_SUCCESS,
     EXIT_TOOL_MISSING,
 )
@@ -216,6 +218,9 @@ class SingleBuildContext:
     dependency_reports: dict[str, Path] | None = None
     upstream_min_versions: dict[str, str] | None = None
 
+    # Resume support
+    resume_workspace_path: Path | None = None
+
 
 # =============================================================================
 # Setup: Create and populate SingleBuildContext
@@ -265,6 +270,9 @@ class SetupInputs:
 
     # Run context
     run: Any  # RunContext
+
+    # Resume support
+    resume_workspace_path: Path | None = None
 
 
 def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildContext | None]:
@@ -319,10 +327,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     pkg_name = inputs.pkg_name
 
     # Derive project name from package name
-    if pkg_name.startswith("python-"):
-        package = pkg_name[7:]
-    else:
-        package = pkg_name
+    package = pkg_name[7:] if pkg_name.startswith("python-") else pkg_name
 
     # Resolve series
     resolved_ubuntu = resolve_series(inputs.ubuntu_series)
@@ -340,7 +345,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     # Phase 1: Retirement check
     # -------------------------------------------------------------------------
     project_config_path = paths.get("openstack_project_config")
-    retirement_result, retirement_info = check_retirement_status(
+    retirement_result, _retirement_info = check_retirement_status(
         pkg_name=pkg_name,
         package=package,
         project_config_path=project_config_path,
@@ -609,6 +614,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         openstack_pkgs=openstack_pkgs,
         schroot_name=schroot_name,
         provenance=provenance,
+        resume_workspace_path=inputs.resume_workspace_path,
     )
 
     return PhaseResult.ok(), ctx
@@ -642,6 +648,38 @@ def fetch_packaging_repo(
     result = FetchResult()
     run = ctx.run
 
+    # If resuming from existing workspace, use it instead of creating new one
+    if ctx.resume_workspace_path and ctx.resume_workspace_path.exists():
+        workspace = ctx.resume_workspace_path
+        activity("resume", f"Using existing workspace: {workspace}")
+
+        # Verify the package repo exists in the workspace
+        pkg_repo = workspace / ctx.pkg_name
+        if not pkg_repo.exists() or not (pkg_repo / ".git").is_dir():
+            error = f"Resume workspace does not contain valid git repository at {pkg_repo}"
+            activity("resume", f"ERROR: {error}")
+            run.write_summary(status="failed", error=error, exit_code=EXIT_RESUME_ERROR)
+            return PhaseResult.fail(EXIT_RESUME_ERROR, error), result
+
+        result.workspace = workspace
+        result.pkg_repo = pkg_repo
+        ctx.workspace = workspace
+        ctx.pkg_repo = pkg_repo
+
+        # Mirror logs into existing workspace
+        with contextlib.suppress(Exception):
+            run.add_log_mirror(workspace / "logs")
+
+        activity("resume", f"Resuming from: {pkg_repo}")
+        run.log_event({
+            "event": "resume.workspace_reused",
+            "workspace": str(workspace),
+            "pkg_repo": str(pkg_repo),
+        })
+
+        # Skip the rest of fetch - we're using existing state
+        return PhaseResult.ok(), result
+
     # Create workspace
     build_root = ctx.paths.get("build_root", ctx.paths["cache_root"] / "build")
     workspace = build_root / run.run_id / ctx.pkg_name
@@ -653,10 +691,8 @@ def fetch_packaging_repo(
     ctx.workspace = workspace
 
     # Mirror RunContext logs into the build workspace
-    try:
+    with contextlib.suppress(Exception):
         run.add_log_mirror(workspace / "logs")
-    except Exception:
-        pass
 
     # Clone packaging repo
     launchpad_username = ctx.cfg.get("git", {}).get("launchpad_username")
@@ -735,7 +771,6 @@ def fetch_packaging_repo(
 
     watch_updated = False
     signing_key_updated = False
-    files_to_commit = []
 
     if upgrade_watch_version(watch_path):
         activity("prepare", "Updated debian/watch to version=4")
@@ -757,10 +792,9 @@ def fetch_packaging_repo(
 
     # For snapshot builds, remove PGP signature verification options from watch file
     # since there are no official signed tarballs for snapshots
-    if is_snapshot:
-        if remove_pgp_options_from_watch(watch_path):
-            activity("prepare", "Removed PGP options from debian/watch for snapshot build")
-            watch_updated = True
+    if is_snapshot and remove_pgp_options_from_watch(watch_path):
+        activity("prepare", "Removed PGP options from debian/watch for snapshot build")
+        watch_updated = True
 
     if update_signing_key(pkg_repo, releases_repo, ctx.openstack_target, is_snapshot):
         signing_key_updated = True
@@ -1150,18 +1184,12 @@ def prepare_upstream_source(
             upstream_ver = snapshot_result.upstream_version
         else:
             # Fallback for forced builds or errors
-            if parsed:
-                next_upstream = increment_upstream_version(parsed.upstream)
-            else:
-                next_upstream = "0.0.0"
+            next_upstream = increment_upstream_version(parsed.upstream) if parsed else "0.0.0"
             upstream_ver = f"{next_upstream}~git{git_date}.{git_sha[:7]}"
 
         # Apply epoch and debian revision
         epoch = parsed.epoch if parsed else 0
-        if epoch:
-            new_version = f"{epoch}:{upstream_ver}-0ubuntu1"
-        else:
-            new_version = f"{upstream_ver}-0ubuntu1"
+        new_version = f"{epoch}:{upstream_ver}-0ubuntu1" if epoch else f"{upstream_ver}-0ubuntu1"
     else:
         new_version = current_version or "0.0.0-0ubuntu1"
 
@@ -1271,10 +1299,8 @@ def validate_and_build_deps(
         if not mins:
             return None
 
-        try:
+        with contextlib.suppress(Exception):
             mins.sort(key=Version)
-        except Exception:
-            pass
         return mins[0]
 
     if upstream_repo_path and upstream_repo_path.exists():
@@ -1291,7 +1317,7 @@ def validate_and_build_deps(
 
         resolved_count = 0
         for python_dep, version_spec in upstream_deps.runtime:
-            debian_name, uncertain = map_python_to_debian(python_dep)
+            debian_name, _uncertain = map_python_to_debian(python_dep)
             if not debian_name:
                 activity("validate-deps", f"  {python_dep} -> (unmapped)")
                 continue
@@ -1873,7 +1899,7 @@ def import_and_patch(
                             if check_rc == 0 and check_out.strip() and not file_path.exists():
                                 # File existed before merge but is now missing - restore it
                                 restore_cmd = ["git", "checkout", "HEAD", "--", pfile]
-                                restore_rc, restore_out, restore_err = run_command(restore_cmd, cwd=pkg_repo)
+                                restore_rc, _restore_out, restore_err = run_command(restore_cmd, cwd=pkg_repo)
 
                                 if restore_rc == 0:
                                     activity("import-orig", f"Restored {pfile} after merge")
@@ -2366,7 +2392,7 @@ def verify_and_publish(
         for art in build_result.artifacts:
             activity("verify", f"  artifact to publish: {art}")
 
-        deb_artifacts = [a for a in build_result.artifacts if a.suffix in {".deb", ".udeb", ".ddeb"}]
+        [a for a in build_result.artifacts if a.suffix in {".deb", ".udeb", ".ddeb"}]
 
         publish_result = localrepo.publish_artifacts(
             artifact_paths=build_result.artifacts,
@@ -2455,7 +2481,7 @@ def build_single_package(
     # -------------------------------------------------------------------------
     # Phase 1: Fetch packaging repository
     # -------------------------------------------------------------------------
-    fetch_result_phase, fetch_data = fetch_packaging_repo(ctx, workspace_ref)
+    fetch_result_phase, _fetch_data = fetch_packaging_repo(ctx, workspace_ref)
     if not fetch_result_phase.success:
         outcome.exit_code = fetch_result_phase.exit_code
         outcome.error = fetch_result_phase.error
@@ -2483,7 +2509,7 @@ def build_single_package(
     # -------------------------------------------------------------------------
     # Phase 3: Validate dependencies (and auto-build if enabled)
     # -------------------------------------------------------------------------
-    validate_result_phase, validate_data = validate_and_build_deps(
+    validate_result_phase, _validate_data = validate_and_build_deps(
         ctx,
         upstream_tarball=prepare_data.upstream_tarball,
         snapshot_result=prepare_data.snapshot_result,
