@@ -35,6 +35,9 @@ The ``paths`` section defines all on-disk locations used by PackaStack:
    * - ``runs_root``
      - Run logs and summaries
      - ``~/.cache/packastack/runs``
+   * - ``upload_ppa``
+     - PPA to automatically upload to when ``--ppa-upload`` is used.
+     - ``None``
 
 Notes
 -----

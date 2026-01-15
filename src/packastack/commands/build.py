@@ -33,6 +33,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+import subprocess
 
 import typer
 
@@ -56,6 +57,7 @@ from packastack.build.all_runner import (
 )
 from packastack.build.git_helpers import (
     ensure_no_merge_paths,
+    git_commit,
 )
 from packastack.build.provenance import summarize_provenance
 from packastack.build.type_resolution import (
@@ -68,6 +70,7 @@ from packastack.core.config import load_config
 from packastack.core.context import BuildAllRequest, BuildRequest
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
+from packastack.debpkg.changelog import update_changelog
 from packastack.planning.build_all_state import (
     BuildAllState,
     PackageState,
@@ -564,21 +567,26 @@ def _upload_to_ppa(changes_file: Path, ppa: str, run: RunContextType) -> bool:
         activity("warn", f"Changes file not found: {changes_file}")
         return False
 
-    # Build dput command
-    cmd = ["dput", f"ppa:{ppa}", str(changes_file)]
+    # Handle ppa: prefix
+    target_ppa = ppa
+    if not target_ppa.startswith("ppa:"):
+        target_ppa = f"ppa:{ppa}"
 
-    activity("report", f"Uploading to PPA {ppa}...")
+    # Build dput command
+    cmd = ["dput", target_ppa, str(changes_file)]
+
+    activity("report", f"Uploading {changes_file.name} to {target_ppa}...")
     activity("report", f"  Command: {' '.join(cmd)}")
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
         if result.returncode == 0:
-            activity("report", f"Successfully uploaded to ppa:{ppa}")
-            run.log_event({"event": "build.ppa_upload_success", "ppa": ppa, "changes_file": str(changes_file)})
+            activity("report", f"Successfully uploaded {changes_file.name} to {target_ppa}")
+            run.log_event({"event": "build.ppa_upload_success", "ppa": target_ppa, "changes_file": str(changes_file)})
             return True
         else:
-            activity("warn", f"PPA upload failed with exit code {result.returncode}")
+            activity("warn", f"PPA upload to {target_ppa} failed with exit code {result.returncode}")
             if result.stdout:
                 activity("warn", f"  stdout: {result.stdout}")
             if result.stderr:
@@ -912,10 +920,57 @@ def _run_build(
             if changes_files:
                 upload_ppa = cfg.get("defaults", {}).get("upload_ppa")
                 if upload_ppa:
-                    _upload_to_ppa(changes_files[0], upload_ppa, run)
+                    activity("ppa", f"Preparing PPA upload to {upload_ppa}")
+
+                    # 1. Modify changelog
+                    ppa_version = f"{outcome.new_version}~ppa1"
+                    changelog_path = ctx.pkg_repo / "debian" / "changelog"
+                    activity("ppa", f"Bumping version to {ppa_version}")
+
+                    update_changelog(
+                        changelog_path=changelog_path,
+                        package=ctx.pkg_name,
+                        version=ppa_version,
+                        distribution=ctx.resolved_ubuntu,
+                        changes=["Automated PPA build"],
+                    )
+
+                    # 2. Commit
+                    git_commit(ctx.pkg_repo, f"PPA build {ppa_version}", ["debian/changelog"])
+
+                    # 3. Rebuild
+                    activity("ppa", "Rebuilding for PPA...")
+                    # Ensure we reuse the workspace with our committed changes
+                    ctx.resume_workspace_path = ctx.workspace
+
+                    ppa_outcome = build_single_package(ctx, workspace_ref=request.workspace_ref)
+
+                    if ppa_outcome.success and ppa_outcome.artifacts:
+                        ppa_changes_files = [
+                            a for a in ppa_outcome.artifacts if a.suffix == ".changes"
+                        ]
+                        if ppa_changes_files:
+                            _upload_to_ppa(ppa_changes_files[0], upload_ppa, run)
+                    else:
+                        activity("error", f"PPA Rebuild failed: {ppa_outcome.error}")
+
+                    # 4. Reset
+                    activity("ppa", "Resetting workspace state")
+                    subprocess.run(
+                        ["git", "reset", "--hard", "HEAD^"],
+                        cwd=ctx.pkg_repo,
+                        check=True,
+                        capture_output=True,
+                    )
                 else:
-                    activity("warn", "PPA upload requested but 'upload_ppa' not configured in ~/.packastack/config.yaml")
-                    activity("warn", "Set 'defaults.upload_ppa' to enable (e.g., 'mylesjp/gazpacho-devel')")
+                    activity(
+                        "warn",
+                        "PPA upload requested but 'upload_ppa' not configured in ~/.packastack/config.yaml",
+                    )
+                    activity(
+                        "warn",
+                        "Set 'defaults.upload_ppa' to enable (e.g., 'mylesjp/gazpacho-devel')",
+                    )
 
         # Write final summary
         run.write_summary(
