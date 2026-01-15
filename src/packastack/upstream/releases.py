@@ -254,7 +254,10 @@ def load_openstack_packages(
 
             # Determine Ubuntu source package name based on type
             if project_type == "library":
-                source_pkg = f"python-{project}"
+                if project.startswith("python-"):
+                    source_pkg = project
+                else:
+                    source_pkg = f"python-{project}"
             else:
                 source_pkg = project
 
@@ -331,6 +334,10 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
         yaml_file = deliverables_dir / f"{alt_name}.yaml"
 
     if not yaml_file.exists():
+        # Try with python- prefix (openstackclient -> python-openstackclient)
+        yaml_file = deliverables_dir / f"python-{project}.yaml"
+
+    if not yaml_file.exists():
         return None
 
     try:
@@ -348,7 +355,7 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
                 ))
 
             return ProjectRelease(
-                name=project,
+                name=yaml_file.stem,
                 team=data.get("team", ""),
                 release_model=data.get("release-model", ""),
                 releases=releases,

@@ -145,12 +145,20 @@ def build_tarball_url(project: str, version: str) -> str:
     # For oslo.* projects:
     # - Directory path uses dots: oslo.config/
     # - Tarball filename uses underscores: oslo_config-version.tar.gz
-    if "." in project and not project.startswith("python-"):
-        # e.g., oslo.config -> openstack/oslo.config/oslo_config-9.4.0.tar.gz
-        tarball_name = project.replace(".", "_")
-        path = f"openstack/{project}/{tarball_name}-{version}.tar.gz"
-    else:
-        path = f"openstack/{project}/{project}-{version}.tar.gz"
+    # For python-* client libraries:
+    # - Directory path uses hyphens: python-openstackclient/
+    # - Tarball filename uses underscores: python_openstackclient-version.tar.gz
+    
+    tarball_name = project
+    # Replace dots with underscores (e.g. oslo.config -> oslo_config)
+    if "." in project:
+         tarball_name = tarball_name.replace(".", "_")
+    
+    # Replace hyphens with underscores for python- prefixed projects
+    if project.startswith("python-"):
+         tarball_name = tarball_name.replace("-", "_")
+
+    path = f"openstack/{project}/{tarball_name}-{version}.tar.gz"
 
     return urljoin(OPENSTACK_TARBALLS_URL + "/", path)
 
@@ -188,6 +196,15 @@ def select_upstream_source(
     Returns:
         UpstreamSource with source information, or None if not found.
     """
+    if build_type == BuildType.SNAPSHOT:
+        # For snapshots, we don't strictly need the project to be in openstack/releases
+        # (unless we need metadata from it, but currently we rely on git)
+        return UpstreamSource(
+            version="",  # Will be computed later
+            git_ref=git_ref or "HEAD",
+            build_type=BuildType.SNAPSHOT,
+        )
+
     # Import here to avoid circular imports
     from packastack.upstream.releases import load_project_releases
 
@@ -201,7 +218,7 @@ def select_upstream_source(
         if latest is None:
             return None
 
-        tarball_url = build_tarball_url(project, latest.version)
+        tarball_url = build_tarball_url(proj.name, latest.version)
         signature_url = build_signature_url(tarball_url)
 
         return UpstreamSource(
@@ -215,7 +232,7 @@ def select_upstream_source(
         # Find the milestone release
         for rel in reversed(proj.releases):
             if milestone.lower() in rel.version.lower():
-                tarball_url = build_tarball_url(project, rel.version)
+                tarball_url = build_tarball_url(proj.name, rel.version)
                 signature_url = build_signature_url(tarball_url)
 
                 return UpstreamSource(
@@ -227,14 +244,7 @@ def select_upstream_source(
                 )
         return None
 
-    else:  # SNAPSHOT
-        # For snapshots, we need a git ref
-        # If not provided, default will be determined by caller
-        return UpstreamSource(
-            version="",  # Will be computed later
-            git_ref=git_ref or "HEAD",
-            build_type=BuildType.SNAPSHOT,
-        )
+    return None
 
 
 def download_file(url: str, dest: Path, timeout: int = 300) -> tuple[bool, str]:

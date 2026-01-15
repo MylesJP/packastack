@@ -943,10 +943,18 @@ def prepare_upstream_source(
     ctx.upstream = upstream
 
     if upstream is None and ctx.build_type != BuildType.SNAPSHOT:
-        error_msg = (
-            f"No {ctx.build_type.value} tarball found for {ctx.package} "
-            f"in OpenStack {ctx.openstack_target}"
-        )
+        # Try to diagnose specifics for the error message
+        proj_info = load_project_releases(releases_repo, ctx.openstack_target, ctx.package)
+        if proj_info is not None and not proj_info.has_releases():
+            error_msg = (
+                f"Project {ctx.package} is tracked in OpenStack {ctx.openstack_target} "
+                "but has no releases defined yet."
+            )
+        else:
+            error_msg = (
+                f"No {ctx.build_type.value} tarball found for {ctx.package} "
+                f"in OpenStack {ctx.openstack_target}"
+            )
         activity("prepare", error_msg)
         run.write_summary(status="failed", error=error_msg, exit_code=EXIT_CONFIG_ERROR)
         return PhaseResult.fail(EXIT_CONFIG_ERROR, error_msg), result
@@ -1047,7 +1055,7 @@ def prepare_upstream_source(
             if deliverable_name:
                 test_releases = load_project_releases(releases_repo, ctx.openstack_target, deliverable_name)
                 if not test_releases:
-                    # Deliverable doesn't exist in releases, try pkg_name
+                    # Deliverable doesn't exist, try pkg_name
                     test_releases = load_project_releases(releases_repo, ctx.openstack_target, ctx.pkg_name)
                     if test_releases:
                         project_name = ctx.pkg_name
@@ -2005,14 +2013,11 @@ def import_and_patch(
     # Export patches and return to master branch
     if (pkg_repo / ".git").exists():
         branch_rc, branch_out, _ = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=pkg_repo)
-        current_branch = branch_out.strip() if branch_rc == 0 else ""
-        on_patch_queue = current_branch.startswith("patch-queue/")
+        current_branch = branch_out.strip() if branch_rc == 0 else None
 
-        if on_patch_queue:
+        if current_branch and current_branch.startswith("patch-queue/"):
             export_result = pq_export(pkg_repo)
-            if export_result.success:
-                activity("patches", "Patches exported (back to debian branch)")
-            else:
+            if not export_result.success:
                 activity("patches", f"Patch export failed: {export_result.output}")
                 if not ctx.force:
                     run.write_summary(
