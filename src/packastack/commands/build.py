@@ -309,14 +309,13 @@ def build(
     all_packages: bool = typer.Option(False, "-a", "--all", help="Build all discovered packages in dependency order"),
     keep_going: bool = typer.Option(True, "--keep-going/--fail-fast", help="Continue on failure (default: keep-going) [--all only]"),
     max_failures: int = typer.Option(0, "--max-failures", help="Stop after N failures (0=unlimited) [--all only]"),
-    resume: bool = typer.Option(False, "--resume", help="Resume a previous run [--all only]"),
+    resume: bool = typer.Option(False, "--resume", help="Resume a previous run (all mode) or workspace (single mode)"),
     resume_run_id: str = typer.Option("", "--resume-run-id", help="Specific run ID to resume [--all only]"),
     retry_failed: bool = typer.Option(False, "--retry-failed", help="Retry failed packages on resume [--all only]"),
     skip_failed: bool = typer.Option(True, "--skip-failed/--no-skip-failed", help="Skip previously failed on resume [--all only]"),
     parallel: int = typer.Option(0, "-j", "--parallel", help="Parallel workers (0=auto) [--all only]"),
     packages_file: str = typer.Option("", "--packages-file", help="File with package names (one per line) [--all only]"),
     dry_run: bool = typer.Option(False, "-n", "--dry-run", help="Show plan without building [--all only]"),
-    resume_workspace: bool = typer.Option(False, "--resume", help="Resume build using most recent workspace for this package"),
 ) -> None:
     """Build OpenStack packages for Ubuntu.
 
@@ -404,7 +403,7 @@ def build(
             include_retired=include_retired,
             skip_repo_regen=skip_repo_regen,
             ppa_upload=ppa_upload,
-            resume_workspace=resume_workspace,
+            resume_workspace=resume,
         )
 
 
