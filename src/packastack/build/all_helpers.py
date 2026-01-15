@@ -24,10 +24,15 @@ and package filtering used by the build-all command.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from packastack.apt.packages import PackageIndex
 from packastack.core.run import RunContext, activity
+
+if TYPE_CHECKING:
+    from packastack.planning.build_all_state import FailureType
 from packastack.debpkg.control import get_changelog_version
 from packastack.debpkg.version import extract_upstream_version
 from packastack.planning.build_all_state import BuildAllState, PackageStatus
@@ -98,7 +103,7 @@ def filter_retired_packages(
     openstack_target: str,
     offline: bool,
     run: RunContext,
-    clone_project_config_fn: callable = None,
+    clone_project_config_fn: Callable[[Path, RunContext], None] | None = None,
 ) -> tuple[list[str], list[str], list[str]]:
     """Filter retired packages using openstack/project-config and releases inference.
 
@@ -117,10 +122,14 @@ def filter_retired_packages(
     if not packages:
         return packages, [], []
 
-    if project_config_path and not project_config_path.exists() and not offline:
-        if clone_project_config_fn:
-            activity("all", "Cloning openstack/project-config for retirement checks")
-            clone_project_config_fn(project_config_path, run)
+    if (
+        project_config_path
+        and not project_config_path.exists()
+        and not offline
+        and clone_project_config_fn
+    ):
+        activity("all", "Cloning openstack/project-config for retirement checks")
+        clone_project_config_fn(project_config_path, run)
 
     if project_config_path is None or not project_config_path.exists():
         return packages, [], []
@@ -203,7 +212,8 @@ def run_single_build(
     binary: bool,
     force: bool,
     run_dir: Path,
-) -> tuple[bool, "FailureType | None", str, str]:
+    ppa_upload: bool = False,
+) -> tuple[bool, FailureType | None, str, str]:
     """Run a single package build as a subprocess.
 
     Args:
@@ -215,6 +225,7 @@ def run_single_build(
         binary: Build binary packages.
         force: Force through warnings.
         run_dir: Directory for logs.
+        ppa_upload: Whether to upload to PPA after build.
 
     Returns:
         Tuple of (success, failure_type, message, log_path).
@@ -235,6 +246,9 @@ def run_single_build(
         "--skip-repo-regen",  # Coordinator handles repo regeneration
         "--no-build-deps",  # Coordinator handles dependencies
     ]
+
+    if ppa_upload:
+        cmd.append("--ppa-upload")
 
     if cloud_archive:
         cmd.extend(["--cloud-archive", cloud_archive])

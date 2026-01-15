@@ -26,22 +26,24 @@ packages, and produces upload orders.
 from __future__ import annotations
 
 import contextlib
-import glob
-import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-import subprocess
 
 import typer
 
 # Core packastack imports
 # Build module imports
 from packastack.build import (
+    EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
+    EXIT_DISCOVERY_FAILED,
+    EXIT_GRAPH_ERROR,
+    EXIT_RESUME_ERROR,
     EXIT_SUCCESS,
 )
 from packastack.build.all_helpers import (
@@ -54,6 +56,7 @@ from packastack.build.all_helpers import (
 from packastack.build.all_runner import (
     _run_build_all,
     _run_parallel_builds,
+    _run_sequential_builds,
 )
 from packastack.build.git_helpers import (
     ensure_no_merge_paths,
@@ -70,7 +73,6 @@ from packastack.core.config import load_config
 from packastack.core.context import BuildAllRequest, BuildRequest
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
-from packastack.debpkg.changelog import update_changelog
 from packastack.planning.build_all_state import (
     BuildAllState,
     PackageState,
@@ -97,6 +99,13 @@ _get_parallel_batches = get_parallel_batches
 _run_single_build = run_single_build
 _ensure_no_merge_paths = ensure_no_merge_paths
 OPTIONAL_DEPS_FOR_CYCLE = OPTIONAL_BUILD_DEPS
+_run_sequential_builds = _run_sequential_builds
+_EXPORTED_CONSTANTS = (
+    EXIT_ALL_BUILD_FAILED,
+    EXIT_DISCOVERY_FAILED,
+    EXIT_GRAPH_ERROR,
+    EXIT_RESUME_ERROR,
+)
 
 
 def _find_most_recent_workspace(build_root: Path, package: str) -> Path | None:
@@ -114,20 +123,105 @@ def _find_most_recent_workspace(build_root: Path, package: str) -> Path | None:
     Returns:
         Path to most recent workspace, or None if not found
     """
-    pattern = str(build_root / "*" / package)
-    matching = glob.glob(pattern)
+    matching = build_root.glob(f"*/{package}")
 
     if not matching:
         return None
 
     # Filter to directories only and sort by modification time (most recent first)
-    dirs = [Path(p) for p in matching if os.path.isdir(p)]
+    dirs = [p for p in matching if p.is_dir()]
     if not dirs:
         return None
 
     # Sort by modification time, most recent first
     dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return dirs[0]
+
+
+def _parse_changes_files(changes_text: str) -> list[str]:
+    files: list[str] = []
+    in_files = False
+    for line in changes_text.splitlines():
+        if line.startswith("Files:"):
+            in_files = True
+            continue
+        if in_files:
+            if not line.strip():
+                break
+            if not line[0].isspace():
+                break
+            parts = line.split()
+            if parts:
+                files.append(parts[-1])
+    return files
+
+
+def _append_ppa_suffix_to_changelog(changelog_path: Path, suffix: str) -> str:
+    text = changelog_path.read_text()
+    lines = text.splitlines()
+    if not lines:
+        raise ValueError("changelog is empty")
+
+    header = lines[0]
+    import re
+
+    match = re.match(r"^(\S+)\s+\(([^)]+)\)\s+([^;]+);(.*)$", header)
+    if not match:
+        raise ValueError("unexpected changelog header format")
+
+    package, version, distribution, remainder = match.groups()
+    if not version.endswith(suffix):
+        version = f"{version}{suffix}"
+
+    lines[0] = f"{package} ({version}) {distribution};{remainder}"
+    changelog_path.write_text("\n".join(lines) + "\n")
+    return version
+
+
+def _ensure_changes_files_present(
+    changes_file: Path,
+    artifacts: list[Path],
+    run: RunContextType,
+) -> bool:
+    try:
+        changes_text = changes_file.read_text()
+    except OSError as exc:
+        activity("error", f"Failed to read changes file: {changes_file} ({exc})")
+        run.log_event({
+            "event": "ppa.changes_read_failed",
+            "changes_file": str(changes_file),
+            "error": str(exc),
+        })
+        return False
+
+    required_files = _parse_changes_files(changes_text)
+    if not required_files:
+        return True
+
+    artifact_map = {a.name: a for a in artifacts}
+    changes_dir = changes_file.parent
+    missing: list[str] = []
+
+    for filename in required_files:
+        target = changes_dir / filename
+        if target.exists():
+            continue
+        source = artifact_map.get(filename)
+        if source and source.exists():
+            shutil.copy2(source, target)
+            continue
+        missing.append(filename)
+
+    if missing:
+        activity("error", f"Missing files for upload: {', '.join(missing)}")
+        run.log_event({
+            "event": "ppa.missing_upload_files",
+            "changes_file": str(changes_file),
+            "missing": missing,
+        })
+        return False
+
+    return True
 
 
 def _filter_retired_packages(
@@ -157,6 +251,51 @@ def _generate_reports(
     """Generate build-all summary reports."""
     from packastack.build.all_reports import generate_build_all_reports
     return generate_build_all_reports(state, run_dir)
+
+
+def _build_ppa_source(
+    repo_path: Path,
+    output_dir: Path,
+    run: RunContextType,
+) -> tuple[bool, list[Path], str]:
+    from packastack.debpkg.gbp import run_command
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "gbp",
+        "buildpackage",
+        "-S",
+        "-us",
+        "-uc",
+        "-d",
+        f"--git-export-dir={output_dir}",
+        "--git-export=WC",
+    ]
+    returncode, stdout, stderr = run_command(cmd, cwd=repo_path)
+    output = stdout + stderr
+    if returncode != 0:
+        activity("error", f"PPA source build failed: {output}")
+        run.log_event({
+            "event": "ppa.source_build_failed",
+            "returncode": returncode,
+            "output": output,
+        })
+        return False, [], output
+
+    artifacts: list[Path] = []
+    for artifact in output_dir.iterdir():
+        if not artifact.is_file():
+            continue
+        name = artifact.name
+        is_artifact = (
+            artifact.suffix in {".dsc", ".changes", ".buildinfo"}
+            or name.endswith(".tar.gz")
+            or name.endswith(".tar.xz")
+        )
+        if is_artifact:
+            artifacts.append(artifact)
+
+    return True, artifacts, output
 
 
 # =============================================================================
@@ -828,6 +967,7 @@ def _run_build(
             parallel=parallel_workers,
             local_repo=paths.get("local_apt_repo"),
             run=run,
+            ppa_upload=request.ppa_upload,
         )
 
         return exit_code
@@ -921,37 +1061,84 @@ def _run_build(
                 if upload_ppa:
                     activity("ppa", f"Preparing PPA upload to {upload_ppa}")
 
+                    # Ensure workspace is clean before PPA bump
+                    status_result = subprocess.run(
+                        ["git", "status", "--porcelain"],
+                        cwd=ctx.pkg_repo,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if status_result.stdout.strip():
+                        activity("ppa", "Cleaning workspace before PPA upload")
+                        subprocess.run(
+                            ["git", "reset", "--hard", "HEAD"],
+                            cwd=ctx.pkg_repo,
+                            check=True,
+                            capture_output=True,
+                        )
+                        subprocess.run(
+                            ["git", "clean", "-fd"],
+                            cwd=ctx.pkg_repo,
+                            check=True,
+                            capture_output=True,
+                        )
+
                     # 1. Modify changelog
-                    ppa_version = f"{outcome.new_version}~ppa1"
                     changelog_path = ctx.pkg_repo / "debian" / "changelog"
+                    ppa_version = _append_ppa_suffix_to_changelog(
+                        changelog_path,
+                        "~ppa1",
+                    )
                     activity("ppa", f"Bumping version to {ppa_version}")
 
-                    update_changelog(
-                        changelog_path=changelog_path,
-                        package=ctx.pkg_name,
-                        version=ppa_version,
-                        distribution=ctx.resolved_ubuntu,
-                        changes=["Automated PPA build"],
+                    # 2. Commit
+                    git_commit(
+                        ctx.pkg_repo,
+                        f"PPA build {ppa_version}",
+                        files=["debian/changelog"],
                     )
 
-                    # 2. Commit
-                    git_commit(ctx.pkg_repo, f"PPA build {ppa_version}", ["debian/changelog"])
-
                     # 3. Rebuild
-                    activity("ppa", "Rebuilding for PPA...")
-                    # Ensure we reuse the workspace with our committed changes
-                    ctx.resume_workspace_path = ctx.workspace
+                    activity("ppa", "Building PPA source package...")
+                    ppa_output_dir = ctx.workspace / "build-output"
+                    ppa_success, ppa_artifacts, _ppa_output = _build_ppa_source(
+                        ctx.pkg_repo,
+                        ppa_output_dir,
+                        run,
+                    )
 
-                    ppa_outcome = build_single_package(ctx, workspace_ref=request.workspace_ref)
-
-                    if ppa_outcome.success and ppa_outcome.artifacts:
+                    if ppa_success and ppa_artifacts:
                         ppa_changes_files = [
-                            a for a in ppa_outcome.artifacts if a.suffix == ".changes"
+                            a for a in ppa_artifacts if a.suffix == ".changes"
                         ]
                         if ppa_changes_files:
-                            _upload_to_ppa(ppa_changes_files[0], upload_ppa, run)
+                            source_changes = next(
+                                (
+                                    a
+                                    for a in ppa_changes_files
+                                    if "ppa1" in a.name
+                                    and (a.name.endswith("_source.changes") or a.name.endswith(".source.changes"))
+                                ),
+                                next(
+                                    (
+                                        a
+                                        for a in ppa_changes_files
+                                        if a.name.endswith("_source.changes")
+                                        or a.name.endswith(".source.changes")
+                                    ),
+                                    ppa_changes_files[0],
+                                ),
+                            )
+                            upload_ok = _ensure_changes_files_present(
+                                source_changes,
+                                [*ppa_artifacts, *(outcome.artifacts or [])],
+                                run,
+                            )
+                            if upload_ok:
+                                _upload_to_ppa(source_changes, upload_ppa, run)
                     else:
-                        activity("error", f"PPA Rebuild failed: {ppa_outcome.error}")
+                        activity("error", "PPA source build failed")
 
                     # 4. Reset
                     activity("ppa", "Resetting workspace state")

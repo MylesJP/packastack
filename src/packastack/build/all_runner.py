@@ -28,7 +28,7 @@ import concurrent.futures
 import contextlib
 import sys
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,14 +40,13 @@ from packastack.apt.packages import (
     merge_package_indexes,
 )
 from packastack.build.all_helpers import (
+    build_upstream_versions_from_packaging,
     get_parallel_batches,
     run_single_build,
-    build_upstream_versions_from_packaging,
 )
 from packastack.build.all_reports import generate_build_all_reports
 from packastack.build.errors import (
     EXIT_ALL_BUILD_FAILED,
-    EXIT_CONFIG_ERROR,
     EXIT_DISCOVERY_FAILED,
     EXIT_GRAPH_ERROR,
     EXIT_RESUME_ERROR,
@@ -150,11 +149,7 @@ def _run_build_all(
     cycles: list[list[str]] = []
 
     if resume:
-        if resume_run_id:
-            resume_state_dir = runs_root / resume_run_id / "state"
-        else:
-            # Find most recent build-all run
-            resume_state_dir = state_dir
+        resume_state_dir = runs_root / resume_run_id / "state" if resume_run_id else state_dir
 
         state = load_state(resume_state_dir)
         if state is None:
@@ -414,7 +409,7 @@ def _run_build_all(
             graph.add_node(pkg)
 
     if parallel > 1:
-        exit_code = _run_parallel_builds(
+        _run_parallel_builds(
             state=state,
             graph=graph,
             run_dir=run_dir,
@@ -430,7 +425,7 @@ def _run_build_all(
             run=run,
         )
     else:
-        exit_code = _run_sequential_builds(
+        _run_sequential_builds(
             state=state,
             run_dir=run_dir,
             state_dir=state_dir,
@@ -445,7 +440,7 @@ def _run_build_all(
         )
 
     # Mark completion
-    state.completed_at = datetime.now(timezone.utc).isoformat()
+    state.completed_at = datetime.now(UTC).isoformat()
     save_state(state, state_dir)
 
     # Generate reports
@@ -510,7 +505,13 @@ def _run_sequential_builds(
         Exit code.
     """
     from rich.console import Console
-    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
 
     total = len(state.build_order)
     built = 0
@@ -613,6 +614,7 @@ def _run_parallel_builds(
     parallel: int,
     local_repo: Path,
     run: RunContext,
+    ppa_upload: bool = False,
 ) -> int:
     """Run builds in parallel, respecting dependencies.
 
@@ -630,12 +632,19 @@ def _run_parallel_builds(
         parallel: Number of parallel workers.
         local_repo: Path to local APT repository.
         run: RunContext for logging.
+        ppa_upload: Whether to upload to PPA after build.
 
     Returns:
         Exit code.
     """
     from rich.console import Console
-    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
 
     total = len(state.build_order)
     built = 0
@@ -650,6 +659,19 @@ def _run_parallel_builds(
                 state.mark_success(pkg, log_path)
                 built += 1
                 activity("all", f"[ok]    {pkg}")
+                if ppa_upload and log_path:
+                    log_text = ""
+                    try:
+                        log_text = Path(log_path).read_text(encoding="utf-8", errors="ignore")
+                    except Exception:
+                        log_text = ""
+
+                    if "Successfully uploaded" in log_text:
+                        activity("all", f"[ppa]   {pkg}: upload complete")
+                    elif "PPA upload failed" in log_text or "PPA Rebuild failed" in log_text:
+                        activity("all", f"[ppa]   {pkg}: upload failed (see log)")
+                    else:
+                        activity("all", f"[ppa]   {pkg}: no upload detected (see log)")
             else:
                 state.mark_failed(pkg, failure_type or FailureType.UNKNOWN, message, log_path)
                 failed_set.add(pkg)
@@ -713,6 +735,7 @@ def _run_parallel_builds(
                         binary=binary,
                         force=force,
                         run_dir=run_dir,
+                        ppa_upload=ppa_upload,
                     )
                     futures[future] = pkg
 
