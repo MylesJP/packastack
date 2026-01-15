@@ -11,10 +11,15 @@ Packastack is a Python CLI tool which handles generating and importing new tarba
 - **GBP Layer**: `packastack/gbp/*.py` - Handles git-buildpackage operations
 - **Debian Layer**: `packastack/debian/*.py` - Handles functions and logic for using debian packaging tools and version conversion.
 
+## Key File Locations
+All build artifacts, temporary files, and local clones are stored in the user's cache directory: `~/.cache/packastack/build/`
+All run logs and summaries are stored in the user's cache directory: `~/.cache/packastack/runs/`
+
 ## Code Conventions
 All code should be pep8 compliant and pass formatting checks using the black linter and formatter.
 All code should have 100% unit test coverage.
 All cli commands use the click framework
+The documentation should be kept in sync with any changes to functionality.
 
 ### Coverage Exclusions
 Methods or functions that only contain a `pass` statement should include `# pragma: no cover` at the end of the line to exclude them from coverage reporting. This typically applies to:
