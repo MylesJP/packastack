@@ -25,6 +25,7 @@ packages to depend on previously built packages from the same build run.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import hashlib
 import logging
@@ -219,10 +220,8 @@ def _set_field(info: DebPackageInfo, field_name: str, value: str) -> None:
     attr = mapping.get(field_lower)
     if attr:
         if attr == "installed_size":
-            try:
+            with contextlib.suppress(ValueError):
                 setattr(info, attr, int(value))
-            except ValueError:
-                pass
         else:
             setattr(info, attr, value)
 
@@ -243,7 +242,6 @@ def extract_dsc_info(dsc_path: Path) -> SourcePackageInfo | None:
 
         current_field: str | None = None
         current_value: list[str] = []
-        checksums_section: str = ""  # "Files", "Checksums-Sha256", etc.
 
         for line in content.split("\n"):
             if line.startswith(" ") or line.startswith("\t"):
@@ -276,7 +274,7 @@ def extract_dsc_info(dsc_path: Path) -> SourcePackageInfo | None:
 
         # Compute file entries from the .dsc location
         pool_dir = dsc_path.parent
-        info.directory = f"pool/main"
+        info.directory = "pool/main"
 
         # Find associated files based on Files: section or by naming convention
         base_name = dsc_path.stem  # e.g., "nova_29.0.0-0ubuntu1"
@@ -733,10 +731,8 @@ def get_available_versions(repo_root: Path, package_name: str) -> list[str]:
                     versions.append(current_ver)
 
     # Sort versions using debian version comparison
-    try:
+    with contextlib.suppress(Exception):
         versions.sort(key=lambda v: Version(v), reverse=True)
-    except Exception:
-        pass
 
     return versions
 
@@ -781,15 +777,7 @@ def satisfies(repo_root: Path, package_name: str, constraint: str) -> bool:
         required = Version(required_version)
         for v in versions:
             available = Version(v)
-            if relation == ">=" and available >= required:
-                return True
-            elif relation == "<=" and available <= required:
-                return True
-            elif relation == ">>" and available > required:
-                return True
-            elif relation == "<<" and available < required:
-                return True
-            elif relation == "=" and available == required:
+            if (relation == ">=" and available >= required) or (relation == "<=" and available <= required) or (relation == ">>" and available > required) or (relation == "<<" and available < required) or (relation == "=" and available == required):
                 return True
     except Exception:
         pass
@@ -821,10 +809,8 @@ def get_source_versions(repo_root: Path, source_name: str) -> list[str]:
         if len(parts) == 2:
             versions.append(parts[1])
 
-    try:
+    with contextlib.suppress(Exception):
         versions.sort(key=lambda v: Version(v), reverse=True)
-    except Exception:
-        pass
 
     return versions
 

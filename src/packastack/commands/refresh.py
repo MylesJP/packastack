@@ -31,19 +31,19 @@ from dataclasses import dataclass
 import requests
 import typer
 
-from packastack.target.arch import resolve_arches
 from packastack.apt.archive import (
     ArchiveFetcher,
     load_metadata,
     validate_gzip,
     write_metadata,
 )
-from packastack.commands.init import _clone_or_update_releases, _clone_or_update_project_config
+from packastack.commands.init import _clone_or_update_project_config, _clone_or_update_releases
 from packastack.core.config import load_config
 from packastack.core.duration import parse_duration
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
 from packastack.core.spinner import activity_spinner
+from packastack.target.arch import resolve_arches
 from packastack.target.series import resolve_series
 
 # Exit codes per spec
@@ -138,7 +138,13 @@ def refresh_ubuntu_archive(
     now = datetime.datetime.now(datetime.UTC)
 
     from rich.console import Console
-    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
 
     targets = [
         (pocket, component, arch)

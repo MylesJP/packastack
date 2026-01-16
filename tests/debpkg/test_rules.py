@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from packastack.debpkg.rules import (
     add_doctree_cleanup,
     ensure_sphinxdoc_addon,
@@ -103,8 +101,7 @@ override_dh_installdocs:
 
     def test_read_error_returns_false(self, tmp_path: Path) -> None:
         """Test returns False when file cannot be read."""
-        from unittest.mock import patch, MagicMock
-        import os
+        from unittest.mock import patch
 
         rules = tmp_path / "rules"
         rules.write_text("test content")

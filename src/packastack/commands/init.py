@@ -35,8 +35,8 @@ import typer
 from packastack.core.config import ensure_config_exists, load_config
 from packastack.core.paths import ensure_directories
 from packastack.core.run import RunContext, activity
-from packastack.target.series import resolve_series
 from packastack.core.spinner import activity_spinner
+from packastack.target.series import resolve_series
 
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
@@ -190,7 +190,7 @@ def init(
             activity("init", "Priming minimal Ubuntu archive metadata")
             run.log_event({"event": "prime.start"})
             # Import refresh logic here to avoid circular imports
-            from packastack.commands.refresh import refresh_ubuntu_archive, RefreshConfig
+            from packastack.commands.refresh import RefreshConfig, refresh_ubuntu_archive
 
             try:
                 refresh_config = RefreshConfig.from_lists(

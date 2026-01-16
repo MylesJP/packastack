@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import warnings
 from collections.abc import Iterator
@@ -65,7 +66,7 @@ def compare_versions(v1: str, v2: str) -> int:
     # (e.g., ${binary:Version}). These can't be compared meaningfully.
     if "${" in v1 or "${" in v2:
         return 0  # Treat as equal when substitution variables are present
-    
+
     ver1 = Version(v1)
     ver2 = Version(v2)
     if ver1 < ver2:
@@ -88,7 +89,7 @@ def version_satisfies(available: str, relation: str, required: str) -> bool:
     """
     if not relation or not required:
         return True
-    
+
     # If the required version contains Debian substitution variables
     # (e.g., ${binary:Version}), we can't evaluate it meaningfully.
     # Treat as satisfied since the actual version is unknown.
@@ -303,7 +304,7 @@ def load_local_repo_index(repo_root: Path, arch: str = "amd64") -> PackageIndex:
 
     # Local repos use dists/local/main/binary-{arch}/Packages.gz
     packages_gz = repo_root / "dists" / "local" / "main" / f"binary-{arch}" / "Packages.gz"
-    
+
     if packages_gz.exists():
         for pkg in iter_packages(packages_gz):
             pkg.pocket = "local"
@@ -378,10 +379,8 @@ def apply_ubuntu_source_fallbacks(
                 # If upstream_project is missing or obviously a python-prefixed name,
                 # normalize it to the base deliverable name.
                 if not upl or (isinstance(upl, str) and (upl.startswith("python3-") or upl.startswith("python-") or upl == src)):
-                    try:
+                    with contextlib.suppress(Exception):
                         t.upstream_project = base
-                    except Exception:
-                        pass
                     if run is not None and hasattr(run, "log_event"):
                         run.log_event({
                             "event": "plan.ub_fallback_upstream_normalized",
@@ -426,10 +425,8 @@ def apply_ubuntu_source_fallbacks(
         if chosen:
             t.source_package = chosen
             # Mark resolution source to indicate the substitution
-            try:
+            with contextlib.suppress(Exception):
                 t.resolution_source = f"{getattr(t, 'resolution_source', '')}+ub-fallback"
-            except Exception:
-                pass
             # If upstream_project appears to be a python-prefixed name, normalize
             # it to the deliverable base so downstream policy checks use the
             # canonical upstream project identifier.

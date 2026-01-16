@@ -10,14 +10,14 @@ def test_wave_computation_linear_chain():
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
-    
+
     # A depends on B, B on C, C on D
     graph.add_edge("A", "B")
     graph.add_edge("B", "C")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
-    
+
     # D has no dependencies, so wave 0
     assert waves["D"] == 0
     # C depends only on D (wave 0), so wave 1
@@ -35,16 +35,16 @@ def test_wave_computation_parallel_deps():
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
-    
+
     # A depends on both B and C
     graph.add_edge("A", "B")
     graph.add_edge("A", "C")
     # Both B and C depend on D
     graph.add_edge("B", "D")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
-    
+
     # D has no dependencies, so wave 0
     assert waves["D"] == 0
     # B and C both depend only on D (wave 0), so wave 1
@@ -61,14 +61,14 @@ def test_wave_computation_diamond():
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
-    
+
     graph.add_edge("A", "B")
     graph.add_edge("A", "C")
     graph.add_edge("B", "D")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
-    
+
     assert waves["D"] == 0
     assert waves["B"] == 1
     assert waves["C"] == 1
@@ -78,7 +78,7 @@ def test_wave_computation_diamond():
 def test_wave_computation_complex():
     """Test wave computation on a more complex graph."""
     graph = DependencyGraph()
-    
+
     # Build a graph like:
     #       A
     #      / \
@@ -89,10 +89,10 @@ def test_wave_computation_complex():
     #     H   I
     #      \ /
     #       J
-    
+
     for node in ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]:
         graph.add_node(node)
-    
+
     graph.add_edge("A", "B")
     graph.add_edge("A", "C")
     graph.add_edge("B", "D")
@@ -105,9 +105,9 @@ def test_wave_computation_complex():
     graph.add_edge("G", "I")
     graph.add_edge("H", "J")
     graph.add_edge("I", "J")
-    
+
     waves = graph.compute_waves()
-    
+
     # J at bottom (wave 0)
     assert waves["J"] == 0
     # H and I both depend on J (wave 1)
@@ -132,9 +132,9 @@ def test_wave_computation_no_deps():
     graph.add_node("A")
     graph.add_node("B")
     graph.add_node("C")
-    
+
     waves = graph.compute_waves()
-    
+
     # All nodes have no dependencies, so all wave 0
     assert waves["A"] == 0
     assert waves["B"] == 0
@@ -145,9 +145,9 @@ def test_wave_computation_single_node():
     """Test wave computation with a single node."""
     graph = DependencyGraph()
     graph.add_node("single")
-    
+
     waves = graph.compute_waves()
-    
+
     assert waves["single"] == 0
 
 
@@ -158,14 +158,14 @@ def test_forced_by_computation_linear():
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
-    
+
     graph.add_edge("A", "B")
     graph.add_edge("B", "C")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
     forced_by = graph.compute_forced_by(waves)
-    
+
     # D has no dependencies
     assert forced_by["D"] == []
     # C is forced by D (wave 0, C is wave 1)
@@ -183,15 +183,15 @@ def test_forced_by_computation_parallel():
     graph.add_node("B")
     graph.add_node("C")
     graph.add_node("D")
-    
+
     graph.add_edge("A", "B")
     graph.add_edge("A", "C")
     graph.add_edge("B", "D")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
     forced_by = graph.compute_forced_by(waves)
-    
+
     # D wave 0, no forced-by
     assert forced_by["D"] == []
     # B wave 1, forced by D
@@ -225,7 +225,7 @@ def test_wave_computation_with_cycle_component():
 def test_forced_by_computation_mixed_waves():
     """Test forced-by identifies only wave-1 predecessors."""
     graph = DependencyGraph()
-    
+
     # A -> B -> D
     # A -> C -> D
     # A -> E (where E is wave 0)
@@ -234,23 +234,23 @@ def test_forced_by_computation_mixed_waves():
     graph.add_node("C")
     graph.add_node("D")
     graph.add_node("E")
-    
+
     graph.add_edge("A", "B")
     graph.add_edge("A", "C")
     graph.add_edge("A", "E")
     graph.add_edge("B", "D")
     graph.add_edge("C", "D")
-    
+
     waves = graph.compute_waves()
     forced_by = graph.compute_forced_by(waves)
-    
+
     # Waves: D=0, E=0, B=1, C=1, A=2
     assert waves["D"] == 0
     assert waves["E"] == 0
     assert waves["B"] == 1
     assert waves["C"] == 1
     assert waves["A"] == 2
-    
+
     # A is forced by B and C (wave 1), NOT E (wave 0)
     # Because E is in wave 0, not wave 1
     assert set(forced_by["A"]) == {"B", "C"}
@@ -259,15 +259,15 @@ def test_forced_by_computation_mixed_waves():
 def test_forced_by_stable_order():
     """Test that forced-by list has stable ordering (alphabetical)."""
     graph = DependencyGraph()
-    
+
     graph.add_node("top")
     for node in ["zebra", "alpha", "beta"]:
         graph.add_node(node)
         graph.add_edge("top", node)
-    
+
     waves = graph.compute_waves()
     forced_by = graph.compute_forced_by(waves)
-    
+
     # All three are in same wave (wave 0), top is wave 1
     # Forced-by should be alphabetically sorted
     assert forced_by["top"] == ["alpha", "beta", "zebra"]

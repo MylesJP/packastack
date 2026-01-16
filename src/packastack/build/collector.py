@@ -36,7 +36,6 @@ from typing import Any
 
 from packastack.build.sbuildrc import (
     CandidateDirectories,
-    discover_candidate_directories,
     parse_sbuild_output_for_paths,
 )
 

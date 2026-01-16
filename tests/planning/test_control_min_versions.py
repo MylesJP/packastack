@@ -1,9 +1,9 @@
 from packastack.debpkg.control import ParsedDependency
 from packastack.planning.control_min_versions import (
+    _cmp,
     apply_min_version_policy,
     decide_min_version,
     decisions_to_report,
-    _cmp,
 )
 
 

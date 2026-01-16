@@ -10,9 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-import yaml
-
 from packastack.upstream.registry import (
     UpstreamsRegistry,
     load_registry,

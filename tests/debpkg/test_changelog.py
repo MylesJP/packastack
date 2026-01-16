@@ -340,7 +340,7 @@ class TestUpdateChangelog:
         monkeypatch.setenv("DEBFULLNAME", "Custom Name")
         monkeypatch.setenv("DEBEMAIL", "custom@example.com")
 
-        changelog_path = tmp_path / "changelog"
+        tmp_path / "changelog"
 
         # This will use the environment variables for maintainer
         # We're just verifying the function runs without error
@@ -360,7 +360,7 @@ class TestUpdateChangelogDch:
             original = changelog.Changelog
             try:
                 changelog.Changelog = None
-                result = changelog.update_changelog(
+                changelog.update_changelog(
                     changelog_path=changelog_path,
                     package="nova",
                     version="29.0.0-0ubuntu1",
@@ -566,7 +566,7 @@ class TestUpdateChangelogDchFallback:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
-            result = changelog._update_changelog_dch(
+            changelog._update_changelog_dch(
                 changelog_path=changelog_path,
                 package="nova",
                 version="29.0.0-0ubuntu1",

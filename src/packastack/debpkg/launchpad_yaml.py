@@ -131,9 +131,8 @@ def find_series_references(data: Any, series: str) -> list[tuple[str, Any]]:
             for i, item in enumerate(obj):
                 new_path = f"{path}[{i}]"
                 search(item, new_path)
-        elif isinstance(obj, str):
-            if series in obj:
-                results.append((path, obj))
+        elif isinstance(obj, str) and series in obj:
+            results.append((path, obj))
 
     search(data)
     return results

@@ -23,10 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from packastack.build.collector import CollectionResult
-
 from packastack.build.sbuild import (
     CHROOT_REPO_MOUNT,
     CHROOT_SOURCES_LIST,
@@ -347,10 +344,10 @@ class TestRunSbuild:
             output_dir=tmp_path / "output",
             distribution="noble",
         )
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=False):
             result = run_sbuild(config)
-        
+
         assert not result.success
         assert "not installed" in result.output
 
@@ -362,29 +359,29 @@ class TestRunSbuild:
             distribution="noble",
             run_log_dir=tmp_path / "logs",
         )
-        
+
         # Create a mock that simulates sbuild writing to stdout/stderr
         mock_result = MagicMock()
         mock_result.returncode = 0
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
              patch("packastack.build.sbuild.collect_artifacts") as mock_collect:
-            
+
             # Setup mock candidates
             from packastack.build.sbuildrc import CandidateDirectories
             mock_discover.return_value = CandidateDirectories()
-            
+
             # Setup mock collection with no binaries (to test the failure path)
             from packastack.build.collector import CollectionResult
             mock_collect.return_value = CollectionResult(
                 success=False,
                 validation_message="No binary packages found",
             )
-            
+
             result = run_sbuild(config)
-        
+
         # Log files should be created
         assert result.stdout_log_path is not None
         assert result.stderr_log_path is not None
@@ -396,7 +393,7 @@ class TestRunSbuild:
         user_build_dir = tmp_path / "user_build"
         user_build_dir.mkdir()
         (user_build_dir / "pkg_1.0_amd64.deb").write_text("deb content")
-        
+
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path / "output",
@@ -404,21 +401,21 @@ class TestRunSbuild:
             run_log_dir=tmp_path / "logs",
             source_package="pkg",
         )
-        
+
         mock_result = MagicMock()
         mock_result.returncode = 0
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-            
+
             from packastack.build.sbuildrc import CandidateDirectories
             candidates = CandidateDirectories()
             candidates.add_build_dir(user_build_dir, "~/.sbuildrc")
             mock_discover.return_value = candidates
-            
+
             result = run_sbuild(config)
-        
+
         # Should find and collect the deb from user build dir
         assert result.success
         assert len(result.collected_artifacts) >= 1
@@ -510,19 +507,19 @@ class TestRunSbuild:
             distribution="noble",
             run_log_dir=tmp_path / "logs",
         )
-        
+
         mock_result = MagicMock()
         mock_result.returncode = 0  # sbuild succeeds
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-            
+
             from packastack.build.sbuildrc import CandidateDirectories
             mock_discover.return_value = CandidateDirectories()
-            
+
             result = run_sbuild(config)
-        
+
         # Should fail validation even though sbuild exited 0
         assert not result.success
         assert "No binary packages" in result.validation_message
@@ -532,31 +529,31 @@ class TestRunSbuild:
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         (build_dir / "pkg_1.0_amd64.deb").write_text("deb")
-        
+
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=build_dir,
             distribution="noble",
             run_log_dir=tmp_path / "logs",
         )
-        
+
         mock_result = MagicMock()
         mock_result.returncode = 0
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-            
+
             from packastack.build.sbuildrc import CandidateDirectories
             candidates = CandidateDirectories()
             candidates.add_build_dir(build_dir, "test")
             mock_discover.return_value = candidates
-            
+
             result = run_sbuild(config)
-        
+
         assert result.report_path is not None
         assert result.report_path.exists()
-        
+
         # Verify report content
         import json
         report_data = json.loads(result.report_path.read_text())
@@ -572,19 +569,19 @@ class TestRunSbuild:
             distribution="noble",
             run_log_dir=tmp_path / "logs",
         )
-        
+
         mock_result = MagicMock()
         mock_result.returncode = 0
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-            
+
             from packastack.build.sbuildrc import CandidateDirectories
             mock_discover.return_value = CandidateDirectories()
-            
+
             result = run_sbuild(config)
-        
+
         assert len(result.command) > 0
         assert result.command[0] == "sbuild"
         assert "-d" in result.command
@@ -593,20 +590,20 @@ class TestRunSbuild:
     def test_handles_sbuild_timeout(self, tmp_path: Path) -> None:
         """Should handle sbuild timeout gracefully."""
         import subprocess
-        
+
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path / "output",
             distribution="noble",
             run_log_dir=tmp_path / "logs",
         )
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="sbuild", timeout=3600)
-            
+
             result = run_sbuild(config, timeout=3600)
-        
+
         assert not result.success
         assert "timed out" in result.output
         assert "timeout" in result.validation_message.lower()
@@ -617,11 +614,11 @@ class TestRunSbuild:
         log_dir = tmp_path / "schroot_logs"
         build_dir.mkdir()
         log_dir.mkdir()
-        
+
         # Create artifacts and logs
         (build_dir / "pkg_1.0_amd64.deb").write_text("deb content")
         (log_dir / "pkg_amd64.build").write_text("sbuild log content")
-        
+
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=build_dir,
@@ -629,21 +626,21 @@ class TestRunSbuild:
             run_log_dir=tmp_path / "run_logs",
             source_package="pkg",
         )
-        
+
         mock_result = MagicMock()
         mock_result.returncode = 0
-        
+
         with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
              patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
              patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-            
+
             from packastack.build.sbuildrc import CandidateDirectories
             candidates = CandidateDirectories()
             candidates.add_build_dir(build_dir, "test")
             candidates.add_log_dir(log_dir, "~/.sbuildrc")
             mock_discover.return_value = candidates
-            
+
             result = run_sbuild(config)
-        
+
         # Should collect the log file
         assert len(result.collected_logs) >= 1

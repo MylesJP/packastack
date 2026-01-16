@@ -32,14 +32,12 @@ explicit entries.
 from __future__ import annotations
 
 import importlib.resources
-import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 # Registry schema version
 REGISTRY_VERSION = 2
@@ -581,7 +579,7 @@ class UpstreamsRegistry:
             return True
 
         # Check common_names
-        for proj_key, proj_data in self._load_result.projects.items():
+        for _proj_key, proj_data in self._load_result.projects.items():
             common_names = proj_data.get("common_names", [])
             if project in common_names:
                 return True

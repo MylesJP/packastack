@@ -24,8 +24,6 @@ import json
 import time
 from pathlib import Path
 
-import pytest
-
 from packastack.build.collector import (
     ArtifactReport,
     CollectedFile,
@@ -48,7 +46,7 @@ class TestComputeSha256:
         """Should compute correct SHA256 hash."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world")
-        
+
         result = compute_sha256(test_file)
         # Known SHA256 of "hello world"
         expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
@@ -58,7 +56,7 @@ class TestComputeSha256:
         """Should handle binary files."""
         test_file = tmp_path / "test.bin"
         test_file.write_bytes(b"\x00\x01\x02\x03")
-        
+
         result = compute_sha256(test_file)
         assert len(result) == 64  # SHA256 hex is 64 chars
 
@@ -71,11 +69,11 @@ class TestCopyFileWithChecksum:
         src = tmp_path / "source" / "file.deb"
         src.parent.mkdir()
         src.write_text("package content")
-        
+
         dest_dir = tmp_path / "dest"
-        
+
         result = copy_file_with_checksum(src, dest_dir)
-        
+
         assert result.copied_path.exists()
         assert result.copied_path.read_text() == "package content"
 
@@ -83,11 +81,11 @@ class TestCopyFileWithChecksum:
         """Should compute SHA256 checksum."""
         src = tmp_path / "file.deb"
         src.write_text("content")
-        
+
         dest_dir = tmp_path / "dest"
-        
+
         result = copy_file_with_checksum(src, dest_dir)
-        
+
         assert len(result.sha256) == 64
         assert result.sha256 == compute_sha256(src)
 
@@ -95,22 +93,22 @@ class TestCopyFileWithChecksum:
         """Should record file size."""
         src = tmp_path / "file.deb"
         src.write_text("12345")
-        
+
         dest_dir = tmp_path / "dest"
-        
+
         result = copy_file_with_checksum(src, dest_dir)
-        
+
         assert result.size == 5
 
     def test_creates_dest_dir(self, tmp_path: Path) -> None:
         """Should create destination directory if needed."""
         src = tmp_path / "file.deb"
         src.write_text("content")
-        
+
         dest_dir = tmp_path / "nested" / "dest"
-        
+
         result = copy_file_with_checksum(src, dest_dir)
-        
+
         assert dest_dir.exists()
         assert result.copied_path.exists()
 
@@ -122,12 +120,12 @@ class TestCopyFileWithChecksum:
         src2.parent.mkdir()
         src1.write_text("content1")
         src2.write_text("content2")
-        
+
         dest_dir = tmp_path / "dest"
-        
+
         result1 = copy_file_with_checksum(src1, dest_dir)
         result2 = copy_file_with_checksum(src2, dest_dir)
-        
+
         # Both should exist with different names
         assert result1.copied_path.exists()
         assert result2.copied_path.exists()
@@ -201,18 +199,18 @@ class TestFindArtifactsInDirectory:
         """Should find .deb files."""
         (tmp_path / "package1_1.0_amd64.deb").write_text("deb1")
         (tmp_path / "package2_1.0_amd64.deb").write_text("deb2")
-        
+
         result = find_artifacts_in_directory(tmp_path)
-        
+
         assert len(result) == 2
         assert all(p.suffix == ".deb" for p in result)
 
     def test_finds_udeb_files(self, tmp_path: Path) -> None:
         """Should find .udeb files."""
         (tmp_path / "installer_1.0_amd64.udeb").write_text("udeb")
-        
+
         result = find_artifacts_in_directory(tmp_path)
-        
+
         assert len(result) == 1
         assert result[0].suffix == ".udeb"
 
@@ -220,9 +218,9 @@ class TestFindArtifactsInDirectory:
         """Should find .changes and .buildinfo files."""
         (tmp_path / "package_1.0_amd64.changes").write_text("changes")
         (tmp_path / "package_1.0_amd64.buildinfo").write_text("buildinfo")
-        
+
         result = find_artifacts_in_directory(tmp_path)
-        
+
         assert len(result) == 2
         suffixes = {p.suffix for p in result}
         assert ".changes" in suffixes
@@ -232,9 +230,9 @@ class TestFindArtifactsInDirectory:
         """Should filter by source package name."""
         (tmp_path / "nova_1.0_amd64.deb").write_text("nova")
         (tmp_path / "glance_1.0_amd64.deb").write_text("glance")
-        
+
         result = find_artifacts_in_directory(tmp_path, source_package="nova")
-        
+
         assert len(result) == 1
         assert "nova" in result[0].name
 
@@ -242,15 +240,15 @@ class TestFindArtifactsInDirectory:
         """Should filter by timestamp."""
         old_file = tmp_path / "old.deb"
         old_file.write_text("old")
-        
+
         start_time = time.time()
         time.sleep(0.1)  # Ensure time difference
-        
+
         new_file = tmp_path / "new.deb"
         new_file.write_text("new")
-        
+
         result = find_artifacts_in_directory(tmp_path, start_time=start_time)
-        
+
         assert len(result) == 1
         assert result[0].name == "new.deb"
 
@@ -263,9 +261,9 @@ class TestFindArtifactsInDirectory:
         """Should ignore non-artifact files."""
         (tmp_path / "readme.txt").write_text("readme")
         (tmp_path / "script.py").write_text("python")
-        
+
         result = find_artifacts_in_directory(tmp_path)
-        
+
         assert result == []
 
 
@@ -275,18 +273,18 @@ class TestFindLogsInDirectory:
     def test_finds_log_files(self, tmp_path: Path) -> None:
         """Should find .log files."""
         (tmp_path / "sbuild.log").write_text("log content")
-        
+
         result = find_logs_in_directory(tmp_path)
-        
+
         assert len(result) == 1
         assert result[0].suffix == ".log"
 
     def test_finds_build_files(self, tmp_path: Path) -> None:
         """Should find .build files."""
         (tmp_path / "package_amd64.build").write_text("build log")
-        
+
         result = find_logs_in_directory(tmp_path)
-        
+
         assert len(result) == 1
         assert result[0].suffix == ".build"
 
@@ -294,9 +292,9 @@ class TestFindLogsInDirectory:
         """Should filter by package name."""
         (tmp_path / "nova_amd64.build").write_text("nova log")
         (tmp_path / "glance_amd64.build").write_text("glance log")
-        
+
         result = find_logs_in_directory(tmp_path, source_package="nova")
-        
+
         assert len(result) == 1
         assert "nova" in result[0].name
 
@@ -309,13 +307,13 @@ class TestCollectArtifacts:
         user_build_dir = tmp_path / "user_build"
         user_build_dir.mkdir()
         (user_build_dir / "package_1.0_amd64.deb").write_text("deb content")
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(user_build_dir, "~/.sbuildrc")
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         assert result.success
         assert result.deb_count == 1
         assert len(result.binaries) == 1
@@ -325,31 +323,31 @@ class TestCollectArtifacts:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         (log_dir / "package_amd64.build").write_text("log content")
-        
+
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         (build_dir / "package_1.0_amd64.deb").write_text("deb")
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(build_dir, "test")
         candidates.add_log_dir(log_dir, "~/.sbuildrc")
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         assert len(result.logs) == 1
 
     def test_fails_when_no_binaries(self, tmp_path: Path) -> None:
         """Should fail validation when no binaries found."""
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(empty_dir, "test")
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         assert not result.success
         assert "No binary packages" in result.validation_message
 
@@ -359,14 +357,14 @@ class TestCollectArtifacts:
         dir2 = tmp_path / "dir2"
         dir1.mkdir()
         dir2.mkdir()
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(dir1, "test1")
         candidates.add_build_dir(dir2, "test2")
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         assert str(dir1) in result.searched_dirs
         assert str(dir2) in result.searched_dirs
 
@@ -375,13 +373,13 @@ class TestCollectArtifacts:
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         (build_dir / "test_1.0_amd64.deb").write_text("content")
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(build_dir, "test")
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         assert result.success
         assert result.binaries[0].copied_path.parent == dest_dir
 
@@ -391,13 +389,13 @@ class TestCollectArtifacts:
         build_dir.mkdir()
         (build_dir / "nova_1.0_amd64.deb").write_text("nova")
         (build_dir / "glance_1.0_amd64.deb").write_text("glance")
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         candidates.add_build_dir(build_dir, "test")
-        
+
         result = collect_artifacts(dest_dir, candidates, source_package="nova")
-        
+
         assert result.deb_count == 1
         assert "nova" in result.binaries[0].source_path.name
 
@@ -406,15 +404,15 @@ class TestCollectArtifacts:
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         (build_dir / "test_1.0_amd64.deb").write_text("content")
-        
+
         dest_dir = tmp_path / "dest"
         candidates = CandidateDirectories()
         # Add same directory twice (simulating config overlap)
         candidates.add_build_dir(build_dir, "source1")
         candidates.build_dirs.append(build_dir.resolve())  # Force duplicate
-        
+
         result = collect_artifacts(dest_dir, candidates)
-        
+
         # Should only collect once
         assert result.deb_count == 1
 
@@ -430,16 +428,16 @@ class TestCollectionResult:
             CollectedFile(Path("b.udeb"), Path("b.udeb"), "hash", 100, 0),
             CollectedFile(Path("c.ddeb"), Path("c.ddeb"), "hash", 100, 0),
         ]
-        
+
         assert result.deb_count == 2  # .deb and .udeb, not .ddeb
 
     def test_to_dict(self) -> None:
         """Should convert to dictionary."""
         result = CollectionResult(success=True, validation_message="OK")
         result.searched_dirs = ["/tmp/build"]
-        
+
         d = result.to_dict()
-        
+
         assert d["success"] is True
         assert d["validation_message"] == "OK"
         assert "/tmp/build" in d["searched_dirs"]
@@ -461,10 +459,10 @@ class TestArtifactReport:
             stderr_path="/tmp/stderr.log",
             primary_log_path="/tmp/sbuild.log",
         )
-        
+
         report_path = tmp_path / "report.json"
         report.write_json(report_path)
-        
+
         assert report_path.exists()
         data = json.loads(report_path.read_text())
         assert data["sbuild_exit_code"] == 0
@@ -478,11 +476,11 @@ class TestCreatePrimaryLogSymlink:
         """Should create copy with stable name if original differs."""
         log_file = tmp_path / "package_amd64.build"
         log_file.write_text("log content")
-        
+
         logs = [CollectedFile(log_file, log_file, "hash", 100, 0)]
-        
+
         result = create_primary_log_symlink(logs, tmp_path)
-        
+
         assert result is not None
         assert result.name == "sbuild.log"
         assert result.read_text() == "log content"
@@ -498,13 +496,13 @@ class TestCreatePrimaryLogSymlink:
         large_log = tmp_path / "large.log"
         small_log.write_text("x")
         large_log.write_text("x" * 1000)
-        
+
         logs = [
             CollectedFile(small_log, small_log, "hash", 1, 0),
             CollectedFile(large_log, large_log, "hash", 1000, 0),
         ]
-        
+
         result = create_primary_log_symlink(logs, tmp_path, "primary.log")
-        
+
         assert result is not None
         assert result.read_text() == "x" * 1000

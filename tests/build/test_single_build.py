@@ -15,8 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from packastack.build.single_build import (
     BuildResult,
     FetchResult,
@@ -224,7 +222,7 @@ class TestFetchPackagingRepo:
             },
         )
 
-        phase_result, fetch_result = fetch_packaging_repo(ctx)
+        phase_result, _fetch_result = fetch_packaging_repo(ctx)
 
         assert phase_result.success is False
         assert phase_result.exit_code == 3  # EXIT_FETCH_FAILED

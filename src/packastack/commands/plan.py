@@ -24,38 +24,47 @@ detects missing packages and MIR candidates, and produces plan outputs.
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-import concurrent.futures
 
 import typer
 
-from packastack.core.config import load_config
-from packastack.debpkg.control import ParsedDependency
-from packastack.planning.graph import DependencyGraph, PlanResult
-from packastack.planning.graph_builder import (
-    SOFT_DEPENDENCY_EXCLUSIONS,
-    build_graph_from_index,
-)
-from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
 from packastack.apt.packages import (
     PackageIndex,
     load_package_index,
 )
-from packastack.apt.packages import apply_ubuntu_source_fallbacks
+from packastack.commands.init import _clone_or_update_project_config
+from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths
+from packastack.core.run import RunContext, activity
+from packastack.core.spinner import activity_spinner
+from packastack.debpkg.control import ParsedDependency
+from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
+from packastack.planning.dependency_satisfaction import evaluate_dependencies
+from packastack.planning.graph import DependencyGraph, PlanResult
+from packastack.planning.graph_builder import (
+    build_graph_from_index,
+)
 from packastack.planning.package_discovery import discover_packages
 from packastack.planning.type_selection import (
-    BuildType,
     TypeSelectionReport,
     WatchConfig,
     get_default_parallel_workers,
     select_build_types_for_packages,
 )
-from packastack.planning.dependency_satisfaction import evaluate_dependencies
+from packastack.reports.explain import write_plan_dependency_summary
+from packastack.reports.plan_graph import (
+    PlanGraph,
+    render_ascii,
+    render_build_order_list,
+    render_dot,
+    render_waves,
+    write_plan_graph_reports,
+)
 from packastack.reports.type_selection import (
     render_compact_summary,
     render_console_table,
@@ -64,16 +73,11 @@ from packastack.reports.type_selection import (
 from packastack.reports.watch_resolution import (
     write_watch_resolution_reports,
 )
-from packastack.reports.plan_graph import (
-    PlanGraph,
-    render_ascii,
-    render_dot,
-    render_waves,
-    render_build_order_list,
-    write_plan_graph_reports,
-)
-from packastack.reports.explain import write_plan_dependency_summary
+from packastack.target.distro_info import get_current_lts
+from packastack.target.resolution import TargetResolver, parse_target_expr
+from packastack.target.series import resolve_series
 from packastack.upstream.gitfetch import GitFetcher
+from packastack.upstream.registry import UpstreamsRegistry
 from packastack.upstream.releases import (
     get_current_development_series,
     is_snapshot_eligible,
@@ -82,13 +86,6 @@ from packastack.upstream.releases import (
     project_to_package_name,
 )
 from packastack.upstream.retirement import RetirementChecker, RetirementStatus
-from packastack.upstream.registry import UpstreamsRegistry
-from packastack.target.resolution import TargetResolver, parse_target_expr
-from packastack.commands.init import _clone_or_update_project_config
-from packastack.core.run import RunContext, activity
-from packastack.target.series import resolve_series
-from packastack.target.distro_info import get_current_lts
-from packastack.core.spinner import activity_spinner
 
 if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
@@ -113,9 +110,15 @@ def _fetch_packaging_repos(
     Returns a map of package -> repo path (only existing paths when offline).
     """
     import sys
-    import time
-    from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
+
     from rich.console import Console
+    from rich.progress import (
+        BarColumn,
+        Progress,
+        TaskProgressColumn,
+        TextColumn,
+        TimeRemainingColumn,
+    )
 
     fetcher = GitFetcher()
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -190,7 +193,7 @@ def _parse_dep_name(dep_str: str) -> tuple[str, str, str]:
 
 
 def run_plan_for_package(
-    request: "PlanRequest",
+    request: PlanRequest,
     run: RunContextType,
     cfg: dict,
     paths: dict[str, Path],
@@ -213,7 +216,6 @@ def run_plan_for_package(
         Tuple of (PlanResult, exit_code).
     """
     # Import here to avoid circular dependency
-    from packastack.core.context import PlanRequest
 
     # Resolve series
     resolved_ubuntu = resolve_series(request.ubuntu_series)
@@ -304,7 +306,7 @@ def run_plan_for_package(
     # Skip this check if build_type is explicitly set to RELEASE or MILESTONE
     # (means caller already resolved build type and wants to use release/milestone)
     skip_snapshot_check = request.build_type in ("release", "milestone")
-    
+
     policy_issues = []
     preferred_versions = {}
     if not skip_snapshot_check:
@@ -428,7 +430,7 @@ def run_plan_for_package(
     pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
     components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])
     ubuntu_cache = paths["ubuntu_archive_cache"]
-    
+
     if verbose_output:
         with activity_spinner("plan", "Loading Ubuntu package index"):
             ubuntu_index = load_package_index(ubuntu_cache, resolved_ubuntu, pockets, components)
@@ -439,9 +441,9 @@ def run_plan_for_package(
     if len(ubuntu_index.sources) == 0 and not request.offline:
         if verbose_output:
             activity("plan", "Package index empty, refreshing from archive")
-        
-        from packastack.commands.refresh import refresh_ubuntu_archive, RefreshConfig
-        
+
+        from packastack.commands.refresh import RefreshConfig, refresh_ubuntu_archive
+
         try:
             refresh_config = RefreshConfig.from_lists(
                 ubuntu_series=resolved_ubuntu,
@@ -454,7 +456,7 @@ def run_plan_for_package(
                 offline=False,
             )
             refresh_ubuntu_archive(refresh_config, run=run)
-            
+
             # Reload index after refresh
             if verbose_output:
                 with activity_spinner("plan", "Reloading Ubuntu package index"):
@@ -494,7 +496,7 @@ def run_plan_for_package(
     # Phase: prepare - Regenerate local repo indexes to pick up manually-added debs
     from packastack.build.localrepo_helpers import refresh_local_repo_indexes
     from packastack.target.arch import get_host_arch
-    
+
     if local_repo.exists():
         try:
             refresh_local_repo_indexes(local_repo, get_host_arch(), run, phase="prepare")
@@ -935,12 +937,12 @@ def _build_dependency_graph(
         # Determine source packages present in local repo
         # local_index.sources is a dict mapping source_name -> [binary_names]
         local_built_sources = set(local_index.sources.keys())
-        
+
         # Determine valid candidates for skipping
         # We only skip if the package is NOT a direct target
         # (Users usually expect the thing they asked to build to actually build)
         candidates_to_skip = local_built_sources - set(targets)
-        
+
         # Remove from openstack_set so needs_rebuild becomes False
         skipped = openstack_set & candidates_to_skip
         if skipped:
@@ -993,7 +995,7 @@ def _write_plan_dependency_summary(
 
     for node in sorted(graph.nodes):
         deps = [ParsedDependency(name=d) for d in graph.edges.get(node, set())]
-        results, summary = evaluate_dependencies(deps, ubuntu_index, current_lts_index, kind="runtime")
+        _results, summary = evaluate_dependencies(deps, ubuntu_index, current_lts_index, kind="runtime")
         packages.append({
             "package": node,
             "dependencies": summary.total,
@@ -1074,7 +1076,7 @@ def _source_package_to_deliverable(source_package: str) -> str:
 
 
 def _plan_all_packages(
-    run: "RunContextType",
+    run: RunContextType,
     paths: dict[str, Path],
     releases_repo: Path,
     cache_dir: Path,
@@ -1184,12 +1186,12 @@ def _plan_all_packages(
     retirement_checker: RetirementChecker | None = None
     if not include_retired:
         project_config_path = paths.get("openstack_project_config")
-        
+
         # Clone project-config if missing and not in offline mode
         if project_config_path and not project_config_path.exists() and not offline:
             with activity_spinner("retire", "Cloning openstack/project-config repository"):
                 _clone_or_update_project_config(project_config_path, run)
-        
+
         if project_config_path and project_config_path.exists():
             with activity_spinner("retire", "Loading retirement status data"):
                 retirement_checker = RetirementChecker(
@@ -1204,8 +1206,14 @@ def _plan_all_packages(
 
     # Phase: type selection
     if package_names:
-        from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
         from rich.console import Console
+        from rich.progress import (
+            BarColumn,
+            Progress,
+            TaskProgressColumn,
+            TextColumn,
+            TimeRemainingColumn,
+        )
 
         console = Console(file=sys.__stdout__, force_terminal=True)
         with Progress(
@@ -1361,7 +1369,6 @@ def _plan_all_packages(
         # Refresh the targets list used for graph building
         try:
             target_names = [t.source_package for t in resolved_targets]
-            targets = target_names
             run.log_event({"event": "resolve.targets_adjusted", "targets": target_names})
         except Exception:
             pass
@@ -1371,7 +1378,7 @@ def _plan_all_packages(
     activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 
     with activity_spinner("plan", "Building dependency graph"):
-        dep_graph, mir_candidates = _build_dependency_graph(
+        dep_graph, _mir_candidates = _build_dependency_graph(
             targets=graph_package_names,
             local_repo=local_repo,
             local_index=None,
@@ -1746,7 +1753,7 @@ def plan(
         # Phase: prepare - Regenerate local repo indexes to pick up manually-added debs
         from packastack.build.localrepo_helpers import refresh_local_repo_indexes
         from packastack.target.arch import get_host_arch
-        
+
         if local_repo.exists():
             try:
                 refresh_local_repo_indexes(local_repo, get_host_arch(), run, phase="prepare")

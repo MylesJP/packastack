@@ -13,11 +13,11 @@ This module provides utilities for parsing Ubuntu release information from
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterator
 
 # Default path to Ubuntu distro info CSV
 UBUNTU_DISTRO_INFO_PATH = Path("/usr/share/distro-info/ubuntu.csv")

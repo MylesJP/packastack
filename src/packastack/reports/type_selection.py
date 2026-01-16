@@ -545,7 +545,7 @@ def render_console_table(report: TypeSelectionReport, explain: bool = False) -> 
             ])
 
         row = " | ".join(
-            data.ljust(width) for data, (_, width) in zip(row_data, cols)
+            data.ljust(width) for data, (_, width) in zip(row_data, cols, strict=False)
         )
         lines.append(row)
 

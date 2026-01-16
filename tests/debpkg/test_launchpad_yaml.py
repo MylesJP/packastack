@@ -206,7 +206,7 @@ class TestUpdateSeriesReferences:
                 {"name": "pkg-caracal", "branch": "ubuntu/noble-caracal"}
             ]
         }
-        new_data, updated = launchpad_yaml.update_series_references(
+        new_data, _updated = launchpad_yaml.update_series_references(
             data, "caracal", "dalmatian"
         )
 
@@ -249,7 +249,7 @@ class TestValidateUpdate:
             path=tmp_path / "launchpad.yaml",
         )
 
-        is_valid, fields, warnings = launchpad_yaml.validate_update(
+        is_valid, fields, _warnings = launchpad_yaml.validate_update(
             config, "caracal", "dalmatian"
         )
 
@@ -280,7 +280,7 @@ class TestUpdateLaunchpadYamlSeries:
             "    branch: ubuntu/noble-caracal\n"
         )
 
-        success, updated, error = launchpad_yaml.update_launchpad_yaml_series(
+        success, updated, _error = launchpad_yaml.update_launchpad_yaml_series(
             tmp_path, "caracal", "dalmatian"
         )
 
@@ -296,7 +296,7 @@ class TestUpdateLaunchpadYamlSeries:
         yaml_path = tmp_path / "launchpad.yaml"
         yaml_path.write_text("git-repository: lp:~test/+git/pkg\n")
 
-        success, updated, error = launchpad_yaml.update_launchpad_yaml_series(
+        success, updated, _error = launchpad_yaml.update_launchpad_yaml_series(
             tmp_path, "caracal", "dalmatian"
         )
 
@@ -375,7 +375,7 @@ class TestUpdateSeriesReferencesEdgeCases:
             "enabled": True,
             "branch": "caracal",
         }
-        new_data, updated = launchpad_yaml.update_series_references(
+        new_data, _updated = launchpad_yaml.update_series_references(
             data, "caracal", "dalmatian"
         )
 
@@ -398,7 +398,7 @@ class TestValidateUpdateEdgeCases:
             path=tmp_path / "launchpad.yaml",
         )
 
-        is_valid, fields, warnings = launchpad_yaml.validate_update(
+        is_valid, fields, _warnings = launchpad_yaml.validate_update(
             config, "caracal", "dalmatian"
         )
 
@@ -421,7 +421,7 @@ class TestUpdateLaunchpadYamlSeriesEdgeCases:
 
         monkeypatch.setattr(launchpad_yaml, "validate_update", mock_validate)
 
-        success, updated, error = launchpad_yaml.update_launchpad_yaml_series(
+        success, _updated, error = launchpad_yaml.update_launchpad_yaml_series(
             tmp_path, "caracal", "dalmatian"
         )
 
@@ -439,7 +439,7 @@ class TestUpdateLaunchpadYamlSeriesEdgeCases:
 
         monkeypatch.setattr(launchpad_yaml, "save_launchpad_yaml", mock_save)
 
-        success, updated, error = launchpad_yaml.update_launchpad_yaml_series(
+        success, _updated, error = launchpad_yaml.update_launchpad_yaml_series(
             tmp_path, "caracal", "dalmatian"
         )
 

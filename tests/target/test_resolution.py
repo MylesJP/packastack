@@ -14,7 +14,6 @@ from packastack.target.resolution import (
     MatchMode,
     OriginSource,
     Scope,
-    TargetExpr,
     TargetIdentity,
     TargetKind,
     TargetResolver,

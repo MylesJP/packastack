@@ -24,12 +24,13 @@ for dependency analysis during release builds.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import shutil
 import tarfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -109,7 +110,7 @@ class CacheMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CacheMetadata":
+    def from_dict(cls, data: dict) -> CacheMetadata:
         """Create from dictionary."""
         return cls(
             project=data["project"],
@@ -124,8 +125,8 @@ class CacheMetadata:
         extracted = datetime.fromisoformat(self.extracted_at)
         # Ensure timezone-aware comparison
         if extracted.tzinfo is None:
-            extracted = extracted.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+            extracted = extracted.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
         return now - extracted > timedelta(days=max_age_days)
 
 
@@ -168,7 +169,7 @@ class TarballMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "TarballMetadata":
+    def from_dict(cls, data: dict) -> TarballMetadata:
         """Create from dictionary."""
         return cls(
             project=data.get("project", ""),
@@ -409,7 +410,7 @@ def extract_tarball(
     metadata = CacheMetadata(
         project=project,
         version=version,
-        extracted_at=datetime.now(timezone.utc).isoformat(),
+        extracted_at=datetime.now(UTC).isoformat(),
         tarball_path=str(tarball_path),
         tarball_size=tarball_path.stat().st_size,
     )
@@ -464,10 +465,8 @@ def cleanup_expired_cache(
 
         # Remove empty project directories
         if project_dir.exists() and not any(project_dir.iterdir()):
-            try:
+            with contextlib.suppress(OSError):
                 project_dir.rmdir()
-            except OSError:
-                pass
 
     return removed
 
@@ -487,10 +486,8 @@ def get_cache_size(cache_base: Path = DEFAULT_CACHE_DIR) -> int:
     total = 0
     for path in cache_base.rglob("*"):
         if path.is_file():
-            try:
+            with contextlib.suppress(OSError):
                 total += path.stat().st_size
-            except OSError:
-                pass
     return total
 
 
@@ -606,7 +603,7 @@ def cache_tarball(
         package_name=entry.package_name,
         version=entry.version,
         build_type=entry.build_type,
-        cached_at=datetime.now(timezone.utc).isoformat(),
+        cached_at=datetime.now(UTC).isoformat(),
         tarball_name=dest.name,
         tarball_size=dest.stat().st_size,
         source_method=entry.source_method,
@@ -666,9 +663,9 @@ def find_cached_tarball(
         try:
             cached_at = datetime.fromisoformat(meta.cached_at)
             if cached_at.tzinfo is None:
-                cached_at = cached_at.replace(tzinfo=timezone.utc)
+                cached_at = cached_at.replace(tzinfo=UTC)
         except ValueError:
-            cached_at = datetime.fromtimestamp(tarball_path.stat().st_mtime, tz=timezone.utc)
+            cached_at = datetime.fromtimestamp(tarball_path.stat().st_mtime, tz=UTC)
 
         if best_time is None or cached_at > best_time:
             best_time = cached_at

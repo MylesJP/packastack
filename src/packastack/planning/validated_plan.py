@@ -640,7 +640,7 @@ def resolve_dependency_with_spec(
     for ver, src, sat in candidates:
         if src in ("ubuntu", "cloud-archive"):
             return ver, src, sat
-    
+
     return candidates[0][0], candidates[0][1], candidates[0][2]
 
 
@@ -820,9 +820,9 @@ def validate_plan(
 def validate_dependencies_recursive(
     initial_packages: list[str],
     upstream_cache: Path,
-    local_index: "PackageIndex | None",
-    cloud_archive_index: "PackageIndex | None",
-    ubuntu_index: "PackageIndex",
+    local_index: PackageIndex | None,
+    cloud_archive_index: PackageIndex | None,
+    ubuntu_index: PackageIndex,
     openstack_packages: set[str],
     max_depth: int = 10,
     refresh_cache: bool = True,
@@ -910,7 +910,7 @@ def validate_dependencies_recursive(
         pkg_missing: list[str] = []
 
         for python_dep, version_spec in upstream_deps.runtime:
-            debian_name, uncertain = map_python_to_debian(python_dep)
+            debian_name, _uncertain = map_python_to_debian(python_dep)
             if not debian_name:
                 continue
 
@@ -919,7 +919,7 @@ def validate_dependencies_recursive(
                 continue
 
             # Try to resolve the dependency with version check
-            version, source, satisfied = resolve_dependency_with_spec(
+            version, source, _satisfied = resolve_dependency_with_spec(
                 debian_name, version_spec, local_index, cloud_archive_index, ubuntu_index
             )
 
@@ -956,7 +956,7 @@ def validate_dependencies_recursive(
 
     # Topological sort for build order
     # Simple Kahn's algorithm
-    in_degree: dict[str, int] = {pkg: 0 for pkg in processed}
+    in_degree: dict[str, int] = dict.fromkeys(processed, 0)
     for pkg, deps in result.dependency_edges.items():
         for dep in deps:
             if dep in in_degree:
@@ -970,7 +970,7 @@ def validate_dependencies_recursive(
 
     # Wait, that's reversed. Let me fix:
     # in_degree[pkg] = number of packages that pkg depends on that are also being built
-    in_degree = {pkg: 0 for pkg in processed}
+    in_degree = dict.fromkeys(processed, 0)
     reverse_deps: dict[str, list[str]] = {pkg: [] for pkg in processed}
 
     for pkg, deps in result.dependency_edges.items():

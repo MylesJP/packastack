@@ -416,7 +416,7 @@ class PlanResult:
     missing_packages: dict[str, list[str]] = field(default_factory=dict)  # pkg -> [missing deps]
     cycles: list[list[str]] = field(default_factory=list)
     # Optional PlanGraph for renderers that need structured graph output
-    plan_graph: "PlanGraph | None" = None
+    plan_graph: PlanGraph | None = None
 
     def has_errors(self) -> bool:
         """Check if there are blocking errors."""

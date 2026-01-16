@@ -21,8 +21,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from packastack.debpkg.control import ParsedDependency
 from packastack.debpkg.dep_sync import (
     SyncResult,

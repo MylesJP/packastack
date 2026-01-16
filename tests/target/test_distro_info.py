@@ -29,7 +29,6 @@ from packastack.target.distro_info import (
     load_ubuntu_releases,
 )
 
-
 # Sample CSV content for testing
 SAMPLE_CSV = dedent("""\
     version,codename,series,created,release,eol,eol-server

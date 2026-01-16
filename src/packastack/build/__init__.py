@@ -23,16 +23,6 @@ including artifact collection and sbuild configuration parsing.
 """
 
 # Types for build state management
-from packastack.build.types import (
-    BuildInputs,
-    BuildOutcome,
-    PhaseResult,
-    RegistryResolution,
-    ResolvedTargets,
-    TarballAcquisitionResult,
-    WorkspacePaths,
-)
-
 # Error handling and exit codes
 from packastack.build.errors import (
     EXIT_ALL_BUILD_FAILED,
@@ -67,17 +57,10 @@ from packastack.build.git_helpers import (
     no_gpg_sign_enabled,
 )
 
-# Tarball acquisition
-from packastack.build.tarball import (
-    download_github_release_tarball,
-    download_pypi_tarball,
-    fetch_release_tarball,
-    run_uscan,
-    # Backwards compatibility aliases
-    _download_github_release_tarball,
-    _download_pypi_tarball,
-    _fetch_release_tarball,
-    _run_uscan,
+# Local repo helpers
+from packastack.build.localrepo_helpers import (
+    _refresh_local_repo_indexes,
+    refresh_local_repo_indexes,
 )
 
 # Phase functions
@@ -96,17 +79,12 @@ from packastack.build.phases import (
     resolve_upstream_registry,
 )
 
-# Local repo helpers
-from packastack.build.localrepo_helpers import (
-    refresh_local_repo_indexes,
-    _refresh_local_repo_indexes,
-)
-
 # Single build phases
 from packastack.build.single_build import (
     BuildResult as SingleBuildResult,
+)
+from packastack.build.single_build import (
     FetchResult,
-    PhaseResult as SinglePhaseResult,
     PrepareResult,
     SetupInputs,
     SingleBuildContext,
@@ -121,79 +99,104 @@ from packastack.build.single_build import (
     validate_and_build_deps,
     verify_and_publish,
 )
+from packastack.build.single_build import (
+    PhaseResult as SinglePhaseResult,
+)
+
+# Tarball acquisition
+from packastack.build.tarball import (
+    # Backwards compatibility aliases
+    _download_github_release_tarball,
+    _download_pypi_tarball,
+    _fetch_release_tarball,
+    _run_uscan,
+    download_github_release_tarball,
+    download_pypi_tarball,
+    fetch_release_tarball,
+    run_uscan,
+)
+from packastack.build.types import (
+    BuildInputs,
+    BuildOutcome,
+    PhaseResult,
+    RegistryResolution,
+    ResolvedTargets,
+    TarballAcquisitionResult,
+    WorkspacePaths,
+)
 
 __all__ = [
+    "EXIT_ALL_BUILD_FAILED",
+    "EXIT_BUILD_FAILED",
+    "EXIT_CONFIG_ERROR",
+    "EXIT_CYCLE_DETECTED",
+    "EXIT_DISCOVERY_FAILED",
+    "EXIT_FETCH_FAILED",
+    "EXIT_GRAPH_ERROR",
+    "EXIT_MISSING_PACKAGES",
+    "EXIT_PATCH_FAILED",
+    "EXIT_POLICY_BLOCKED",
+    "EXIT_REGISTRY_ERROR",
+    "EXIT_RESUME_ERROR",
+    "EXIT_RETIRED_PROJECT",
+    # Exit codes
+    "EXIT_SUCCESS",
+    "EXIT_TOOL_MISSING",
     # Types
     "BuildInputs",
     "BuildOutcome",
-    "PhaseResult",
-    "RegistryResolution",
-    "ResolvedTargets",
-    "TarballAcquisitionResult",
-    "WorkspacePaths",
-    # Error helpers
-    "log_phase_event",
-    "phase_error",
-    "phase_warning",
-    # Git helpers
-    "ensure_no_merge_paths",
-    "get_git_author_env",
-    "git_commit",
-    "maybe_disable_gpg_sign",
-    "maybe_enable_sphinxdoc",
-    "no_gpg_sign_enabled",
-    # Tarball helpers
-    "download_github_release_tarball",
-    "download_pypi_tarball",
-    "fetch_release_tarball",
-    "run_uscan",
+    "FetchResult",
     # Phase functions
     "PackageIndexes",
+    "PhaseResult",
     "PolicyCheckResult",
+    "PrepareResult",
+    "RegistryResolution",
     "RegistryResolutionResult",
+    "ResolvedTargets",
     "RetirementCheckResult",
     "SchrootSetupResult",
-    "ToolCheckResult",
-    "check_policy",
-    "check_retirement_status",
-    "check_tools",
-    "ensure_schroot_ready",
-    "load_package_indexes",
-    "resolve_upstream_registry",
-    # Local repo helpers
-    "refresh_local_repo_indexes",
     # Single build phases
     "SetupInputs",
     "SingleBuildContext",
+    "SingleBuildOutcome",
     "SingleBuildResult",
     "SinglePhaseResult",
-    "FetchResult",
-    "PrepareResult",
+    "TarballAcquisitionResult",
+    "ToolCheckResult",
     "ValidateDepsResult",
-    "SingleBuildOutcome",
-    "fetch_packaging_repo",
-    "prepare_upstream_source",
-    "validate_and_build_deps",
-    "import_and_patch",
+    "WorkspacePaths",
     "build_packages",
-    "verify_and_publish",
     "build_single_package",
+    "check_policy",
+    "check_retirement_status",
+    "check_tools",
+    # Tarball helpers
+    "download_github_release_tarball",
+    "download_pypi_tarball",
+    # Git helpers
+    "ensure_no_merge_paths",
+    "ensure_schroot_ready",
+    "fetch_packaging_repo",
+    "fetch_release_tarball",
+    "get_git_author_env",
+    "git_commit",
+    "import_and_patch",
+    "load_package_indexes",
+    # Error helpers
+    "log_phase_event",
+    "maybe_disable_gpg_sign",
+    "maybe_enable_sphinxdoc",
+    "no_gpg_sign_enabled",
+    "phase_error",
+    "phase_warning",
+    "prepare_upstream_source",
+    # Local repo helpers
+    "refresh_local_repo_indexes",
+    "resolve_upstream_registry",
+    "run_uscan",
     "setup_build_context",
-    # Exit codes
-    "EXIT_SUCCESS",
-    "EXIT_CONFIG_ERROR",
-    "EXIT_TOOL_MISSING",
-    "EXIT_FETCH_FAILED",
-    "EXIT_PATCH_FAILED",
-    "EXIT_MISSING_PACKAGES",
-    "EXIT_CYCLE_DETECTED",
-    "EXIT_BUILD_FAILED",
-    "EXIT_POLICY_BLOCKED",
-    "EXIT_REGISTRY_ERROR",
-    "EXIT_RETIRED_PROJECT",
-    "EXIT_DISCOVERY_FAILED",
-    "EXIT_GRAPH_ERROR",
-    "EXIT_ALL_BUILD_FAILED",
-    "EXIT_RESUME_ERROR",
+    "validate_and_build_deps",
+    "verify_and_publish",
 ]
 

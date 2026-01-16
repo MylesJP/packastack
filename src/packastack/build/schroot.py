@@ -29,7 +29,6 @@ from pathlib import Path
 
 from packastack.core.spinner import activity_spinner
 
-
 # Fun messages to display while waiting for schroot creation
 SCHROOT_WAIT_MESSAGES = [
     "Smell that fresh coffee? Go get some - this will take a while",
@@ -201,13 +200,12 @@ def ensure_schroot(
     # When running as non-root, check if sudo credentials are cached
     # If not, prompt for password first (outside spinner) then proceed
     needs_sudo = os.geteuid() != 0
-    if needs_sudo and not _sudo_credentials_cached():
-        if not _ensure_sudo_cached():
-            return SchrootResult(
-                name=name,
-                exists=False,
-                error="sudo authentication failed",
-            )
+    if needs_sudo and not _sudo_credentials_cached() and not _ensure_sudo_cached():
+        return SchrootResult(
+            name=name,
+            exists=False,
+            error="sudo authentication failed",
+        )
 
     # Pick a fun message for the wait
     fun_msg = random.choice(SCHROOT_WAIT_MESSAGES)

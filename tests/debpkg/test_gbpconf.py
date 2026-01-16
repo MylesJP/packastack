@@ -22,8 +22,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from packastack.debpkg import gbpconf
 
 
@@ -212,7 +210,7 @@ class TestUpdateGbpConf:
         """Test updating non-existent file creates new one."""
         (tmp_path / "debian").mkdir()
 
-        success, updated, error = gbpconf.update_gbp_conf(
+        success, updated, _error = gbpconf.update_gbp_conf(
             tmp_path,
             ubuntu_series="noble",
             openstack_series="dalmatian",
@@ -225,7 +223,7 @@ class TestUpdateGbpConf:
 
     def test_update_nonexistent_no_series(self, tmp_path: Path) -> None:
         """Test updating non-existent file without series does nothing."""
-        success, updated, error = gbpconf.update_gbp_conf(tmp_path)
+        success, updated, _error = gbpconf.update_gbp_conf(tmp_path)
 
         assert success is True
         assert updated == []
@@ -242,7 +240,7 @@ debian-branch = ubuntu/noble-caracal
 sign-tags = True
 """)
 
-        success, updated, error = gbpconf.update_gbp_conf(
+        success, updated, _error = gbpconf.update_gbp_conf(
             tmp_path,
             ubuntu_series="noble",
             openstack_series="dalmatian",
@@ -265,7 +263,7 @@ debian-branch = ubuntu/noble-dalmatian
 keyid = MYKEY
 """)
 
-        success, updated, error = gbpconf.update_gbp_conf(
+        success, updated, _error = gbpconf.update_gbp_conf(
             tmp_path,
             ubuntu_series="noble",
             openstack_series="dalmatian",
@@ -287,7 +285,7 @@ debian-branch = ubuntu/noble-dalmatian
 keyid = OLDKEY
 """)
 
-        success, updated, error = gbpconf.update_gbp_conf(
+        success, updated, _error = gbpconf.update_gbp_conf(
             tmp_path,
             signing_key="",
         )
@@ -307,7 +305,7 @@ debian-branch = ubuntu/noble-caracal
 """)
 
         # Only ubuntu_series, no openstack_series
-        success, updated, error = gbpconf.update_gbp_conf(
+        success, updated, _error = gbpconf.update_gbp_conf(
             tmp_path,
             ubuntu_series="noble",
         )
@@ -363,7 +361,7 @@ recipes:
         # Create debian dir
         (tmp_path / "debian").mkdir()
 
-        success, updated, error = gbpconf.update_gbp_conf_from_launchpad_yaml(
+        success, updated, _error = gbpconf.update_gbp_conf_from_launchpad_yaml(
             tmp_path, signing_key="SIGNKEY"
         )
 
@@ -397,7 +395,7 @@ debian-branch = ubuntu/noble-dalmatian
 sign-tags = True
 """)
 
-        success, updated, error = gbpconf.update_gbp_conf_from_launchpad_yaml(tmp_path)
+        success, updated, _error = gbpconf.update_gbp_conf_from_launchpad_yaml(tmp_path)
 
         assert success is True
         assert any("debian-branch=ubuntu/plucky-epoxy" in u for u in updated)

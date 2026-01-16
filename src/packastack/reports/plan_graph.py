@@ -30,9 +30,8 @@ from __future__ import annotations
 
 import html
 import json
-import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -119,7 +118,7 @@ class PlanGraph:
             {"wave": wave_num, "packages": nodes}
             for wave_num, nodes in sorted(self.waves.items())
         ]
-        
+
         return {
             "run_id": self.run_id,
             "generated_at_utc": self.generated_at_utc,
@@ -140,13 +139,13 @@ class PlanGraph:
     @classmethod
     def from_dependency_graph(
         cls,
-        dep_graph: "DependencyGraph",
+        dep_graph: DependencyGraph,
         run_id: str,
         target: str,
         ubuntu_series: str,
-        type_report: "TypeSelectionReport | None" = None,
+        type_report: TypeSelectionReport | None = None,
         cycles: list[list[str]] | None = None,
-    ) -> "PlanGraph":
+    ) -> PlanGraph:
         """Create a PlanGraph from a DependencyGraph and optional type selection report.
 
         Args:
@@ -162,7 +161,7 @@ class PlanGraph:
         """
         graph = cls(
             run_id=run_id,
-            generated_at_utc=datetime.now(timezone.utc).isoformat(),
+            generated_at_utc=datetime.now(UTC).isoformat(),
             target=target,
             ubuntu_series=ubuntu_series,
             cycles=cycles or [],
@@ -180,7 +179,7 @@ class PlanGraph:
             cycle_nodes.update(cycle)
 
         # Add nodes
-        for name, node in dep_graph.nodes.items():
+        for name, _node in dep_graph.nodes.items():
             build_type = type_map.get(name, "snapshot")
             status = "cycle" if name in cycle_nodes else "ok"
             graph.nodes[name] = GraphNode(
@@ -230,7 +229,7 @@ class PlanGraph:
         self,
         focus: str,
         depth: int = 2,
-    ) -> "PlanGraph":
+    ) -> PlanGraph:
         """Extract a subgraph centered on a focus node.
 
         Includes ancestors (dependencies) and descendants (dependents) up to
@@ -320,7 +319,7 @@ def render_waves(
     if focus and focus in graph.nodes:
         # Filter to waves relevant to focus (ancestors + descendants)
         relevant_nodes = set()
-        
+
         def add_ancestors(node_id: str) -> None:
             if node_id in relevant_nodes:
                 return
@@ -328,7 +327,7 @@ def render_waves(
             if node_id in graph.nodes:
                 for dep in graph.nodes[node_id].dependencies:
                     add_ancestors(dep)
-        
+
         def add_descendants(node_id: str) -> None:
             if node_id in relevant_nodes:
                 return
@@ -336,10 +335,10 @@ def render_waves(
             if node_id in graph.nodes:
                 for dep in graph.nodes[node_id].dependents:
                     add_descendants(dep)
-        
+
         add_ancestors(focus)
         add_descendants(focus)
-        
+
         # Filter waves
         filtered_waves = {}
         for wave_num, nodes in graph.waves.items():
@@ -351,18 +350,18 @@ def render_waves(
         waves = graph.waves
 
     lines: list[str] = []
-    lines.append(f"Build waves (parallelizable batches):")
-    
+    lines.append("Build waves (parallelizable batches):")
+
     if not waves:
         lines.append("  (no waves computed - graph may have cycles)")
         return "\n".join(lines)
-    
+
     total_packages = sum(len(nodes) for nodes in waves.values())
-    
+
     for wave_num in sorted(waves.keys()):
         nodes = waves[wave_num]
         count = len(nodes)
-        
+
         # Format package list and annotate with chosen build type if available
         def _annotate(n: str) -> str:
             node = graph.nodes.get(n)
@@ -385,10 +384,10 @@ def render_waves(
             for i in range(0, count, max_wave_packages):
                 chunk = nodes[i:i+max_wave_packages]
                 lines.append(f"    {', '.join(_annotate(n) for n in chunk)}")
-    
+
     lines.append("")
     lines.append(f"Total: {len(waves)} waves, {total_packages} packages, {graph.edge_count} dependencies")
-    
+
     return "\n".join(lines)
 
 
@@ -410,7 +409,7 @@ def render_build_order_list(
     if focus and focus in graph.nodes:
         # Get relevant nodes (ancestors + descendants)
         relevant_nodes = set()
-        
+
         def add_ancestors(node_id: str) -> None:
             if node_id in relevant_nodes:
                 return
@@ -418,7 +417,7 @@ def render_build_order_list(
             if node_id in graph.nodes:
                 for dep in graph.nodes[node_id].dependencies:
                     add_ancestors(dep)
-        
+
         def add_descendants(node_id: str) -> None:
             if node_id in relevant_nodes:
                 return
@@ -426,10 +425,10 @@ def render_build_order_list(
             if node_id in graph.nodes:
                 for dep in graph.nodes[node_id].dependents:
                     add_descendants(dep)
-        
+
         add_ancestors(focus)
         add_descendants(focus)
-        
+
         # Filter topo order
         display_order = [n for n in graph.topo_order if n in relevant_nodes]
     else:
@@ -438,23 +437,23 @@ def render_build_order_list(
     lines: list[str] = []
     lines.append("Build order (topologically sorted):")
     lines.append("")
-    
+
     if not display_order:
         lines.append("  (no build order - graph may have cycles)")
         return "\n".join(lines)
-    
+
     for i, node_id in enumerate(display_order, 1):
         node = graph.nodes.get(node_id)
         if not node:
             continue
-        
+
         # Main line: index, wave, package name
         lines.append(f"  {i:03d} [wave {node.wave}] {node_id}")
-        
+
         # Show forced-by if present
         if node.forced_by:
             shown = node.forced_by[:max_forced_by]
-            
+
             # Format with wave numbers
             forced_strs = []
             for dep in shown:
@@ -463,9 +462,9 @@ def render_build_order_list(
                     forced_strs.append(f"{dep} [wave {dep_node.wave}]")
                 else:
                     forced_strs.append(dep)
-            
+
             forced_text = ", ".join(forced_strs)
-            
+
             # Add overflow indicator
             total_deps = len(node.dependencies)
             if len(node.forced_by) > max_forced_by:
@@ -474,9 +473,9 @@ def render_build_order_list(
             elif total_deps > len(node.forced_by):
                 other = total_deps - len(node.forced_by)
                 forced_text += f" (+{other} deps)"
-            
+
             lines.append(f"      forced-by: {forced_text}")
-    
+
     return "\n".join(lines)
 
 
@@ -517,7 +516,7 @@ def render_dot(
     elif graph.node_count > max_nodes:
         # Truncate to root nodes and their immediate dependencies
         root_nodes = [n for n in graph.nodes.values() if not n.dependents]
-        included = set(n.id for n in root_nodes[:max_nodes])
+        included = {n.id for n in root_nodes[:max_nodes]}
         for node in root_nodes[:max_nodes]:
             included.update(node.dependencies[:5])  # Limit deps per node
 
@@ -648,10 +647,7 @@ def render_ascii(
         lines.append("Build order:")
         lines.append("")
 
-        if graph.topo_order:
-            order_list = graph.topo_order
-        else:
-            order_list = sorted(graph.nodes.keys())
+        order_list = graph.topo_order or sorted(graph.nodes.keys())
 
         for i, node_id in enumerate(order_list[:max_nodes]):
             node = graph.nodes.get(node_id)
@@ -800,7 +796,7 @@ def render_html(graph: PlanGraph) -> str:
     '''
 
     # SVG dimensions for graph visualization
-    svg_width = min(1200, max(800, graph.node_count * 8))
+    min(1200, max(800, graph.node_count * 8))
     svg_height = min(800, max(400, graph.node_count * 4))
 
     html_content = f'''<!DOCTYPE html>

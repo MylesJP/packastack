@@ -24,7 +24,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import git
-import pytest
 
 from packastack.debpkg import gbp
 
@@ -106,13 +105,13 @@ class TestRunCommand:
 
     def test_successful_command(self) -> None:
         """Test running a successful command."""
-        code, stdout, stderr = gbp.run_command(["echo", "hello"])
+        code, stdout, _stderr = gbp.run_command(["echo", "hello"])
         assert code == 0
         assert "hello" in stdout
 
     def test_failed_command(self) -> None:
         """Test running a failing command."""
-        code, stdout, stderr = gbp.run_command(["false"])
+        code, _stdout, _stderr = gbp.run_command(["false"])
         assert code != 0
 
     def test_with_cwd(self, tmp_path: Path) -> None:

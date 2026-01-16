@@ -26,13 +26,10 @@ policy management.
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
 import subprocess
-import tarfile
-import tempfile
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urljoin
@@ -148,12 +145,12 @@ def build_tarball_url(project: str, version: str) -> str:
     # For python-* client libraries:
     # - Directory path uses hyphens: python-openstackclient/
     # - Tarball filename uses underscores: python_openstackclient-version.tar.gz
-    
+
     tarball_name = project
     # Replace dots with underscores (e.g. oslo.config -> oslo_config)
     if "." in project:
          tarball_name = tarball_name.replace(".", "_")
-    
+
     # Replace hyphens with underscores for python- prefixed projects
     if project.startswith("python-"):
          tarball_name = tarball_name.replace("-", "_")

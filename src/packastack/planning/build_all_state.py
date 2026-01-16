@@ -24,8 +24,8 @@ Provides persistence for build-all runs to enable resume capability.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -33,7 +33,7 @@ from typing import Any
 
 def _utcnow_iso() -> str:
     """Get current UTC time as ISO format string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class PackageStatus(str, Enum):

@@ -18,7 +18,6 @@
 
 """Tests for build manifest module."""
 
-import pytest
 
 from packastack.planning.build_manifest import (
     BuildManifest,
@@ -256,7 +255,7 @@ class TestResolveVersionForPackage:
 
     def test_snapshot_returns_placeholder(self):
         """Snapshot type returns placeholder version."""
-        version, revision, epoch, source = resolve_version_for_package(
+        version, _revision, _epoch, source = resolve_version_for_package(
             source_package="nova",
             build_type=BuildType.SNAPSHOT,
             releases_repo=None,
@@ -269,7 +268,7 @@ class TestResolveVersionForPackage:
 
     def test_release_without_repo(self):
         """Release without releases repo returns placeholder."""
-        version, revision, epoch, source = resolve_version_for_package(
+        version, _revision, _epoch, source = resolve_version_for_package(
             source_package="nova",
             build_type=BuildType.RELEASE,
             releases_repo=None,
@@ -281,7 +280,7 @@ class TestResolveVersionForPackage:
 
     def test_release_with_repo(self, tmp_path):
         """Release with releases repo loads version from releases."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         releases_repo = tmp_path / "releases"
         releases_repo.mkdir()
@@ -290,7 +289,7 @@ class TestResolveVersionForPackage:
         mock_release.version = "29.1.0"
 
         with patch("packastack.upstream.releases.load_project_releases", return_value=[mock_release]):
-            version, revision, epoch, source = resolve_version_for_package(
+            version, _revision, _epoch, source = resolve_version_for_package(
                 source_package="nova",
                 build_type=BuildType.RELEASE,
                 releases_repo=releases_repo,
@@ -308,7 +307,7 @@ class TestResolveVersionForPackage:
         releases_repo.mkdir()
 
         with patch("packastack.upstream.releases.load_project_releases", return_value=[]):
-            version, revision, epoch, source = resolve_version_for_package(
+            version, _revision, _epoch, source = resolve_version_for_package(
                 source_package="nova",
                 build_type=BuildType.RELEASE,
                 releases_repo=releases_repo,
@@ -320,7 +319,7 @@ class TestResolveVersionForPackage:
 
     def test_milestone_without_repo(self):
         """Milestone without releases repo returns placeholder."""
-        version, revision, epoch, source = resolve_version_for_package(
+        version, _revision, _epoch, source = resolve_version_for_package(
             source_package="nova",
             build_type=BuildType.MILESTONE,
             releases_repo=None,
@@ -332,7 +331,7 @@ class TestResolveVersionForPackage:
 
     def test_milestone_with_repo(self, tmp_path):
         """Milestone with releases repo loads version from releases."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         releases_repo = tmp_path / "releases"
         releases_repo.mkdir()
@@ -341,7 +340,7 @@ class TestResolveVersionForPackage:
         mock_release.version = "30.0.0b1"
 
         with patch("packastack.upstream.releases.load_project_releases", return_value=[mock_release]):
-            version, revision, epoch, source = resolve_version_for_package(
+            version, _revision, _epoch, source = resolve_version_for_package(
                 source_package="nova",
                 build_type=BuildType.MILESTONE,
                 releases_repo=releases_repo,

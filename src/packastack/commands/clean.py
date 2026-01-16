@@ -26,6 +26,7 @@ Removes cached data including:
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 from pathlib import Path
 
@@ -107,10 +108,9 @@ def clean(
     items_to_remove: list[tuple[str, Path, int]] = []
 
     # Collect tarball cache items
-    if clean_tarballs:
-        if tarball_cache_dir.exists():
-            items_to_remove.append(("Tarball cache", tarball_cache_dir, tarball_cache_size))
-            total_size += tarball_cache_size
+    if clean_tarballs and tarball_cache_dir.exists():
+        items_to_remove.append(("Tarball cache", tarball_cache_dir, tarball_cache_size))
+        total_size += tarball_cache_size
 
     # Collect workspace items
     if clean_workspaces and workspace_dir.exists():
@@ -136,7 +136,7 @@ def clean(
             return
 
         activity("clean", f"Found {len(expired_entries)} expired entries")
-        for proj, ver, meta in expired_entries[:10]:
+        for proj, ver, _meta in expired_entries[:10]:
             activity("clean", f"  {proj}/{ver}")
         if len(expired_entries) > 10:
             activity("clean", f"  ... and {len(expired_entries) - 10} more")
@@ -236,7 +236,7 @@ def _show_cache_status(paths: dict) -> None:
 
     if total >= SIZE_WARNING_THRESHOLD:
         typer.secho(
-            f"\n⚠️  Cache size exceeds 10GB. Consider running: packastack clean --all",
+            "\n⚠️  Cache size exceeds 10GB. Consider running: packastack clean --all",
             fg=typer.colors.YELLOW,
         )
 
@@ -252,10 +252,8 @@ def _get_dir_size(path: Path) -> int:
     try:
         for file_path in path.rglob("*"):
             if file_path.is_file():
-                try:
+                with contextlib.suppress(OSError):
                     total += file_path.stat().st_size
-                except OSError:
-                    pass
     except OSError:
         pass
     return total

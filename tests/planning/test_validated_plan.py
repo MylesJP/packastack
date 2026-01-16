@@ -315,7 +315,7 @@ class TestParseRequirementsFile:
         assert "oslo.log" in names
         assert "requests" in names
         # Check version specs are preserved
-        specs = {name: spec for name, spec in result}
+        specs = dict(result)
         assert specs["oslo.config"] == ">=1.0"
         assert specs["oslo.log"] == ""
         assert specs["requests"] == ">=2.0"
@@ -376,7 +376,7 @@ class TestParsePyprojectDeps:
         """Test parsing pyproject.toml with invalid content."""
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("invalid toml content [[[")
-        
+
         # Should return empty list on exception
         result = validated_plan.parse_pyproject_deps(pyproject)
         assert result == []
@@ -389,7 +389,7 @@ class TestParsePyprojectDeps:
             "name = 'test'\n"
             "version = '1.0'\n"
         )
-        
+
         result = validated_plan.parse_pyproject_deps(pyproject)
         assert result == []
 
@@ -425,7 +425,7 @@ class TestParseSetupCfgDeps:
         """Test parsing setup.cfg without options section."""
         setup_cfg = tmp_path / "setup.cfg"
         setup_cfg.write_text("[metadata]\nname = test\n")
-        
+
         result = validated_plan.parse_setup_cfg_deps(setup_cfg)
         assert result == []
 
@@ -434,14 +434,13 @@ class TestParseSetupCfgDeps:
         import configparser
         setup_cfg = tmp_path / "setup.cfg"
         setup_cfg.write_text("[options]\ninstall_requires = pkg\n")
-        
+
         # Mock configparser to raise exception
-        original_read = configparser.ConfigParser.read
         def mock_read(self: configparser.ConfigParser, *args: object, **kwargs: object) -> list[str]:
-            raise IOError("Parse failed")
-        
+            raise OSError("Parse failed")
+
         monkeypatch.setattr(configparser.ConfigParser, "read", mock_read)
-        
+
         result = validated_plan.parse_setup_cfg_deps(setup_cfg)
         assert result == []
 
@@ -614,7 +613,7 @@ class TestResolveDependency:
         mock_local = MagicMock()
         mock_local.get_version.return_value = "1.0.0"
         mock_ubuntu = MagicMock()
-        
+
         version, source = validated_plan.resolve_dependency(
             "python3-oslo.config", mock_local, None, mock_ubuntu
         )
@@ -628,7 +627,7 @@ class TestResolveDependency:
         mock_ca = MagicMock()
         mock_ca.get_version.return_value = "2.0.0"
         mock_ubuntu = MagicMock()
-        
+
         version, source = validated_plan.resolve_dependency(
             "python3-oslo.config", mock_local, mock_ca, mock_ubuntu
         )
@@ -639,7 +638,7 @@ class TestResolveDependency:
         """Test resolving from Ubuntu index."""
         mock_ubuntu = MagicMock()
         mock_ubuntu.get_version.return_value = "3.0.0"
-        
+
         version, source = validated_plan.resolve_dependency(
             "python3-requests", None, None, mock_ubuntu
         )
@@ -650,7 +649,7 @@ class TestResolveDependency:
         """Test resolving when not found in any index."""
         mock_ubuntu = MagicMock()
         mock_ubuntu.get_version.return_value = None
-        
+
         version, source = validated_plan.resolve_dependency(
             "python3-unknown", None, None, mock_ubuntu
         )
@@ -870,7 +869,7 @@ class TestValidateDependenciesRecursive:
 
     def test_cycle_detection(self, tmp_path: Path) -> None:
         """Test that cycles are detected."""
-        from packastack.apt.packages import PackageIndex, BinaryPackage
+        from packastack.apt.packages import BinaryPackage, PackageIndex
 
         # Create a mock that returns None for deps (not found in ubuntu)
         mock_ubuntu = MagicMock(spec=PackageIndex)

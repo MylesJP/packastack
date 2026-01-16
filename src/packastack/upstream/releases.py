@@ -254,10 +254,7 @@ def load_openstack_packages(
 
             # Determine Ubuntu source package name based on type
             if project_type == "library":
-                if project.startswith("python-"):
-                    source_pkg = project
-                else:
-                    source_pkg = f"python-{project}"
+                source_pkg = project if project.startswith("python-") else f"python-{project}"
             else:
                 source_pkg = project
 

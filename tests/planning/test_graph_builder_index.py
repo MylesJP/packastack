@@ -1,5 +1,5 @@
+from packastack.apt.packages import BinaryPackage, PackageIndex
 from packastack.planning.graph_builder import build_graph_from_index
-from packastack.apt.packages import PackageIndex, BinaryPackage
 
 
 def make_index_with_deps():

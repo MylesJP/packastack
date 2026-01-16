@@ -32,20 +32,14 @@ from typing import TYPE_CHECKING
 
 from packastack.debpkg.control import (
     ParsedDependency,
-    parse_dependency_field,
 )
 from packastack.debpkg.version import (
-    compare_versions,
     upstream_version_newer,
 )
 from packastack.planning.validated_plan import (
     UpstreamDeps,
     extract_upstream_deps,
     map_python_to_debian,
-)
-from packastack.target.distro_info import (
-    get_current_lts,
-    get_previous_lts,
 )
 
 if TYPE_CHECKING:
@@ -230,10 +224,9 @@ def compute_version_bumps(
             result.from_manifest.append(debian_name)
         elif source == "lts":
             result.from_lts.append(debian_name)
-        elif source == "none":
-            if is_uncertain:
-                result.unresolved.append(python_name)
-                continue
+        elif source == "none" and is_uncertain:
+            result.unresolved.append(python_name)
+            continue
 
         # Check if dep exists in d/control
         if debian_name in existing_by_name:

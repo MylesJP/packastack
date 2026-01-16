@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from packastack.debpkg.manpages import (
-    ManPagesConfig,
-    ManPagesResult,
     add_sphinx_build_dep,
     apply_man_pages_support,
     create_manpages_file,

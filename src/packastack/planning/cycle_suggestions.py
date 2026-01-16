@@ -29,7 +29,7 @@ from packastack.planning.validated_plan import (
     map_python_to_debian,
     project_to_source_package,
 )
-from packastack.upstream.tarball_cache import get_cached_extraction, find_source_dir
+from packastack.upstream.tarball_cache import find_source_dir, get_cached_extraction
 
 if TYPE_CHECKING:
     from packastack.apt.packages import PackageIndex
@@ -74,7 +74,7 @@ def suggest_cycle_edge_exclusions(
     packaging_repos: dict[str, Path] | None,
     upstream_versions: dict[str, str] | None,
     source_to_project: dict[str, str] | None,
-    package_index: "PackageIndex | None",
+    package_index: PackageIndex | None,
     upstream_cache_base: Path | None,
 ) -> list[CycleEdgeSuggestion]:
     """Suggest dependency edges to exclude based on upstream requirements.
@@ -183,7 +183,7 @@ def _list_requirement_files(repo_path: Path) -> list[str]:
 
 def _map_upstream_deps_to_sources(
     deps: list[tuple[str, str]],
-    package_index: "PackageIndex | None",
+    package_index: PackageIndex | None,
 ) -> set[str]:
     sources: set[str] = set()
     for python_dep, _ in deps:
@@ -193,7 +193,7 @@ def _map_upstream_deps_to_sources(
 
 def _python_dep_to_sources(
     python_dep: str,
-    package_index: "PackageIndex | None",
+    package_index: PackageIndex | None,
 ) -> set[str]:
     debian_name, _ = map_python_to_debian(python_dep)
     candidates: set[str] = set()

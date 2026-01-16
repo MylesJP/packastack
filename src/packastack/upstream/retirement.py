@@ -83,7 +83,7 @@ class RetirementInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RetirementInfo":
+    def from_dict(cls, data: dict[str, Any]) -> RetirementInfo:
         """Create from dictionary."""
         return cls(
             status=RetirementStatus(data.get("status", "unknown")),

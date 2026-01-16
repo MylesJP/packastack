@@ -203,11 +203,10 @@ def update_gbp_conf(
             updated_fields.append(f"debian-branch={new_branch}")
 
     # Update signing key if provided
-    if signing_key is not None:
-        if config.keyid != signing_key:
-            config.keyid = signing_key
-            config.sign_tags = bool(signing_key)
-            updated_fields.append(f"keyid={signing_key or '(removed)'}")
+    if signing_key is not None and config.keyid != signing_key:
+        config.keyid = signing_key
+        config.sign_tags = bool(signing_key)
+        updated_fields.append(f"keyid={signing_key or '(removed)'}")
 
     if not updated_fields:
         return True, [], "No changes needed"

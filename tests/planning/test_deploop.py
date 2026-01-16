@@ -22,15 +22,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from packastack.planning.deploop import (
     DependencyBuildPlan,
     DependencyBuildResult,
     DependencyCheckResult,
     normalize_python_package_name,
-    parse_requirements_txt,
     parse_pyproject_toml_deps,
+    parse_requirements_txt,
 )
 
 

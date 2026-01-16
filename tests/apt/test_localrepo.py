@@ -25,8 +25,6 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from packastack.apt import localrepo
 
 
@@ -371,11 +369,6 @@ class TestRegenerateIndexes:
         deb_file = pool_dir / "test_1.0_amd64.deb"
         deb_file.write_bytes(b"fake deb content")
 
-        control_content = """Package: test
-Version: 1.0
-Architecture: amd64
-Description: Test package
-"""
 
         with patch.object(localrepo, "extract_deb_control") as mock_extract:
             mock_extract.return_value = localrepo.DebPackageInfo(
@@ -476,7 +469,7 @@ Architecture: all
     def test_multiple_archs(self, tmp_path: Path) -> None:
         """Test getting versions from multiple arch directories."""
         repo_root = tmp_path / "repo"
-        
+
         for arch in ["amd64", "arm64"]:
             dists_dir = repo_root / "dists" / "local" / "main" / f"binary-{arch}"
             dists_dir.mkdir(parents=True)
@@ -571,14 +564,14 @@ class TestSetField:
     def test_set_standard_fields(self) -> None:
         """Test setting standard control fields."""
         info = localrepo.DebPackageInfo(package="", version="", architecture="")
-        
+
         localrepo._set_field(info, "Package", "test-pkg")
         localrepo._set_field(info, "Version", "1.0.0")
         localrepo._set_field(info, "Architecture", "amd64")
         localrepo._set_field(info, "Source", "test")
         localrepo._set_field(info, "Section", "python")
         localrepo._set_field(info, "Priority", "optional")
-        
+
         assert info.package == "test-pkg"
         assert info.version == "1.0.0"
         assert info.architecture == "amd64"
@@ -718,11 +711,11 @@ class TestPublishArtifactsEdgeCases:
         repo_root = tmp_path / "repo"
         pool_main = repo_root / "pool" / "main"
         pool_main.mkdir(parents=True)
-        
+
         # Create existing file with old content
         existing = pool_main / "test_1.0_amd64.deb"
         existing.write_bytes(b"old content")
-        
+
         # Create new artifact
         artifacts_dir = tmp_path / "artifacts"
         artifacts_dir.mkdir()
@@ -742,7 +735,7 @@ class TestPublishArtifactsEdgeCases:
         repo_root = tmp_path / "repo"
         artifacts_dir = tmp_path / "artifacts"
         artifacts_dir.mkdir()
-        
+
         deb = artifacts_dir / "test_1.0_amd64.deb"
         deb.write_bytes(b"deb content")
 
@@ -1091,7 +1084,6 @@ class TestMultiArchIndexes:
         arm64_deb.touch()
 
         # Mock extract_deb_control to return architecture-specific info
-        original_extract = localrepo.extract_deb_control
 
         def mock_extract(deb_path: Path) -> localrepo.DebPackageInfo | None:
             if "amd64" in deb_path.name:

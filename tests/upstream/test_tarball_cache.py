@@ -20,9 +20,8 @@
 
 from __future__ import annotations
 
-import json
 import tarfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -71,7 +70,7 @@ class TestCacheMetadata:
 
     def test_is_expired_fresh(self) -> None:
         """Test that fresh cache is not expired."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         metadata = tarball_cache.CacheMetadata(
             project="test",
             version="1.0",
@@ -84,7 +83,7 @@ class TestCacheMetadata:
 
     def test_is_expired_old(self) -> None:
         """Test that old cache is expired."""
-        old_time = datetime.now(timezone.utc) - timedelta(days=30)
+        old_time = datetime.now(UTC) - timedelta(days=30)
         metadata = tarball_cache.CacheMetadata(
             project="test",
             version="1.0",
@@ -121,7 +120,7 @@ class TestCacheMetadataIO:
         metadata = tarball_cache.CacheMetadata(
             project="project",
             version="1.0",
-            extracted_at=datetime.now(timezone.utc).isoformat(),
+            extracted_at=datetime.now(UTC).isoformat(),
             tarball_path="/tmp/test.tar.gz",
             tarball_size=5000,
         )
@@ -259,7 +258,7 @@ class TestCleanupExpiredCache:
         # Create an expired entry
         expired_dir = tmp_path / "project" / "old"
         expired_dir.mkdir(parents=True)
-        old_time = datetime.now(timezone.utc) - timedelta(days=30)
+        old_time = datetime.now(UTC) - timedelta(days=30)
         metadata = tarball_cache.CacheMetadata(
             project="project",
             version="old",
@@ -275,7 +274,7 @@ class TestCleanupExpiredCache:
         fresh_metadata = tarball_cache.CacheMetadata(
             project="project",
             version="new",
-            extracted_at=datetime.now(timezone.utc).isoformat(),
+            extracted_at=datetime.now(UTC).isoformat(),
             tarball_path="/tmp/new.tar.gz",
             tarball_size=1000,
         )
@@ -326,7 +325,7 @@ class TestListCachedProjects:
             metadata = tarball_cache.CacheMetadata(
                 project=project,
                 version=version,
-                extracted_at=datetime.now(timezone.utc).isoformat(),
+                extracted_at=datetime.now(UTC).isoformat(),
                 tarball_path=f"/tmp/{project}.tar.gz",
                 tarball_size=1000,
             )

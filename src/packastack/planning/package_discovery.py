@@ -27,9 +27,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
 
 from packastack.upstream.registry import RegistryError, UpstreamsRegistry
 
@@ -205,8 +205,8 @@ def discover_packages_from_launchpad(
         repos = lp.git_repositories.getRepositories(target=team)
         result.total_repos = 0
 
-        from datetime import datetime, timezone, timedelta
-        two_years_ago = datetime.now(timezone.utc) - timedelta(days=730)  # 2 years
+        from datetime import datetime, timedelta
+        two_years_ago = datetime.now(UTC) - timedelta(days=730)  # 2 years
 
         for repo in repos:
             result.total_repos += 1

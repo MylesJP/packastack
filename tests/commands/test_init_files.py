@@ -1,5 +1,4 @@
 from pathlib import Path
-import tempfile
 
 from packastack.commands.init import _create_ubuntu_archive_files
 

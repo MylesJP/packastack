@@ -81,7 +81,7 @@ def resolve_build_type_auto(
     source_package: str,
     deliverable: str,
     offline: bool,
-    run: "RunContextType",
+    run: RunContextType,
 ) -> tuple[BuildType, str, str]:
     """Auto-select build type based on openstack/releases data.
 

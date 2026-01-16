@@ -8,10 +8,7 @@
 
 from pathlib import Path
 
-import pytest
-
 from packastack.build.types import (
-    BuildInputs,
     BuildOutcome,
     PhaseResult,
     ResolvedTargets,

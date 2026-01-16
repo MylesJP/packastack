@@ -357,14 +357,12 @@ def update_control_dependencies(
 
         # Find and update the Depends field in the file
         in_binary = False
-        binary_start = -1
         depends_start = -1
         depends_end = -1
 
         for i, line in enumerate(lines):
             if line.startswith("Package:") and binary.name in line:
                 in_binary = True
-                binary_start = i
             elif in_binary and line.startswith("Package:"):
                 in_binary = False
             elif in_binary and line.startswith("Depends:"):

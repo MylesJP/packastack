@@ -8,12 +8,11 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import Any
 
 import typer
 
-from packastack.apt.packages import load_package_index, apply_ubuntu_source_fallbacks
+from packastack.apt.packages import apply_ubuntu_source_fallbacks, load_package_index
 from packastack.commands.plan import _fetch_packaging_repos
 from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths

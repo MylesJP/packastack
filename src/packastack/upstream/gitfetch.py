@@ -263,7 +263,7 @@ class GitFetcher:
             return
 
         origin = repo.remotes.origin
-        current_url = list(origin.urls)[0]
+        current_url = next(iter(origin.urls))
 
         # Check if already using SSH
         if current_url.startswith("git+ssh://") or current_url.startswith("ssh://"):

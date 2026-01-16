@@ -12,8 +12,8 @@ unless explicitly normalized.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from packastack.apt.packages import compare_versions
 from packastack.debpkg.control import ParsedDependency

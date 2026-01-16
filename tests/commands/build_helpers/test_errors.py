@@ -6,9 +6,7 @@
 
 """Tests for build command errors module."""
 
-from unittest.mock import MagicMock, call
-
-import pytest
+from unittest.mock import MagicMock
 
 from packastack.build.errors import (
     EXIT_BUILD_FAILED,

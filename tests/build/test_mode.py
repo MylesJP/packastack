@@ -20,8 +20,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from packastack.build.mode import Builder, BuildMode
 
 

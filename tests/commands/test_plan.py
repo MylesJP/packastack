@@ -20,13 +20,14 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
-import io
 
+from packastack.apt.packages import BinaryPackage, PackageIndex
 from packastack.cli import app
 from packastack.commands.plan import (
     EXIT_CONFIG_ERROR,
@@ -34,16 +35,15 @@ from packastack.commands.plan import (
     EXIT_MISSING_PACKAGES,
     EXIT_SUCCESS,
     ResolvedTarget,
-    _format_graph,
-    _source_package_to_deliverable,
-    SOFT_DEPENDENCY_EXCLUSIONS,
     _build_dependency_graph,
     _check_mir_candidates,
+    _format_graph,
     _parse_dep_name,
     _resolve_package_targets,
+    _source_package_to_deliverable,
 )
+from packastack.planning.graph_builder import SOFT_DEPENDENCY_EXCLUSIONS
 from packastack.planning.graph import DependencyGraph
-from packastack.apt.packages import BinaryPackage, PackageIndex
 
 if TYPE_CHECKING:
     pass

@@ -30,11 +30,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packastack.planning.build_all_state import BuildAllState, PackageStatus
+    from packastack.planning.build_all_state import BuildAllState
 
 
 def generate_build_all_reports(
-    state: "BuildAllState",
+    state: BuildAllState,
     run_dir: Path,
 ) -> tuple[Path, Path]:
     """Generate build-all summary reports.
@@ -48,14 +48,14 @@ def generate_build_all_reports(
 
     Returns:
         Tuple of (json_report_path, md_report_path).
-        
+
     Side Effects:
         - Creates reports/ directory if needed
         - Writes build-all-summary.json
         - Writes build-all-summary.md
     """
     from packastack.planning.build_all_state import PackageStatus
-    
+
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
@@ -144,7 +144,7 @@ def generate_build_all_reports(
 
 
 def _generate_markdown_report(
-    state: "BuildAllState",
+    state: BuildAllState,
     total: int,
     succeeded: int,
     failed: int,
@@ -155,7 +155,7 @@ def _generate_markdown_report(
     top_10_longest: list[tuple[str, float]],
 ) -> list[str]:
     """Generate Markdown report lines.
-    
+
     Args:
         state: Build state
         total: Total package count
@@ -166,7 +166,7 @@ def _generate_markdown_report(
         total_time: Total build time in seconds
         failures_by_type: Failures grouped by type
         top_10_longest: Top 10 longest builds
-        
+
     Returns:
         List of Markdown lines
     """

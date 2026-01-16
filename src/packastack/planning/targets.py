@@ -26,9 +26,9 @@ preferable when ambiguity is possible.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, List, Sequence
 
 
 class TargetParseError(ValueError):
@@ -75,7 +75,7 @@ class TargetIdentity:
     def all_names(self) -> tuple[str, ...]:
         """Return all names usable for matching (case-insensitive)."""
 
-        names: List[str] = [self.source_package, self.canonical_upstream]
+        names: list[str] = [self.source_package, self.canonical_upstream]
         if self.deliverable_name:
             names.append(self.deliverable_name)
         names.extend(self.aliases)
@@ -239,9 +239,8 @@ def _apply_scope(scope: TargetScope | None, identities: Iterable[TargetIdentity]
         elif scope in (TargetScope.CANONICAL, TargetScope.REPO, TargetScope.UPSTREAM):
             if ident.canonical_upstream:
                 scoped.append(ident)
-        elif scope == TargetScope.DELIVERABLE:
-            if ident.deliverable_name:
-                scoped.append(ident)
+        elif scope == TargetScope.DELIVERABLE and ident.deliverable_name:
+            scoped.append(ident)
     return scoped
 
 

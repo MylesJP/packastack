@@ -8,10 +8,7 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-
-import pytest
 
 from packastack.target.completion import (
     generate_completion_index,
@@ -158,8 +155,9 @@ class TestCompletions:
     def test_completions_no_index(self) -> None:
         """Test completions with no index."""
         # Ensure we don't accidentally read a real cache during test runs
-        import packastack.target.completion as completion_module
         from unittest.mock import patch
+
+        import packastack.target.completion as completion_module
 
         with patch.object(completion_module, "load_completion_index", return_value=None):
             completions = get_completions("glance", None)

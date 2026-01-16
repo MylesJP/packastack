@@ -21,8 +21,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from packastack.apt.packages import BinaryPackage, PackageIndex
 from packastack.planning.graph import DependencyGraph
 from packastack.planning.graph_builder import (

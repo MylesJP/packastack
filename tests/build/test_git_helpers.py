@@ -7,7 +7,6 @@
 """Tests for git_helpers module."""
 
 import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -169,7 +168,7 @@ class TestEnsureNoMergePaths:
         """Test that entries are added to existing .gitattributes."""
         gitattributes = tmp_path / ".gitattributes"
         gitattributes.write_text("*.pyc binary\n")
-        
+
         result = ensure_no_merge_paths(tmp_path, ["launchpad.yaml"])
         assert result is True
         content = gitattributes.read_text()
@@ -181,7 +180,7 @@ class TestEnsureNoMergePaths:
         ensure_no_merge_paths(tmp_path, ["launchpad.yaml"])
         result = ensure_no_merge_paths(tmp_path, ["launchpad.yaml"])
         assert result is False  # No changes made second time
-        
+
         gitattributes = tmp_path / ".gitattributes"
         content = gitattributes.read_text()
         # Count occurrences
@@ -205,7 +204,7 @@ class TestMaybeEnableSphinxdoc:
         debian_dir.mkdir()
         rules = debian_dir / "rules"
         rules.write_text("#!/usr/bin/make -f\n%:\n\tdh $@ --with python3\n")
-        
+
         result = maybe_enable_sphinxdoc(tmp_path)
         assert result is True
         content = rules.read_text()
@@ -217,7 +216,7 @@ class TestMaybeEnableSphinxdoc:
         debian_dir.mkdir()
         rules = debian_dir / "rules"
         rules.write_text("#!/usr/bin/make -f\n%:\n\tdh $@\n")
-        
+
         result = maybe_enable_sphinxdoc(tmp_path)
         assert result is True
         content = rules.read_text()
@@ -229,7 +228,7 @@ class TestMaybeEnableSphinxdoc:
         debian_dir.mkdir()
         rules = debian_dir / "rules"
         rules.write_text("#!/usr/bin/make -f\n%:\n\tdh $@ --with python3,sphinxdoc\n")
-        
+
         result = maybe_enable_sphinxdoc(tmp_path)
         assert result is False
 
@@ -244,7 +243,7 @@ class TestMaybeEnableSphinxdoc:
         debian_dir.mkdir()
         rules = debian_dir / "rules"
         rules.write_text("#!/usr/bin/make -f\ncustom-build:\n\techo custom\n")
-        
+
         result = maybe_enable_sphinxdoc(tmp_path)
         assert result is False
 

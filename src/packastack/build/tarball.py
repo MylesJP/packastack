@@ -35,8 +35,8 @@ from typing import TYPE_CHECKING
 from packastack.core.run import activity
 from packastack.debpkg.gbp import run_command
 from packastack.upstream.source import (
-    download_file,
     download_and_verify_tarball,
+    download_file,
     generate_snapshot_tarball,
 )
 from packastack.upstream.tarball_cache import (
@@ -144,15 +144,15 @@ def download_github_release_tarball(
 
 
 def fetch_release_tarball(
-    upstream: "UpstreamSource | None",
+    upstream: UpstreamSource | None,
     upstream_config,
     pkg_repo: Path,
     workspace: Path,
-    provenance: "BuildProvenance",
+    provenance: BuildProvenance,
     offline: bool,
     project_key: str,
     package_name: str,
-    build_type: "BuildType",
+    build_type: BuildType,
     cache_base: Path,
     force: bool,
     run,

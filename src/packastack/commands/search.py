@@ -34,8 +34,6 @@ from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
 from packastack.target.completion import generate_completion_index, save_completion_index
 from packastack.target.resolution import (
-    MatchMode,
-    OriginSource,
     Scope,
     TargetResolver,
     parse_target_expr,

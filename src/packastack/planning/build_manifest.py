@@ -37,8 +37,7 @@ from packastack.planning.type_selection import (
 )
 
 if TYPE_CHECKING:
-    from packastack.apt.packages import PackageIndex
-    from packastack.upstream.registry import UpstreamRegistry
+    pass
 
 logger = logging.getLogger(__name__)
 

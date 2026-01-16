@@ -22,11 +22,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-import pytest
-
+from packastack.planning.graph import DependencyGraph
 from packastack.reports.plan_graph import (
     GraphEdge,
     GraphNode,
@@ -39,7 +37,6 @@ from packastack.reports.plan_graph import (
     render_waves,
     write_plan_graph_reports,
 )
-from packastack.planning.graph import DependencyGraph
 
 
 class TestGraphNode:

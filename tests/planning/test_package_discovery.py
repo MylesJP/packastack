@@ -9,28 +9,27 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from packastack.planning.package_discovery import (
-    EXCLUDED_REPO_PATTERNS,
     EXCLUDED_REPOS,
     DiscoveryResult,
+    _extract_package_from_repo,
+    _get_all_releases_packages,
+    _get_known_openstack_packages,
+    _get_packages_from_releases_repo,
+    _get_upstreams_registry,
     _is_excluded_repo,
     _is_valid_packaging_repo,
-    _get_packages_from_releases_repo,
-    _get_known_openstack_packages,
-    _get_all_releases_packages,
-    _extract_package_from_repo,
-    _get_upstreams_registry,
-    get_releases_libraries_and_services,
     discover_packages,
     discover_packages_from_cache,
     discover_packages_from_launchpad,
     discover_packages_from_list,
+    get_releases_libraries_and_services,
     read_packages_from_file,
 )
 
@@ -59,7 +58,7 @@ class TestIsExcludedRepo:
 
     def test_excluded_hidden_dirs(self) -> None:
         """Test that hidden directories are excluded."""
-        excluded, reason = _is_excluded_repo(".git")
+        excluded, _reason = _is_excluded_repo(".git")
         assert excluded is True
 
     def test_not_excluded_normal_package(self) -> None:
@@ -70,7 +69,7 @@ class TestIsExcludedRepo:
 
     def test_not_excluded_python_package(self) -> None:
         """Test that python packages are not excluded."""
-        excluded, reason = _is_excluded_repo("python-oslo.config")
+        excluded, _reason = _is_excluded_repo("python-oslo.config")
         assert excluded is False
 
 
@@ -302,7 +301,7 @@ class TestDiscoverPackagesFromLaunchpad:
 
     def test_successful_discovery_with_mocked_launchpad(self, tmp_path: Path) -> None:
         """Test successful discovery with mocked team repos enumeration."""
-        recent = datetime.now(timezone.utc)
+        recent = datetime.now(UTC)
 
         # Create mock repos with +source pattern URLs
         mock_nova_repo = MagicMock()
@@ -341,7 +340,7 @@ class TestDiscoverPackagesFromLaunchpad:
     def test_caches_launchpad_results(self, tmp_path: Path) -> None:
         """Test that Launchpad results are cached to file."""
         cache_file = tmp_path / "launchpad-repos.json"
-        recent = datetime.now(timezone.utc)
+        recent = datetime.now(UTC)
 
         # Create mock repos
         mock_nova_repo = MagicMock()
@@ -419,7 +418,7 @@ class TestDiscoverPackagesFromLaunchpad:
     def test_cache_write_failure_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test cache write errors are ignored."""
         cache_file = tmp_path / "launchpad-repos.json"
-        recent = datetime.now(timezone.utc)
+        recent = datetime.now(UTC)
 
         mock_repo = MagicMock()
         mock_repo.name = "nova"
@@ -448,7 +447,7 @@ class TestDiscoverPackagesFromLaunchpad:
 
     def test_discovers_packages_from_repo_urls(self) -> None:
         """Test package extraction from various repo URL formats."""
-        recent = datetime.now(timezone.utc)
+        recent = datetime.now(UTC)
 
         # Create mock repos with different path formats
         mock_valid_repo = MagicMock()
@@ -689,8 +688,8 @@ class TestCrossReferencePackages:
     def test_identifies_missing_upstream(self, tmp_path: Path) -> None:
         """Test that packages without upstream registry entries are identified."""
         from packastack.planning.package_discovery import (
-            _cross_reference_packages,
             DiscoveryResult,
+            _cross_reference_packages,
         )
 
         # Create a mock releases repo with some deliverables
@@ -741,8 +740,8 @@ class TestCrossReferencePackages:
     def test_identifies_missing_packaging(self, tmp_path: Path) -> None:
         """Test that releases entries without packaging repos are identified."""
         from packastack.planning.package_discovery import (
-            _cross_reference_packages,
             DiscoveryResult,
+            _cross_reference_packages,
         )
 
         # Create releases with more deliverables than we have packages for
@@ -769,8 +768,8 @@ class TestCrossReferencePackages:
     def test_empty_inputs(self, tmp_path: Path) -> None:
         """Test with empty inputs."""
         from packastack.planning.package_discovery import (
-            _cross_reference_packages,
             DiscoveryResult,
+            _cross_reference_packages,
         )
 
         result = DiscoveryResult(packages=[], source="launchpad")
@@ -782,8 +781,8 @@ class TestCrossReferencePackages:
     def test_no_releases_repo(self) -> None:
         """Test with no releases repo path."""
         from packastack.planning.package_discovery import (
-            _cross_reference_packages,
             DiscoveryResult,
+            _cross_reference_packages,
         )
 
         result = DiscoveryResult(packages=["keystone"], source="launchpad")

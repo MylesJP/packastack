@@ -25,7 +25,7 @@ offline tab completion in shell environments.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -106,7 +106,7 @@ def generate_completion_index(
 
         try:
             packages = load_openstack_packages(releases_repo, openstack_target)
-            
+
             for source_pkg, project in packages.items():
                 # Skip if already loaded from registry
                 if project in seen_projects:
@@ -132,7 +132,7 @@ def generate_completion_index(
     ]
 
     return {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": datetime.now(UTC).isoformat(),
         "source_packages": sorted(source_packages),
         "canonical_ids": sorted(canonical_ids),
         "deliverables": sorted(deliverables),

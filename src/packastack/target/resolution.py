@@ -320,7 +320,7 @@ class TargetResolver:
 
                     # Extract canonical from provenance
                     canonical = config.provenance.canonical or f"openstack/{project_key}"
-                    
+
                     # Determine if governed by OpenStack
                     governed = (
                         config.release_source.type.value == "openstack_releases"
@@ -360,7 +360,7 @@ class TargetResolver:
 
             try:
                 packages = load_openstack_packages(self.releases_repo, self.openstack_target)
-                
+
                 for source_pkg, project in packages.items():
                     # Skip if already loaded from registry
                     if project in seen_projects:

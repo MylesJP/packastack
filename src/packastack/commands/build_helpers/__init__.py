@@ -26,15 +26,6 @@ This file re-exports for backward compatibility.
 """
 
 # Re-export from packastack.build for backward compatibility
-from packastack.build.types import (
-    BuildInputs,
-    BuildOutcome,
-    PhaseResult,
-    RegistryResolution,
-    ResolvedTargets,
-    TarballAcquisitionResult,
-    WorkspacePaths,
-)
 from packastack.build.errors import (
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
@@ -64,66 +55,75 @@ from packastack.build.git_helpers import (
     maybe_enable_sphinxdoc,
     no_gpg_sign_enabled,
 )
+from packastack.build.phases import (
+    RegistryResolutionResult,
+    RetirementCheckResult,
+    check_retirement_status,
+    resolve_upstream_registry,
+)
 from packastack.build.tarball import (
-    download_github_release_tarball,
-    download_pypi_tarball,
-    fetch_release_tarball,
-    run_uscan,
     # Backwards compatibility aliases
     _download_github_release_tarball,
     _download_pypi_tarball,
     _fetch_release_tarball,
     _run_uscan,
+    download_github_release_tarball,
+    download_pypi_tarball,
+    fetch_release_tarball,
+    run_uscan,
 )
-from packastack.build.phases import (
-    RetirementCheckResult,
-    RegistryResolutionResult,
-    check_retirement_status,
-    resolve_upstream_registry,
+from packastack.build.types import (
+    BuildInputs,
+    BuildOutcome,
+    PhaseResult,
+    RegistryResolution,
+    ResolvedTargets,
+    TarballAcquisitionResult,
+    WorkspacePaths,
 )
 
 __all__ = [
+    "EXIT_ALL_BUILD_FAILED",
+    "EXIT_BUILD_FAILED",
+    "EXIT_CONFIG_ERROR",
+    "EXIT_CYCLE_DETECTED",
+    "EXIT_DISCOVERY_FAILED",
+    "EXIT_FETCH_FAILED",
+    "EXIT_GRAPH_ERROR",
+    "EXIT_MISSING_PACKAGES",
+    "EXIT_PATCH_FAILED",
+    "EXIT_POLICY_BLOCKED",
+    "EXIT_REGISTRY_ERROR",
+    "EXIT_RESUME_ERROR",
+    "EXIT_RETIRED_PROJECT",
+    # Exit codes
+    "EXIT_SUCCESS",
+    "EXIT_TOOL_MISSING",
     # Types
     "BuildInputs",
     "BuildOutcome",
     "PhaseResult",
     "RegistryResolution",
+    "RegistryResolutionResult",
     "ResolvedTargets",
+    # Phase functions
+    "RetirementCheckResult",
     "TarballAcquisitionResult",
     "WorkspacePaths",
-    # Error helpers
-    "phase_error",
-    "phase_warning",
+    "check_retirement_status",
+    # Tarball helpers
+    "download_github_release_tarball",
+    "download_pypi_tarball",
     # Git helpers
     "ensure_no_merge_paths",
+    "fetch_release_tarball",
     "get_git_author_env",
     "maybe_disable_gpg_sign",
     "maybe_enable_sphinxdoc",
     "no_gpg_sign_enabled",
-    # Tarball helpers
-    "download_github_release_tarball",
-    "download_pypi_tarball",
-    "fetch_release_tarball",
-    "run_uscan",
-    # Phase functions
-    "RetirementCheckResult",
-    "RegistryResolutionResult",
-    "check_retirement_status",
+    # Error helpers
+    "phase_error",
+    "phase_warning",
     "resolve_upstream_registry",
-    # Exit codes
-    "EXIT_SUCCESS",
-    "EXIT_CONFIG_ERROR",
-    "EXIT_TOOL_MISSING",
-    "EXIT_FETCH_FAILED",
-    "EXIT_PATCH_FAILED",
-    "EXIT_MISSING_PACKAGES",
-    "EXIT_CYCLE_DETECTED",
-    "EXIT_BUILD_FAILED",
-    "EXIT_POLICY_BLOCKED",
-    "EXIT_REGISTRY_ERROR",
-    "EXIT_RETIRED_PROJECT",
-    "EXIT_DISCOVERY_FAILED",
-    "EXIT_GRAPH_ERROR",
-    "EXIT_ALL_BUILD_FAILED",
-    "EXIT_RESUME_ERROR",
+    "run_uscan",
 ]

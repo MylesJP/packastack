@@ -23,8 +23,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from packastack.upstream import source as upstream
 
 
@@ -301,7 +299,7 @@ class TestVerifySignature:
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            verified, msg = upstream.verify_signature(tarball, signature)
+            verified, _msg = upstream.verify_signature(tarball, signature)
 
             assert verified is True
 
@@ -851,7 +849,7 @@ class TestCloneUpstreamRepo:
         with patch("git.Repo.clone_from") as mock_clone:
             mock_clone.return_value = MagicMock()
 
-            repo_path, cloned, error = upstream.clone_upstream_repo(
+            _repo_path, cloned, _error = upstream.clone_upstream_repo(
                 project="nova",
                 dest_dir=tmp_path,
                 branch="stable/2024.2",
@@ -1106,7 +1104,7 @@ class TestAcquireUpstreamSnapshot:
                 base_version="29.0.0",
                 branch="stable/2024.2",
             )
-            result = upstream.acquire_upstream_snapshot(
+            upstream.acquire_upstream_snapshot(
                 request=request,
                 work_dir=tmp_path,
                 output_dir=output_dir,
@@ -1141,7 +1139,7 @@ class TestAcquireUpstreamSnapshot:
                 base_version="29.0.0",
                 package_name="python3-nova",
             )
-            result = upstream.acquire_upstream_snapshot(
+            upstream.acquire_upstream_snapshot(
                 request=request,
                 work_dir=tmp_path,
                 output_dir=output_dir,
@@ -1160,7 +1158,7 @@ class TestCloneUpstreamRepoEdgeCases:
         with patch("git.Repo.clone_from") as mock_clone:
             mock_clone.return_value = MagicMock()
 
-            repo_path, cloned, error = upstream.clone_upstream_repo(
+            _repo_path, _cloned, _error = upstream.clone_upstream_repo(
                 project="nova",
                 dest_dir=tmp_path,
                 shallow=True,
@@ -1175,7 +1173,7 @@ class TestCloneUpstreamRepoEdgeCases:
         with patch("git.Repo.clone_from") as mock_clone:
             mock_clone.return_value = MagicMock()
 
-            repo_path, cloned, error = upstream.clone_upstream_repo(
+            _repo_path, _cloned, _error = upstream.clone_upstream_repo(
                 project="nova",
                 dest_dir=tmp_path,
                 shallow=False,
@@ -1200,7 +1198,7 @@ class TestCloneUpstreamRepoEdgeCases:
         with patch("git.Repo") as mock_git_repo:
             mock_git_repo.return_value = mock_repo
 
-            result_path, cloned, error = upstream.clone_upstream_repo(
+            _result_path, _cloned, _error = upstream.clone_upstream_repo(
                 project="nova",
                 dest_dir=tmp_path,
                 branch="stable/2024.2",
@@ -1226,7 +1224,7 @@ class TestCloneUpstreamRepoEdgeCases:
         with patch("git.Repo") as mock_git_repo:
             mock_git_repo.return_value = mock_repo
 
-            result_path, cloned, error = upstream.clone_upstream_repo(
+            result_path, _cloned, error = upstream.clone_upstream_repo(
                 project="nova",
                 dest_dir=tmp_path,
             )
@@ -1311,7 +1309,7 @@ class TestAcquireUpstreamSnapshotEdgeCases:
                 project="keystone",
                 base_version="25.0.0",
             )
-            result = upstream.acquire_upstream_snapshot(
+            upstream.acquire_upstream_snapshot(
                 request=request,
                 work_dir=tmp_path,
                 output_dir=output_dir,
@@ -1403,7 +1401,7 @@ class TestGetGitSnapshotInfoEdgeCases:
                 stdout="abc1234567890abcdef1234567890abcdef123456\n",
             )
 
-            short_sha, full_sha, date_str = upstream.get_git_snapshot_info(tmp_path, "HEAD")
+            short_sha, full_sha, _date_str = upstream.get_git_snapshot_info(tmp_path, "HEAD")
 
             assert short_sha == "abc1234"
             assert full_sha == "abc1234567890abcdef1234567890abcdef123456"
@@ -1480,7 +1478,7 @@ class TestUpstreamVersionFormats:
     def test_generate_tarball_for_lib_package(self, tmp_path: Path) -> None:
         """Test tarball generation for lib-prefixed package."""
         import subprocess as sp
-        
+
         upstream_dir = tmp_path / "upstream"
         upstream_dir.mkdir()
 
@@ -1490,7 +1488,7 @@ class TestUpstreamVersionFormats:
         sp.run(["git", "config", "user.name", "Test"], cwd=upstream_dir, capture_output=True)
         # Disable GPG signing for this repo
         sp.run(["git", "config", "commit.gpgsign", "false"], cwd=upstream_dir, capture_output=True)
-        
+
         (upstream_dir / "setup.py").write_text("# test")
         sp.run(["git", "add", "."], cwd=upstream_dir, capture_output=True)
         # Create initial commit

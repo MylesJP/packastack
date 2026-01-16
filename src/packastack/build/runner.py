@@ -30,7 +30,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -64,7 +64,7 @@ class FailureType(str, Enum):
     TIMEOUT = "timeout"
 
     @classmethod
-    def from_exit_code(cls, exit_code: int) -> "FailureType":
+    def from_exit_code(cls, exit_code: int) -> FailureType:
         """Map exit code to failure type."""
         mapping = {
             1: cls.CONFIG_ERROR,
@@ -114,7 +114,7 @@ class BuildResult:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BuildResult":
+    def from_dict(cls, data: dict[str, Any]) -> BuildResult:
         """Create from dictionary."""
         return cls(
             package=data["package"],
@@ -190,7 +190,7 @@ class BuildState:
         if package not in self.packages:
             self.packages[package] = BuildResult(package, BuildStatus.PENDING)
         self.packages[package].status = BuildStatus.RUNNING
-        self.packages[package].started_at = datetime.now(timezone.utc).isoformat()
+        self.packages[package].started_at = datetime.now(UTC).isoformat()
 
     def mark_complete(self, result: BuildResult) -> None:
         """Record a completed build result."""
@@ -221,7 +221,7 @@ class BuildState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "BuildState":
+    def from_dict(cls, data: dict[str, Any]) -> BuildState:
         """Create from dictionary."""
         state = cls(
             run_id=data["run_id"],
@@ -277,7 +277,7 @@ def create_build_state(
         ubuntu_series=ubuntu_series,
         build_type=build_type,
         build_order=build_order,
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(UTC).isoformat(),
         keep_going=keep_going,
         max_failures=max_failures,
         parallel=parallel,
@@ -332,7 +332,7 @@ class PackageBuildRunner:
         Returns:
             BuildResult with status, exit code, and metadata.
         """
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
 
         # Build command
         cmd = self._build_command(package)
@@ -357,7 +357,7 @@ class PackageBuildRunner:
                     timeout=self.config.timeout,
                 )
 
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(UTC)
             duration = (completed_at - started_at).total_seconds()
 
             if result.returncode == 0:
@@ -386,7 +386,7 @@ class PackageBuildRunner:
                 )
 
         except subprocess.TimeoutExpired:
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(UTC)
             duration = (completed_at - started_at).total_seconds()
             return BuildResult(
                 package=package,
@@ -402,7 +402,7 @@ class PackageBuildRunner:
             )
 
         except Exception as e:
-            completed_at = datetime.now(timezone.utc)
+            completed_at = datetime.now(UTC)
             duration = (completed_at - started_at).total_seconds()
             return BuildResult(
                 package=package,

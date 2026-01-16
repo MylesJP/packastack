@@ -32,8 +32,7 @@ if TYPE_CHECKING:
     from packastack.build.provenance import BuildProvenance
     from packastack.core.context import BuildRequest
     from packastack.core.run import RunContext
-    from packastack.planning.type_selection import BuildType
-    from packastack.upstream.registry import UpstreamsRegistry, ResolvedUpstream
+    from packastack.upstream.registry import ResolvedUpstream, UpstreamsRegistry
 
 
 @dataclass

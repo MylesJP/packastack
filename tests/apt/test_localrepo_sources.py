@@ -20,17 +20,14 @@
 
 from __future__ import annotations
 
-import gzip
 from pathlib import Path
 
-import pytest
-
 from packastack.apt.localrepo import (
-    SourcePackageInfo,
     SourceIndexResult,
+    SourcePackageInfo,
     format_sources_entry,
-    regenerate_source_indexes,
     regenerate_all_indexes,
+    regenerate_source_indexes,
 )
 
 

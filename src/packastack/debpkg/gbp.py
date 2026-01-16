@@ -547,7 +547,7 @@ def check_upstreamed_patches(
             "--reverse",
             str(patch_file),
         ]
-        returncode, _, stderr = run_command(cmd, cwd=repo_path)
+        returncode, _, _stderr = run_command(cmd, cwd=repo_path)
 
         if returncode == 0:
             # Patch can be reverse-applied, suggesting it's in upstream

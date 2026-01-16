@@ -20,13 +20,10 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from packastack.debpkg.control import ParsedDependency
 from packastack.debpkg.dep_sync import SyncResult, VersionBump
-from packastack.planning.build_manifest import BuildManifest, PackageVersion
+from packastack.planning.build_manifest import BuildManifest
 from packastack.planning.type_selection import BuildType, CycleStage
 from packastack.reports.dep_sync import (
     DependencySyncReport,

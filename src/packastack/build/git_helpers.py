@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # For type checking only: run_command returns a tuple in packastack.debpkg.gbp
-    from packastack.debpkg.gbp import run_command as _run_command_type
+    pass
 
 @dataclass
 class CommandResult:
@@ -231,7 +231,7 @@ def ensure_no_merge_paths(repo_path: Path, paths: list[str]) -> bool:
 
     # Always protect the .gitattributes file itself to avoid it being
     # overwritten or removed during merges.
-    full_paths = list(paths) + [".gitattributes"]
+    full_paths = [*list(paths), ".gitattributes"]
 
     for path in full_paths:
         entry = f"{path} merge=ours"
@@ -301,7 +301,7 @@ def git_commit(
     extra_lines: list[str] | None = None,
     add_all: bool = False,
     debug: bool = False,
-) -> "CommandResult":
+) -> CommandResult:
     """Execute a git commit with standardized options.
 
     This helper combines common git commit patterns:
@@ -344,7 +344,7 @@ def git_commit(
 
     # Stage files if provided
     if files:
-        add_cmd = ["git", "add"] + files
+        add_cmd = ["git", "add", *files]
         add_rc, add_stdout, add_stderr = run_command(add_cmd, cwd=repo_path)
         if add_rc != 0:
             return CommandResult(

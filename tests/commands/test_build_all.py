@@ -12,27 +12,25 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from packastack.apt.packages import PackageIndex, BinaryPackage
+from packastack.apt.packages import BinaryPackage, PackageIndex
 from packastack.commands.build import (
-    EXIT_SUCCESS,
     EXIT_ALL_BUILD_FAILED,
     EXIT_DISCOVERY_FAILED,
-    EXIT_RESUME_ERROR,
     EXIT_GRAPH_ERROR,
+    EXIT_RESUME_ERROR,
+    EXIT_SUCCESS,
     OPTIONAL_DEPS_FOR_CYCLE,
     _build_dependency_graph,
     _build_upstream_versions_from_packaging,
     _filter_retired_packages,
-    _run_build_all,
+    _generate_reports,
+    _get_parallel_batches,
     _run_parallel_builds,
     _run_sequential_builds,
     _run_single_build,
-    _generate_reports,
-    _get_parallel_batches,
     run_build_all,
 )
 from packastack.core.context import BuildAllRequest
@@ -43,9 +41,9 @@ from packastack.planning.build_all_state import (
     PackageStatus,
     create_initial_state,
 )
+from packastack.planning.cycle_suggestions import CycleEdgeSuggestion
 from packastack.planning.graph import DependencyGraph
 from packastack.planning.package_discovery import DiscoveryResult
-from packastack.planning.cycle_suggestions import CycleEdgeSuggestion
 
 
 def _call_run_build_all(
@@ -70,7 +68,7 @@ def _call_run_build_all(
     dry_run: bool = False,
 ) -> int:
     """Helper to call _run_build_all with a BuildAllRequest.
-    
+
     This bridges the old kwarg-style test calls to the new BuildAllRequest-based API.
     """
     # Convert old-style release/snapshot bools to new build_type string
@@ -132,7 +130,7 @@ Package: nova
 Architecture: all
 """)
 
-        graph, missing = _build_dependency_graph(
+        graph, _missing = _build_dependency_graph(
             packages=["nova"],
             cache_dir=tmp_path,
             pkg_index=PackageIndex(),
@@ -164,7 +162,7 @@ Package: nova
 Architecture: all
 """)
 
-        graph, missing = _build_dependency_graph(
+        graph, _missing = _build_dependency_graph(
             packages=["oslo.config", "nova"],
             cache_dir=tmp_path,
             pkg_index=PackageIndex(),
@@ -224,7 +222,7 @@ Package: nova
 Architecture: all
 """)
 
-        graph, missing = _build_dependency_graph(
+        _graph, missing = _build_dependency_graph(
             packages=["nova"],
             cache_dir=tmp_path,
             pkg_index=PackageIndex(),
@@ -1387,8 +1385,8 @@ class TestRunBuildAllExecution:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should execute builds, generate reports, and write summary."""
-        import packastack.build.all_runner as all_runner
         import packastack.build.all_helpers as all_helpers
+        import packastack.build.all_runner as all_runner
 
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
@@ -1624,7 +1622,7 @@ class TestBuildAllCli:
         class DummyRun:
             run_id = "run-1"
 
-            def __enter__(self) -> "DummyRun":
+            def __enter__(self) -> DummyRun:
                 return self
 
             def __exit__(self, _exc_type, _exc, _tb) -> None:

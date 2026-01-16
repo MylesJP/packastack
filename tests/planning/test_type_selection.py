@@ -25,6 +25,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from packastack.debpkg.watch import (
+    DetectedWatchMode,
+    UscanResult,
+    UscanStatus,
+    WatchParseResult,
+)
 from packastack.planning.type_selection import (
     BuildType,
     CycleStage,
@@ -44,12 +50,6 @@ from packastack.planning.type_selection import (
     infer_deliverable_kind,
     select_build_type,
     select_build_types_for_packages,
-)
-from packastack.debpkg.watch import (
-    DetectedWatchMode,
-    UscanResult,
-    UscanStatus,
-    WatchParseResult,
 )
 from packastack.upstream.retirement import (
     MappingConfidence,
@@ -687,7 +687,7 @@ class TestFindNewAndDefunctPackages:
         ) as mock_load:
             mock_load.return_value = {"nova": "nova", "glance": "glance"}
             local = {"nova", "glance", "new-pkg"}
-            new, defunct = find_new_and_defunct_packages(tmp_path, "dalmatian", local)
+            new, _defunct = find_new_and_defunct_packages(tmp_path, "dalmatian", local)
             assert "new-pkg" in new
             assert "nova" not in new
 
@@ -702,7 +702,7 @@ class TestFindNewAndDefunctPackages:
                 "old-pkg": "old-pkg",
             }
             local = {"nova", "glance"}
-            new, defunct = find_new_and_defunct_packages(tmp_path, "dalmatian", local)
+            _new, defunct = find_new_and_defunct_packages(tmp_path, "dalmatian", local)
             assert "old-pkg" in defunct
             assert "nova" not in defunct
 

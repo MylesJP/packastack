@@ -26,13 +26,13 @@ and unresolved packages.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from packastack.debpkg.dep_sync import SyncResult, VersionBump
+    from packastack.debpkg.dep_sync import SyncResult
     from packastack.planning.build_manifest import BuildManifest
 
 
@@ -87,7 +87,7 @@ class DependencySyncReport:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -343,7 +343,7 @@ class ManifestReport:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -379,7 +379,7 @@ def create_manifest_report(manifest: BuildManifest) -> ManifestReport:
         build_order=list(manifest.build_order),
     )
 
-    for name, pkg in manifest.packages.items():
+    for _name, pkg in manifest.packages.items():
         report.packages.append({
             "source_package": pkg.source_package,
             "deliverable": pkg.deliverable,

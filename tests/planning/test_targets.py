@@ -2,8 +2,8 @@ import pytest
 
 from packastack.planning.targets import (
     MatchMode,
-    TargetIdentity,
     TargetExpr,
+    TargetIdentity,
     TargetParseError,
     TargetScope,
     detect_shell_expansion,
@@ -99,7 +99,7 @@ def test_resolve_contains_all_matches(sample_identities):
 
     expr = parse_target_expr("~nov")
     matches, mode = resolve_targets(
-        expr, sample_identities + [extra], allow_all_matches=True
+        expr, [*sample_identities, extra], allow_all_matches=True
     )
     assert [m.source_package for m in matches] == [
         "nova",

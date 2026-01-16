@@ -39,7 +39,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,7 +47,6 @@ from packastack.apt.localrepo import ensure_repo_initialized
 from packastack.build.collector import (
     ArtifactReport,
     CollectedFile,
-    CollectionResult,
     collect_artifacts,
     create_primary_log_symlink,
 )
@@ -248,7 +247,7 @@ def run_sbuild(config: SbuildConfig, timeout: int = 3600) -> SbuildResult:
 
     cmd = build_sbuild_command(config)
     start_time = time.time()
-    start_timestamp = datetime.now(timezone.utc).isoformat()
+    start_timestamp = datetime.now(UTC).isoformat()
 
     try:
         # Run sbuild and capture output to files
@@ -320,7 +319,7 @@ def run_sbuild(config: SbuildConfig, timeout: int = 3600) -> SbuildResult:
             overall_success = False
             validation_msg = f"sbuild exited with code {exit_code}"
 
-        end_timestamp = datetime.now(timezone.utc).isoformat()
+        end_timestamp = datetime.now(UTC).isoformat()
 
         # Generate artifact report
         report_dir = log_dir.parent / "reports" if log_dir.name == "logs" else log_dir / "reports"

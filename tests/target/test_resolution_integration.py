@@ -8,10 +8,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from packastack.target.resolution import (
     MatchMode,
     OriginSource,
@@ -51,7 +47,7 @@ class TestResolutionIntegration:
         # Prefix match
         expr = parse_target_expr("^gn")
         # Ensure deterministic universe: patch resolver to return a known identity
-        from packastack.target.resolution import TargetIdentity, TargetKind, OriginSource
+        from packastack.target.resolution import OriginSource, TargetIdentity, TargetKind
 
         resolver._get_search_universe = lambda scope: [
             TargetIdentity(
@@ -70,11 +66,11 @@ class TestResolutionIntegration:
         # Should find gnocchi: either as a single identity or in candidates
         assert result.identity is not None or len(result.candidates) > 0
         if result.candidates:
-            canonicals = [c.canonical_upstream for c in result.candidates]
+            [c.canonical_upstream for c in result.candidates]
         elif result.identity:
-            canonicals = [result.identity.canonical_upstream]
+            pass
         else:
-            canonicals = []
+            pass
         # gnocchi should be in results if it matches
         assert not result.is_ambiguous
 
@@ -96,7 +92,7 @@ class TestResolutionIntegration:
     def test_ambiguous_resolution_workflow(self) -> None:
         """Test ambiguous resolution requiring --all-matches."""
         # Create test identities
-        identities = [
+        [
             TargetIdentity(
                 source_package="python-glanceclient",
                 canonical_upstream="openstack/python-glanceclient",
@@ -126,7 +122,7 @@ class TestResolutionIntegration:
 
         # Scoped canonical search
         expr = parse_target_expr("canonical:gnocchixyz/gnocchi")
-        result = resolver.resolve(expr)
+        resolver.resolve(expr)
 
         # Should scope search to canonical field
         assert expr.scope == Scope.CANONICAL
@@ -134,7 +130,7 @@ class TestResolutionIntegration:
     def test_tier_resolution_order(self) -> None:
         """Test that resolution respects tier ordering."""
         # Create identities with overlapping names
-        identities = [
+        [
             # Tier 1: exact source package
             TargetIdentity(
                 source_package="glance",
@@ -176,32 +172,32 @@ class TestResolutionTiers:
 
     def test_tier1_exact_source_package(self) -> None:
         """Test tier 1: exact source package match."""
-        resolver = TargetResolver()
-        expr = parse_target_expr("glance")
+        TargetResolver()
+        parse_target_expr("glance")
 
         # Would match exact source package first
         # (requires mocked universe with test data)
 
     def test_tier2_exact_canonical(self) -> None:
         """Test tier 2: exact canonical upstream match."""
-        resolver = TargetResolver()
-        expr = parse_target_expr("openstack/glance")
+        TargetResolver()
+        parse_target_expr("openstack/glance")
 
         # Would match canonical if no source package match
         # (requires mocked universe)
 
     def test_tier5_prefix_match(self) -> None:
         """Test tier 5: prefix matching."""
-        resolver = TargetResolver()
-        expr = parse_target_expr("^glan")
+        TargetResolver()
+        parse_target_expr("^glan")
 
         # Would do prefix matching after exact attempts fail
         # (requires mocked universe)
 
     def test_tier6_contains_match(self) -> None:
         """Test tier 6: contains matching."""
-        resolver = TargetResolver()
-        expr = parse_target_expr("~client")
+        TargetResolver()
+        parse_target_expr("~client")
 
         # Would do contains matching
         # (requires mocked universe)
@@ -220,7 +216,7 @@ class TestAllMatchesFlag:
         assert not result.is_ambiguous
 
         # With all_matches=False (default), is_ambiguous if >1
-        result_ambig = resolver.resolve(expr, all_matches=False)
+        resolver.resolve(expr, all_matches=False)
         # Would be ambiguous if multiple matches exist
 
     def test_all_matches_exact_no_effect(self) -> None:
@@ -229,5 +225,5 @@ class TestAllMatchesFlag:
         expr = parse_target_expr("glance")
 
         # Exact match ignores all_matches flag
-        result = resolver.resolve(expr, all_matches=True)
+        resolver.resolve(expr, all_matches=True)
         # Should return single match or none

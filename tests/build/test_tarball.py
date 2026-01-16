@@ -7,19 +7,18 @@
 """Tests for the build_helpers.tarball module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
-import pytest
+from unittest.mock import MagicMock, patch
 
 from packastack.build.tarball import (
-    run_uscan,
-    download_pypi_tarball,
-    download_github_release_tarball,
-    fetch_release_tarball,
+    _download_github_release_tarball,
+    _download_pypi_tarball,
+    _fetch_release_tarball,
     # Backwards compatibility aliases
     _run_uscan,
-    _download_pypi_tarball,
-    _download_github_release_tarball,
-    _fetch_release_tarball,
+    download_github_release_tarball,
+    download_pypi_tarball,
+    fetch_release_tarball,
+    run_uscan,
 )
 
 
@@ -59,7 +58,7 @@ class TestRunUscan:
             "packastack.build.tarball.run_command"
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
-            success, path, err = run_uscan(tmp_path)
+            success, path, _err = run_uscan(tmp_path)
 
         assert success is True
         assert path == new_tarball
@@ -122,7 +121,7 @@ class TestRunUscan:
         ) as mock_cmd:
             mock_cmd.return_value = (0, "", "")
             # Pass version - should be ignored
-            success, path, err = run_uscan(tmp_path, version="2.0")
+            success, _path, _err = run_uscan(tmp_path, version="2.0")
 
         # Version doesn't affect behavior
         assert success is True
@@ -155,7 +154,7 @@ class TestDownloadPypiTarball:
             "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
-            ok, path, err = download_pypi_tarball("openstack/nova", "1.0", tmp_path)
+            ok, _path, _err = download_pypi_tarball("openstack/nova", "1.0", tmp_path)
 
         assert ok is True
         # Slash should be replaced with dash
@@ -204,7 +203,7 @@ class TestDownloadGithubReleaseTarball:
             "packastack.build.tarball.download_file"
         ) as mock_dl:
             mock_dl.return_value = (True, "")
-            ok, path, err = download_github_release_tarball(
+            _ok, _path, _err = download_github_release_tarball(
                 "https://github.com/openstack/nova", "v2.0.0", tmp_path
             )
 
@@ -272,7 +271,7 @@ class TestFetchReleaseTarball:
         ) as mock_cache:
             mock_cache.return_value = (cached, cached_meta)
             with patch("packastack.build.tarball.activity"):
-                path, sig_verified, sig_warn = fetch_release_tarball(
+                path, sig_verified, _sig_warn = fetch_release_tarball(
                     upstream=upstream,
                     upstream_config=upstream_config,
                     pkg_repo=tmp_path,
@@ -302,7 +301,7 @@ class TestFetchReleaseTarball:
             "packastack.build.tarball.find_cached_tarball"
         ) as mock_cache:
             mock_cache.return_value = (None, None)
-            path, sig_verified, sig_warn = fetch_release_tarball(
+            path, _sig_verified, sig_warn = fetch_release_tarball(
                 upstream=upstream,
                 upstream_config=upstream_config,
                 pkg_repo=tmp_path,
@@ -338,7 +337,7 @@ class TestFetchReleaseTarball:
                 with patch(
                     "packastack.build.tarball.cache_tarball"
                 ):
-                    path, sig_verified, sig_warn = fetch_release_tarball(
+                    path, _sig_verified, _sig_warn = fetch_release_tarball(
                         upstream=upstream,
                         upstream_config=upstream_config,
                         pkg_repo=tmp_path,
@@ -385,7 +384,7 @@ class TestFetchReleaseTarball:
                     with patch(
                         "packastack.build.tarball.cache_tarball"
                     ):
-                        path, sig_verified, sig_warn = fetch_release_tarball(
+                        path, _sig_verified, _sig_warn = fetch_release_tarball(
                             upstream=upstream,
                             upstream_config=upstream_config,
                             pkg_repo=tmp_path,
@@ -429,7 +428,7 @@ class TestFetchReleaseTarball:
                     with patch(
                         "packastack.build.tarball.cache_tarball"
                     ):
-                        path, sig_verified, sig_warn = fetch_release_tarball(
+                        path, _sig_verified, _sig_warn = fetch_release_tarball(
                             upstream=upstream,
                             upstream_config=upstream_config,
                             pkg_repo=tmp_path,
@@ -460,7 +459,7 @@ class TestFetchReleaseTarball:
         ) as mock_uscan:
             mock_uscan.return_value = (False, None, "uscan failed")
             with patch("packastack.build.tarball.activity"):
-                path, sig_verified, sig_warn = fetch_release_tarball(
+                path, _sig_verified, sig_warn = fetch_release_tarball(
                     upstream=upstream,
                     upstream_config=upstream_config,
                     pkg_repo=tmp_path,

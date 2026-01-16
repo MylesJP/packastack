@@ -41,10 +41,16 @@ from packastack.build import (
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
+    EXIT_CYCLE_DETECTED,
     EXIT_DISCOVERY_FAILED,
+    EXIT_FETCH_FAILED,
     EXIT_GRAPH_ERROR,
+    EXIT_MISSING_PACKAGES,
+    EXIT_PATCH_FAILED,
+    EXIT_POLICY_BLOCKED,
     EXIT_RESUME_ERROR,
     EXIT_SUCCESS,
+    EXIT_TOOL_MISSING,
 )
 from packastack.build.all_helpers import (
     build_dependency_graph,

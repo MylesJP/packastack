@@ -1,9 +1,8 @@
-from pathlib import Path
 
 from packastack.target.completion import (
     get_completions,
-    save_completion_index,
     load_completion_index,
+    save_completion_index,
 )
 
 
@@ -59,7 +58,10 @@ def test_save_and_load_completion_index(tmp_path):
 
 def test_get_completion_cache_path_and_missing_index(monkeypatch, tmp_path):
     # Ensure get_completion_cache_path creates directories under home
-    from packastack.target.completion import get_completion_cache_path, get_completions, load_completion_index
+    from packastack.target.completion import (
+        get_completion_cache_path,
+        get_completions,
+    )
 
     monkeypatch.setattr("packastack.target.completion.Path.home", lambda: tmp_path)
     p = get_completion_cache_path()
@@ -129,7 +131,7 @@ def test_get_completions_empty_prefix_all_matches():
     out = get_completions("", index=idx)
     # scopes and at least one package should be present
     assert "source:" in out
-    assert any(p in out for p in idx["source_packages"]) or any(c in out for c in idx["canonical_ids"]) or any(d in out for d in idx["deliverables"]) or any(a in out for a in idx["aliases"]) 
+    assert any(p in out for p in idx["source_packages"]) or any(c in out for c in idx["canonical_ids"]) or any(d in out for d in idx["deliverables"]) or any(a in out for a in idx["aliases"])
 
     # scoped empty-ident should return scoped entries
     out2 = get_completions("source:", index=idx)
@@ -167,7 +169,7 @@ def test_scoped_case_insensitive():
 def test_save_and_load_default_path(monkeypatch, tmp_path):
     # Ensure save/load with default path uses get_completion_cache_path
     monkeypatch.setattr("packastack.target.completion.Path.home", lambda: tmp_path)
-    from packastack.target.completion import save_completion_index, load_completion_index
+    from packastack.target.completion import load_completion_index, save_completion_index
 
     idx = make_sample_index()
     # Save with default path

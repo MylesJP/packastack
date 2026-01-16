@@ -34,7 +34,7 @@ import re
 import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -124,7 +124,7 @@ class UscanResult:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UscanResult":
+    def from_dict(cls, data: dict[str, Any]) -> UscanResult:
         """Create from dictionary."""
         return cls(
             success=data.get("success", False),
@@ -158,7 +158,7 @@ class UscanCacheEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "UscanCacheEntry":
+    def from_dict(cls, data: dict[str, Any]) -> UscanCacheEntry:
         """Create from dictionary."""
         return cls(
             source_package=data["source_package"],
@@ -271,24 +271,24 @@ def fix_oslo_watch_pattern(watch_path: Path, project_name: str) -> bool:
     )
     if already_updated:
         return False
-    
+
     # For watch version 4, we need to update:
     # 1. The domain from openstack.org to opendev.org
     # 2. The filename pattern to accept both . and _ with regex character class
     # Note: The URL directory path keeps dots (that's how opendev.org structures it)
-    
+
     modified = False
     lines = content.splitlines(keepends=True)
     updated_lines = []
-    
+
     for line in lines:
         updated_line = line
-        
+
         # Skip comments and version lines
         if line.strip().startswith("#") or line.strip().startswith("version="):
             updated_lines.append(updated_line)
             continue
-        
+
         # Fix domain name openstack.org -> opendev.org
         # Also add /openstack/ path if missing (new URL structure)
         if "tarballs.openstack.org" in line:
@@ -298,7 +298,7 @@ def fix_oslo_watch_pattern(watch_path: Path, project_name: str) -> bool:
             # Add /openstack/ path if using opendev.org but missing the path
             updated_line = updated_line.replace("tarballs.opendev.org/", "tarballs.opendev.org/openstack/")
             modified = True
-        
+
         # Check if this line contains the project name for pattern update
         if project_name in updated_line:
             # Split to find URL and filename pattern
@@ -306,7 +306,7 @@ def fix_oslo_watch_pattern(watch_path: Path, project_name: str) -> bool:
             if len(parts) >= 2:
                 # Last part is usually the filename pattern
                 filename_pattern = parts[-1]
-                
+
                 # Update filename pattern to accept both . and _
                 # Only modify the pattern part, not the URL
                 if project_name in filename_pattern:
@@ -317,9 +317,9 @@ def fix_oslo_watch_pattern(watch_path: Path, project_name: str) -> bool:
                     if not updated_line.endswith("\n") and line.endswith("\n"):
                         updated_line += "\n"
                     modified = True
-        
+
         updated_lines.append(updated_line)
-    
+
     if not modified:
         return False
 
@@ -527,11 +527,7 @@ def has_upstream_signing_key(debian_dir: Path) -> bool:
         "upstream/signing-key.pgp",
     ]
 
-    for pattern in key_patterns:
-        if (debian_dir / pattern).exists():
-            return True
-
-    return False
+    return any((debian_dir / pattern).exists() for pattern in key_patterns)
 
 
 def remove_pgp_options_from_watch(watch_path: Path) -> bool:
@@ -651,7 +647,7 @@ def parse_dehs_output(dehs_xml: str) -> UscanResult:
         root = ET.fromstring(dehs_xml)
 
         # Extract fields
-        package = _get_xml_text(root, "package", "")
+        _get_xml_text(root, "package", "")
         debian_uversion = _get_xml_text(root, "debian-uversion", "")
         debian_mangled = _get_xml_text(root, "debian-mangled-uversion", "")
         upstream_version = _get_xml_text(root, "upstream-version", "")
@@ -902,7 +898,7 @@ def cache_uscan_result(
     cache[source_package] = UscanCacheEntry(
         source_package=source_package,
         result=result,
-        cached_at_utc=datetime.now(timezone.utc).isoformat(),
+        cached_at_utc=datetime.now(UTC).isoformat(),
         packaging_repo_path=packaging_repo_path,
     )
 
@@ -923,7 +919,7 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
         True if signing key was updated or removed, False otherwise.
     """
     signing_key_path = pkg_repo / "debian" / "upstream" / "signing-key.asc"
-    
+
     # For snapshot builds, remove the signing key if it exists
     if is_snapshot:
         if signing_key_path.exists():
@@ -933,7 +929,7 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
             except OSError:
                 return False
         return False
-    
+
     # For release/milestone builds, update the signing key
     index_path = releases_repo / "doc" / "source" / "index.rst"
     if not index_path.exists():
@@ -949,10 +945,10 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     # * 2025-10-06..present (2026.1/Gazpacho Cycle key):
     #   `key 0x<keyid>`_
     # We look for the "present" line (current key) or the specific series
-    
+
     # Normalize series for matching (handle both "2026.1" and "gazpacho" forms)
     series_lower = series.lower()
-    
+
     key_id = None
     lines = content.splitlines()
     for i, line in enumerate(lines):
@@ -966,7 +962,7 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
                     break
             if key_id:
                 break
-    
+
     if not key_id:
         return False
 
@@ -977,13 +973,13 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     if not key_file_path.exists():
         # Try without underscore prefix
         key_file_path = releases_repo / "doc" / "source" / "static" / f"{key_id}.txt"
-    
+
     if not key_file_path.exists():
         return False
 
     # Copy the key file to debian/upstream/signing-key.asc
     signing_key_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     try:
         key_content = key_file_path.read_text(encoding="utf-8", errors="replace")
         signing_key_path.write_text(key_content, encoding="utf-8")

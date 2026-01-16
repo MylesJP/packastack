@@ -5,7 +5,6 @@ from typer.testing import CliRunner
 import packastack.commands.explain as explain_module
 from packastack.cli import app
 
-
 runner = CliRunner()
 
 

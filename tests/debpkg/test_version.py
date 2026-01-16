@@ -8,10 +8,7 @@
 
 from __future__ import annotations
 
-import pytest
-
 from packastack.debpkg.version import (
-    ParsedVersion,
     compare_versions,
     extract_upstream_version,
     format_version_constraint,
@@ -147,6 +144,7 @@ class TestParsedVersionComparison:
     def test_fallback_comparison_without_debian_version(self) -> None:
         """Test fallback comparison when DebianVersion is not available."""
         from unittest.mock import patch
+
         import packastack.debpkg.version as version_module
 
         v1 = parse_debian_version("1.0.0-1")
@@ -206,6 +204,7 @@ class TestCompareVersions:
     def test_fallback_without_debian_version(self) -> None:
         """Test fallback comparison when DebianVersion is not available."""
         from unittest.mock import patch
+
         import packastack.debpkg.version as version_module
 
         # Temporarily disable DebianVersion

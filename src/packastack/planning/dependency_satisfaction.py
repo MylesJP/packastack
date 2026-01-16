@@ -11,8 +11,8 @@ in the target development series and the previous LTS (cloud-archive base).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from packastack.apt.packages import PackageIndex, version_satisfies
 from packastack.debpkg.control import ParsedDependency
@@ -114,7 +114,7 @@ def _evaluate_single(
 ) -> SeriesDepStatus:
     """Evaluate dependency with alternatives against a single index."""
 
-    candidates: list[ParsedDependency] = [dep] + list(dep.alternatives)
+    candidates: list[ParsedDependency] = [dep, *list(dep.alternatives)]
     first_found: SeriesDepStatus | None = None
     for candidate in candidates:
         status = _status_for_dep(candidate, index)

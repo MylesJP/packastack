@@ -27,7 +27,7 @@ from __future__ import annotations
 import html
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -147,7 +147,7 @@ class WatchResolutionReport:
 
 
 def build_watch_resolution_report(
-    type_report: "TypeSelectionReport",
+    type_report: TypeSelectionReport,
 ) -> WatchResolutionReport:
     """Build a watch resolution report from a type selection report.
 
@@ -161,7 +161,7 @@ def build_watch_resolution_report(
         run_id=type_report.run_id,
         target=type_report.target,
         ubuntu_series=type_report.ubuntu_series,
-        generated_at_utc=datetime.now(timezone.utc).isoformat(),
+        generated_at_utc=datetime.now(UTC).isoformat(),
     )
 
     for pkg in type_report.packages:
@@ -532,7 +532,7 @@ def render_html(report: WatchResolutionReport, output_path: Path) -> Path:
 
 
 def write_watch_resolution_reports(
-    type_report: "TypeSelectionReport",
+    type_report: TypeSelectionReport,
     reports_dir: Path,
 ) -> dict[str, Path]:
     """Write both JSON and HTML watch resolution reports.

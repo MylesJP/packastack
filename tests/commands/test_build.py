@@ -10,26 +10,25 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from packastack.build import single_build as single_build_module
+from packastack.build import tarball as tarball_module
 from packastack.commands import build
 from packastack.commands import plan as plan_module
 from packastack.commands.plan import ResolvedTarget
-from packastack.build import tarball as tarball_module
-from packastack.build import single_build as single_build_module
 from packastack.planning.type_selection import BuildType
 from packastack.upstream.registry import (
     ProjectConfig,
     ReleaseSourceConfig,
     ReleaseSourceType,
-    ResolvedUpstream,
     ResolutionSource,
-    SignaturesConfig,
+    ResolvedUpstream,
     SignatureMode,
+    SignaturesConfig,
     TarballConfig,
     TarballMethod,
     UpstreamConfig,
@@ -91,10 +90,10 @@ def _make_resolved_target(pkg: str, upstream: str | None = None, source: str = "
 
 def _make_plan_result(packages: list[str] | None = None):
     """Create a mock PlanResult for testing.
-    
+
     Args:
         packages: List of packages in build/upload order. Defaults to ["nova"].
-    
+
     Returns:
         A PlanResult with the given packages in build_order and upload_order.
     """
@@ -139,7 +138,7 @@ def _call_run_build(
     no_cleanup: bool = False,
 ) -> int:
     """Helper to call _run_build with a BuildRequest.
-    
+
     This bridges the old kwarg-style test calls to the new BuildRequest-based API.
     """
     from packastack.core.context import BuildRequest
@@ -203,7 +202,7 @@ class TestResolveBuildTypeFromCli:
 
     def test_case_insensitive(self) -> None:
         """Test type is case insensitive."""
-        result, milestone = build._resolve_build_type_from_cli("RELEASE", "")
+        result, _milestone = build._resolve_build_type_from_cli("RELEASE", "")
         assert result == "release"
 
     def test_invalid_type_raises(self) -> None:
@@ -337,8 +336,8 @@ class TestRunBuildPhases:
         mock_index.packages = {}
         mock_tool_result = MagicMock()
         mock_tool_result.is_complete.return_value = True
-        
-        # Create a valid PlanResult  
+
+        # Create a valid PlanResult
         from packastack.planning.graph import PlanResult
         mock_plan_result = PlanResult(
             build_order=["nova"],
@@ -470,7 +469,7 @@ class TestRunBuildPhases:
         self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock
     ) -> None:
         """Test auto build type with release available uses release without policy block.
-        
+
         This is a regression test for the bug where `auto` build type was blocked
         by snapshot eligibility checks before resolving to RELEASE.
         """
@@ -480,7 +479,7 @@ class TestRunBuildPhases:
         (pkg_dir / "control").touch()
 
         mock_registry = _create_mock_registry("nova")
-        
+
         # Mock auto resolution to return RELEASE
         from packastack.planning.type_selection import BuildType
 
@@ -568,7 +567,7 @@ class TestRunBuildPhases:
         self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock
     ) -> None:
         """Test cloud archive index is loaded when specified.
-        
+
         Note: Cloud archive loading now happens in run_plan_for_package.
         This test verifies that validate_plan_only mode returns successfully
         when a cloud_archive is specified. The actual cloud archive loading
@@ -688,7 +687,7 @@ class TestFetchPhase:
             )
 
         assert result == build.EXIT_FETCH_FAILED
-        
+
 class TestReleaseTarballFetch:
     """Tests for release tarball fetching order."""
 
@@ -2560,16 +2559,16 @@ class TestLocalRepoPublishingIntegration:
             mock_publish_result.success = True
             mock_publish_result.published_paths = []
             mock_publish_result.error = ""
-            mock_publish = stack.enter_context(
+            stack.enter_context(
                 patch("packastack.commands.build.localrepo.publish_artifacts", return_value=mock_publish_result)
             )
-            
+
             mock_index_result = MagicMock()
             mock_index_result.success = True
             mock_index_result.package_count = 0
             mock_index_result.packages_file = None
             mock_index_result.error = ""
-            mock_regen = stack.enter_context(
+            stack.enter_context(
                 patch("packastack.commands.build.localrepo.regenerate_indexes", return_value=mock_index_result)
             )
 
@@ -2677,7 +2676,7 @@ class TestLocalRepoPublishingIntegration:
             mock_publish = stack.enter_context(
                 patch("packastack.commands.build.localrepo.publish_artifacts", return_value=mock_publish_result)
             )
-            mock_regen = stack.enter_context(
+            stack.enter_context(
                 patch("packastack.commands.build.localrepo.regenerate_indexes")
             )
 
