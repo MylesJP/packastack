@@ -2079,11 +2079,21 @@ def import_and_patch(
     # Look up Launchpad bug from config
     lp_bug = None
     if ctx.cfg:
+        from packastack.upstream.releases import load_project_releases
+
         lp_bugs = ctx.cfg.get("launchpad_bugs", {})
         # Try to find bug for this series and build type
         build_type_str = ctx.build_type.value if ctx.build_type else "release"
-        # Check for special client library build type
-        if build_type_str == "release" and ("client" in ctx.package.lower() or ctx.package.startswith("python-")):
+
+        # Check if this is a library project from openstack-releases registry
+        is_library = False
+        releases_repo = ctx.paths.get("openstack_releases_repo")
+        if releases_repo:
+            proj_info = load_project_releases(releases_repo, ctx.openstack_target, ctx.package)
+            if proj_info:
+                is_library = proj_info.is_library()
+
+        if build_type_str == "release" and is_library:
             # Try release-client first, then fall back to release
             key = f"{ctx.openstack_target}:release-client"
             lp_bug = lp_bugs.get(key)
