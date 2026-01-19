@@ -42,8 +42,8 @@ from packastack.commands.plan import (
     _resolve_package_targets,
     _source_package_to_deliverable,
 )
-from packastack.planning.graph_builder import SOFT_DEPENDENCY_EXCLUSIONS
 from packastack.planning.graph import DependencyGraph
+from packastack.planning.graph_builder import SOFT_DEPENDENCY_EXCLUSIONS
 
 if TYPE_CHECKING:
     pass
