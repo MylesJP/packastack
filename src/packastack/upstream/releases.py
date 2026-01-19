@@ -73,7 +73,7 @@ class ProjectRelease:
 
     def is_library(self) -> bool:
         """Check if this is a library project."""
-        return self.type == "library"
+        return self.type in ("library", "client-library")
 
     def has_releases(self) -> bool:
         """Check if this project has any releases."""

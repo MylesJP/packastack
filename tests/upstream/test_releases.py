@@ -196,8 +196,10 @@ class TestProjectRelease:
 
     def test_is_library(self) -> None:
         lib = ProjectRelease(name="oslo.config", type="library")
+        client_lib = ProjectRelease(name="python-neutronclient", type="client-library")
         service = ProjectRelease(name="nova", type="service")
         assert lib.is_library() is True
+        assert client_lib.is_library() is True
         assert service.is_library() is False
 
     def test_has_releases(self) -> None:
