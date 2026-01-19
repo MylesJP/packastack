@@ -116,6 +116,7 @@ def generate_chroot_setup_commands(local_repo_root: Path) -> list[str]:
     2. Bind-mount the host's local repo into the chroot
     3. Write apt sources list entry for the local repo
     4. Run apt-get update to refresh package lists
+    5. Install software-properties-common and add PPA for Python 3.14
 
     Args:
         local_repo_root: Host path to the PackaStack local APT repository.
@@ -131,6 +132,8 @@ def generate_chroot_setup_commands(local_repo_root: Path) -> list[str]:
         f"mount -o remount,ro,bind {CHROOT_REPO_MOUNT}",
         f'echo "deb [trusted=yes] file:{CHROOT_REPO_MOUNT} local main" > {CHROOT_SOURCES_LIST}',
         "apt-get update -o Dir::Etc::sourcelist=" + CHROOT_SOURCES_LIST + " -o Dir::Etc::sourceparts=-",
+        "apt-get -qy install software-properties-common",
+        "add-apt-repository -y ppa:pythoneers/python3.14-default-fixes",
     ]
 
     return commands
