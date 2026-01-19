@@ -2100,6 +2100,10 @@ def import_and_patch(
         if not lp_bug:
             key = f"{ctx.openstack_target}:{build_type_str}"
             lp_bug = lp_bugs.get(key)
+        # For snapshot builds, fall back to milestone bug if no snapshot-specific bug
+        if not lp_bug and build_type_str == "snapshot":
+            key = f"{ctx.openstack_target}:milestone"
+            lp_bug = lp_bugs.get(key)
 
     # Determine upstream version for changelog message
     # For snapshots, use the version from snapshot_result
