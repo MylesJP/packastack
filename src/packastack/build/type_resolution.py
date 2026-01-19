@@ -135,6 +135,27 @@ def resolve_build_type_auto(
         "cycle_stage": cycle_stage.value,
     })
 
+    # Reject snapshot builds for client/library packages
+    if result.chosen_type == BuildType.SNAPSHOT:
+        import sys
+
+        from packastack.upstream.releases import load_project_releases
+
+        proj_info = load_project_releases(releases_repo, series, source_package)
+        if proj_info and proj_info.type in ("client-library", "library"):
+            error_msg = (
+                f"Package {source_package} is a {proj_info.type} and cannot be built as a snapshot. "
+                "Client/library packages must use official release tarballs. "
+                "Please wait for an official release or use --force to override."
+            )
+            activity("resolve", f"{error_msg}")
+            run.log_event({
+                "event": "resolve.snapshot_rejected_for_library",
+                "package": source_package,
+                "type": proj_info.type,
+            })
+            sys.exit(EXIT_CONFIG_ERROR)
+
     activity("resolve", f"Auto-selected: {result.chosen_type.value} ({result.reason_human})")
 
     return result.chosen_type, "", result.reason_code.value
