@@ -1047,20 +1047,20 @@ def prepare_upstream_source(
             # Clone upstream and generate snapshot tarball
             upstream_work_dir = ctx.workspace / "upstream"
             # Determine the correct project name for cloning upstream
-            # Priority: deliverable if exists in releases, otherwise pkg_name
-            # This ensures we clone from the correct OpenDev repository
-            deliverable_name = ctx.upstream_config.release_source.deliverable
-            project_name = deliverable_name
+            # Use pkg_name since it's the authoritative Debian package name
+            # and load_project_releases will find the correct releases entry
+            # by trying variants (with/without python- prefix)
+            project_name = ctx.pkg_name
 
-            if deliverable_name:
-                test_releases = load_project_releases(releases_repo, ctx.openstack_target, deliverable_name)
-                if not test_releases:
-                    # Deliverable doesn't exist, try pkg_name
-                    test_releases = load_project_releases(releases_repo, ctx.openstack_target, ctx.pkg_name)
-                    if test_releases:
-                        project_name = ctx.pkg_name
-            else:
-                project_name = ctx.pkg_name
+            # Verify the project exists in releases for this series
+            test_releases = load_project_releases(releases_repo, ctx.openstack_target, project_name)
+            if not test_releases and ctx.upstream_config.release_source.deliverable:
+                # Fallback: try the deliverable name from registry
+                test_releases = load_project_releases(
+                    releases_repo, ctx.openstack_target, ctx.upstream_config.release_source.deliverable
+                )
+                if test_releases:
+                    project_name = ctx.upstream_config.release_source.deliverable
 
             snapshot_request = SnapshotRequest(
                 project=project_name,
