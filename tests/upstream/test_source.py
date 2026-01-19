@@ -108,6 +108,20 @@ class TestBuildTarballUrl:
         assert "9.4.0" in url
         assert url.endswith(".tar.gz")
 
+    def test_hyphenated_project(self) -> None:
+        """Test URL for hyphenated project name (osc-lib)."""
+        url = upstream.build_tarball_url("osc-lib", "4.3.0")
+        # Directory path should keep hyphens: osc-lib/
+        # Filename should normalize hyphens to underscores: osc_lib-4.3.0.tar.gz
+        assert url == "https://tarballs.opendev.org/openstack/osc-lib/osc_lib-4.3.0.tar.gz"
+
+    def test_python_prefixed_project(self) -> None:
+        """Test URL for python-prefixed project."""
+        url = upstream.build_tarball_url("python-openstackclient", "7.1.0")
+        # Directory path should keep hyphens: python-openstackclient/
+        # Filename should normalize hyphens to underscores: python_openstackclient-7.1.0.tar.gz
+        assert url == "https://tarballs.opendev.org/openstack/python-openstackclient/python_openstackclient-7.1.0.tar.gz"
+
     def test_version_in_filename(self) -> None:
         """Test that version appears in filename."""
         url = upstream.build_tarball_url("neutron", "24.1.0")

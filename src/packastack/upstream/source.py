@@ -132,28 +132,24 @@ def build_tarball_url(project: str, version: str) -> str:
     """Build URL for an official OpenStack release tarball.
 
     Args:
-        project: Project name (e.g., "nova", "oslo.config").
+        project: Project name (e.g., "nova", "oslo.config", "osc-lib").
         version: Release version (e.g., "29.0.0").
 
     Returns:
         Full URL to the tarball.
     """
     # OpenStack tarballs follow pattern: project/project-version.tar.gz
-    # For oslo.* projects:
-    # - Directory path uses dots: oslo.config/
-    # - Tarball filename uses underscores: oslo_config-version.tar.gz
-    # For python-* client libraries:
-    # - Directory path uses hyphens: python-openstackclient/
-    # - Tarball filename uses underscores: python_openstackclient-version.tar.gz
+    # The directory path uses the project name as-is (with hyphens/dots)
+    # but the tarball filename normalizes special characters to underscores:
+    # - oslo.config -> oslo_config (dots to underscores)
+    # - python-openstackclient -> python_openstackclient (hyphens to underscores)
+    # - osc-lib -> osc_lib (hyphens to underscores)
 
     tarball_name = project
     # Replace dots with underscores (e.g. oslo.config -> oslo_config)
-    if "." in project:
-         tarball_name = tarball_name.replace(".", "_")
-
-    # Replace hyphens with underscores for python- prefixed projects
-    if project.startswith("python-"):
-         tarball_name = tarball_name.replace("-", "_")
+    tarball_name = tarball_name.replace(".", "_")
+    # Replace hyphens with underscores (e.g. osc-lib -> osc_lib, python-openstackclient -> python_openstackclient)
+    tarball_name = tarball_name.replace("-", "_")
 
     path = f"openstack/{project}/{tarball_name}-{version}.tar.gz"
 
