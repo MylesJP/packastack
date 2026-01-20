@@ -856,12 +856,7 @@ def select_build_type(
 
     # Pre-final or unknown stage
     if has_beta_rc_final:
-        # Prefer to treat final releases as RELEASE; however, if the latest
-        # release is a beta or RC and there is evidence of an upstream
-        # tarball (indicated by a release entry with project info), classify
-        # it as a SNAPSHOT build instead of a full RELEASE. This captures
-        # the case where a pre-release artifact (beta/rc) exists upstream
-        # and we should perform a pre-release snapshot build.
+        # Beta/RC/final releases count as releases; prefer RELEASE builds.
         latest_release = project.get_latest_release() if project else None
 
         if latest_release is not None:
@@ -883,26 +878,23 @@ def select_build_type(
                     package_status=package_status,
                 ))
 
-            # Beta or RC release: classify as SNAPSHOT only if there's
-            # evidence of an upstream release artifact (projects list).
+            # Beta or RC release: treat as RELEASE with milestone versioning.
             if latest_release.is_beta() or latest_release.is_rc():
-                has_upstream_artifact = bool(getattr(latest_release, "projects", None))
-                if has_upstream_artifact:
-                    return _add_watch_info(TypeSelectionResult(
-                        source_package=source_package,
-                        deliverable=deliverable,
-                        release_model=release_model,
-                        deliverable_kind=kind,
-                        kind_confidence=kind_confidence,
-                        has_release_for_cycle=True,
-                        has_beta_rc_final=True,
-                        latest_version=latest_version,
-                        cycle_stage=cycle_stage,
-                        chosen_type=BuildType.SNAPSHOT,
-                        reason_code=ReasonCode.HAS_PRE_RELEASE_ONLY,
-                        reason_human=f"Beta/RC release {latest_version} available -> snapshot",
-                        package_status=package_status,
-                    ))
+                return _add_watch_info(TypeSelectionResult(
+                    source_package=source_package,
+                    deliverable=deliverable,
+                    release_model=release_model,
+                    deliverable_kind=kind,
+                    kind_confidence=kind_confidence,
+                    has_release_for_cycle=True,
+                    has_beta_rc_final=True,
+                    latest_version=latest_version,
+                    cycle_stage=cycle_stage,
+                    chosen_type=BuildType.RELEASE,
+                    reason_code=ReasonCode.HAS_RELEASE,
+                    reason_human=f"Beta/RC release {latest_version} available",
+                    package_status=package_status,
+                ))
 
         # Fallback: treat as RELEASE if we can't determine
         return _add_watch_info(TypeSelectionResult(

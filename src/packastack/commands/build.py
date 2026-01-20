@@ -452,7 +452,11 @@ def build(
     keep_going: bool = typer.Option(True, "--keep-going/--fail-fast", help="Continue on failure (default: keep-going) [--all only]"),
     max_failures: int = typer.Option(0, "--max-failures", help="Stop after N failures (0=unlimited) [--all only]"),
     resume: bool = typer.Option(False, "--resume", help="Resume a previous run (all mode) or workspace (single mode)"),
-    resume_run_id: str = typer.Option("", "--resume-run-id", help="Specific run ID to resume [--all only]"),
+    resume_run_id: str = typer.Option(
+        "",
+        "--resume-run-id",
+        help="Specific run ID to resume (single: reuse workspace; all: resume state)",
+    ),
     retry_failed: bool = typer.Option(False, "--retry-failed", help="Retry failed packages on resume [--all only]"),
     skip_failed: bool = typer.Option(True, "--skip-failed/--no-skip-failed", help="Skip previously failed on resume [--all only]"),
     parallel: int = typer.Option(0, "-j", "--parallel", help="Parallel workers (0=auto) [--all only]"),
@@ -544,6 +548,7 @@ def build(
             skip_repo_regen=skip_repo_regen,
             ppa_upload=ppa_upload,
             resume_workspace=resume,
+            resume_run_id=resume_run_id,
         )
 
 
@@ -575,6 +580,7 @@ def _build_single_mode(
     skip_repo_regen: bool = False,
     ppa_upload: bool = False,
     resume_workspace: bool = False,
+    resume_run_id: str = "",
 ) -> None:
     """Build a single package."""
     with RunContext("build") as run:
@@ -583,11 +589,15 @@ def _build_single_mode(
         cleanup_on_exit = not no_cleanup
 
         try:
+            if resume_workspace or resume_run_id:
+                # When resuming, focus on the target package only.
+                build_deps = False
             policy_value = (min_version_policy or "").lower()
             if policy_value not in {"enforce", "report", "ignore"}:
                 activity("error", "--min-version-policy must be one of: enforce, report, ignore")
                 sys.exit(EXIT_CONFIG_ERROR)
 
+            resume_flag = resume_workspace or bool(resume_run_id)
             request = BuildRequest(
                 package=package,
                 target=target,
@@ -615,7 +625,8 @@ def _build_single_mode(
                 upload=upload,
                 skip_repo_regen=skip_repo_regen,
                 ppa_upload=ppa_upload,
-                resume_workspace=resume_workspace,
+                resume_workspace=resume_flag,
+                resume_run_id=resume_run_id,
                 workspace_ref=lambda w: _set_workspace(w, locals()),
             )
             exit_code = _run_build(run=run, request=request)
@@ -891,6 +902,10 @@ def _run_build(
         run.write_summary(status="failed", error="No packages in build order", exit_code=EXIT_CONFIG_ERROR)
         return EXIT_CONFIG_ERROR
 
+    resume_target_pkg: str | None = None
+    if request.resume_workspace or request.resume_run_id:
+        resume_target_pkg = plan_result.build_order[-1] if plan_result.build_order else request.package
+
     # Build all packages in dependency order using extracted orchestrator
     from packastack.build.single_build import (
         SetupInputs,
@@ -971,23 +986,45 @@ def _run_build(
 
         # Handle --resume: find and use existing workspace
         resume_workspace_path: Path | None = None
-        if request.resume_workspace:
+        if (request.resume_workspace or request.resume_run_id) and (
+            resume_target_pkg is None or pkg_name == resume_target_pkg
+        ):
             build_root = paths.get("build_root", paths["cache_root"] / "build")
-            resume_workspace_path = _find_most_recent_workspace(build_root, pkg_name)
-
-            if resume_workspace_path:
-                activity("resume", f"Resuming from existing workspace: {resume_workspace_path}")
-                run.log_event({
-                    "event": "resume.workspace_found",
-                    "workspace": str(resume_workspace_path),
-                    "package": pkg_name,
-                })
+            if request.resume_run_id:
+                candidate = build_root / request.resume_run_id / pkg_name
+                if candidate.exists():
+                    resume_workspace_path = candidate
+                    activity("resume", f"Resuming from run {request.resume_run_id}: {candidate}")
+                    run.log_event({
+                        "event": "resume.workspace_found",
+                        "workspace": str(candidate),
+                        "package": pkg_name,
+                        "run_id": request.resume_run_id,
+                    })
+                else:
+                    error = (
+                        f"No workspace for {pkg_name} under run {request.resume_run_id} "
+                        f"({candidate})"
+                    )
+                    activity("resume", f"ERROR: {error}")
+                    run.write_summary(status="failed", error=error, exit_code=EXIT_RESUME_ERROR)
+                    return EXIT_RESUME_ERROR
             else:
-                activity("resume", f"No existing workspace found for {pkg_name}, starting fresh build")
-                run.log_event({
-                    "event": "resume.no_workspace",
-                    "package": pkg_name,
-                })
+                resume_workspace_path = _find_most_recent_workspace(build_root, pkg_name)
+
+                if resume_workspace_path:
+                    activity("resume", f"Resuming from existing workspace: {resume_workspace_path}")
+                    run.log_event({
+                        "event": "resume.workspace_found",
+                        "workspace": str(resume_workspace_path),
+                        "package": pkg_name,
+                    })
+                else:
+                    activity("resume", f"No existing workspace found for {pkg_name}, starting fresh build")
+                    run.log_event({
+                        "event": "resume.no_workspace",
+                        "package": pkg_name,
+                    })
 
         # Create setup inputs for the orchestrator
         setup_inputs = SetupInputs(
@@ -1093,7 +1130,9 @@ def _run_build(
 
                     # 3. Rebuild
                     activity("ppa", "Building PPA source package...")
-                    ppa_output_dir = ctx.workspace / "build-output"
+                    ppa_output_dir = ctx.workspace / "build-output-ppa"
+                    if ppa_output_dir.exists():
+                        shutil.rmtree(ppa_output_dir)
                     ppa_success, ppa_artifacts, _ppa_output = _build_ppa_source(
                         ctx.pkg_repo,
                         ppa_output_dir,

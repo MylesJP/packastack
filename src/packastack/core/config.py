@@ -60,6 +60,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Format: "<series>:<build_type>" -> bug_number
         # Example: "gazpacho:release": 2116155
         # Valid build types: snapshot, release, release-client
+        # milestone is a deprecated alias for snapshot (kept for compatibility)
     },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
 }

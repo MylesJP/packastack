@@ -100,6 +100,8 @@ class BuildRequest:
         plan_upload: --plan-upload flag.
         upload: --upload flag.
         skip_repo_regen: --skip-repo-regen flag (skip local repo regeneration).
+        resume_workspace: Resume a previous workspace in single-package mode.
+        resume_run_id: Specific run ID to resume in single-package mode.
         workspace_ref: Callback to set workspace in outer scope.
     """
 
@@ -135,6 +137,7 @@ class BuildRequest:
     skip_repo_regen: bool = False
     ppa_upload: bool = False
     resume_workspace: bool = False
+    resume_run_id: str = ""
     workspace_ref: Callable[[Path], None] | None = None
 
     def to_plan_request(self) -> PlanRequest:

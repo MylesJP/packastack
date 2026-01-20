@@ -121,6 +121,26 @@ class TestGenerateSnapshotVersion:
         assert ver == "30.0.0~git20240115.abc1234-0ubuntu1"
 
 
+class TestGenerateReleaseOrMilestoneVersion:
+    """Tests for generate_release_or_milestone_version function."""
+
+    def test_rc_version_with_extra_zero(self) -> None:
+        ver = changelog.generate_release_or_milestone_version("21.0.0.0rc1", epoch=1)
+        assert ver == "1:21.0.0~rc1-0ubuntu1"
+
+    def test_beta_version_with_extra_zero(self) -> None:
+        ver = changelog.generate_release_or_milestone_version("31.0.0.0b2")
+        assert ver == "31.0.0~b2-0ubuntu1"
+
+    def test_rc_version_without_extra_zero(self) -> None:
+        ver = changelog.generate_release_or_milestone_version("2024.2.0rc1")
+        assert ver == "2024.2.0~rc1-0ubuntu1"
+
+    def test_regular_release_passthrough(self) -> None:
+        ver = changelog.generate_release_or_milestone_version("29.0.0")
+        assert ver == "29.0.0-0ubuntu1"
+
+
 class TestUpdateChangelogGbp:
     """Tests for gbp dch preferred path."""
 
@@ -649,3 +669,33 @@ class TestUpdateChangelogPythonDebian:
         content = changelog_path.read_text()
         assert "29.0.0" in content
         assert "28.0.0" in content  # Old entry still present
+
+    def test_merges_unreleased_entry(self, tmp_path: Path) -> None:
+        """Test that UNRELEASED entry is merged into new release entry."""
+        if changelog.Changelog is None:
+            pytest.skip("python-debian not available")
+
+        changelog_path = tmp_path / "changelog"
+        changelog_path.write_text(
+            "nova (28.0.0-0ubuntu1) UNRELEASED; urgency=medium\n\n"
+            "  * d/gbp.conf: sync from cloud-archive-tools\n\n"
+            " -- Test <test@test.com>  Mon, 01 Jan 2024 00:00:00 +0000\n\n"
+            "nova (27.0.0-0ubuntu1) noble; urgency=medium\n\n"
+            "  * Previous release\n\n"
+            " -- Test <test@test.com>  Sun, 01 Dec 2023 00:00:00 +0000\n"
+        )
+
+        updated, _error = changelog.update_changelog(
+            changelog_path=changelog_path,
+            package="nova",
+            version="29.0.0-0ubuntu1",
+            distribution="noble",
+            changes=["New upstream release"],
+            maintainer="Test <test@example.com>",
+        )
+
+        assert updated is True
+        content = changelog_path.read_text()
+        assert "UNRELEASED" not in content
+        assert "d/gbp.conf: sync from cloud-archive-tools" in content
+        assert "New upstream release" in content

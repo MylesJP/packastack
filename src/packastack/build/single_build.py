@@ -877,7 +877,7 @@ def prepare_upstream_source(
         Tuple of (PhaseResult, PrepareResult).
     """
     from packastack.debpkg.changelog import (
-        generate_release_version,
+        generate_release_or_milestone_version,
         get_current_version,
         increment_upstream_version,
         parse_version,
@@ -1168,7 +1168,7 @@ def prepare_upstream_source(
         parsed = None
 
     if ctx.build_type == BuildType.RELEASE and ctx.upstream:
-        new_version = generate_release_version(
+        new_version = generate_release_or_milestone_version(
             ctx.upstream.version, epoch=parsed.epoch if parsed else 0
         )
     elif ctx.build_type == BuildType.SNAPSHOT:
@@ -2070,23 +2070,33 @@ def import_and_patch(
         # Try to find bug for this series and build type
         lookup_type = ctx.build_type.value if ctx.build_type else "release"
 
-        # Check if this is a library project from openstack-releases registry
+        # Check deliverable type from openstack-releases registry
         is_library = False
+        is_service = False
         releases_repo = ctx.paths.get("openstack_releases_repo")
         if releases_repo:
             proj_info = load_project_releases(releases_repo, ctx.openstack_target, ctx.package)
             if proj_info:
                 is_library = proj_info.is_library()
+                is_service = proj_info.type == "service"
 
+        lookup_candidates: list[str] = []
         if lookup_type == "release" and is_library:
-            # Try release-client first, then fall back to release
-            key = f"{ctx.openstack_target}:release-client"
-            lp_bug = lp_bugs.get(key)
+            lookup_candidates.append("release-client")
+        if lookup_type == "snapshot" and is_service:
+            lookup_candidates.append("milestone")
+            lookup_candidates.append("snapshot")
+        else:
+            lookup_candidates.append(lookup_type)
+            if lookup_type == "snapshot":
+                # Backwards compatibility for configs that still use milestone keys.
+                lookup_candidates.append("milestone")
 
-        # Primary lookup: use the normalized lookup_type
-        if not lp_bug:
-            key = f"{ctx.openstack_target}:{lookup_type}"
+        for candidate in lookup_candidates:
+            key = f"{ctx.openstack_target}:{candidate}"
             lp_bug = lp_bugs.get(key)
+            if lp_bug is not None:
+                break
 
     # Determine upstream version for changelog message
     # For snapshots, use the version from snapshot_result
@@ -2108,9 +2118,8 @@ def import_and_patch(
         openstack_series=ctx.openstack_target,
     )
 
-    # For snapshot builds, use dch directly instead of gbp dch
-    # gbp dch doesn't handle UNRELEASED entries properly for snapshots
-    use_gbp = ctx.build_type != BuildType.SNAPSHOT
+    # Use gbp dch for snapshots as well to keep changelog handling consistent.
+    use_gbp = True
 
     changelog_updated, changelog_error = update_changelog(
         debian_dir / "changelog",

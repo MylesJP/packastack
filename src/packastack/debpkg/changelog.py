@@ -137,6 +137,81 @@ def generate_snapshot_version(
     return version
 
 
+def generate_milestone_version(
+    base_version: str,
+    milestone: str,
+    ubuntu_revision: int = 1,
+    epoch: int = 0,
+) -> str:
+    """Generate version string for a milestone build.
+
+    Format: [epoch:]<version>~<milestone>-0ubuntu<N>
+    Where milestone is like "b1", "b2", "rc1", "rc2".
+
+    Args:
+        base_version: Base upstream version (e.g., "30.0.0").
+        milestone: Milestone identifier (e.g., "b1", "rc1").
+        ubuntu_revision: Ubuntu package revision number.
+        epoch: Debian epoch (prepended as epoch:version if non-zero).
+
+    Returns:
+        Full Debian version string.
+    """
+    # Normalize milestone format
+    milestone = milestone.lower()
+    if not milestone.startswith(("b", "rc")):
+        milestone = f"b{milestone}"
+
+    version = f"{base_version}~{milestone}-0ubuntu{ubuntu_revision}"
+    if epoch:
+        return f"{epoch}:{version}"
+    return version
+
+
+_MILESTONE_VERSION_RE = re.compile(
+    r"^(?P<base>[0-9][0-9A-Za-z\.]*?)(?P<milestone>(?:rc|b)\d+)$",
+    re.IGNORECASE,
+)
+
+
+def split_milestone_version(upstream_version: str) -> tuple[str, str] | None:
+    """Split an upstream version into base and milestone parts when present."""
+    match = _MILESTONE_VERSION_RE.match(upstream_version)
+    if not match:
+        return None
+
+    base = match.group("base")
+    milestone = match.group("milestone").lower()
+
+    # OpenStack pre-releases often include an extra ".0" before rc/b markers.
+    if base.endswith(".0") and base.count(".") >= 3:
+        base = base[:-2]
+
+    return base, milestone
+
+
+def generate_release_or_milestone_version(
+    upstream_version: str,
+    ubuntu_revision: int = 1,
+    epoch: int = 0,
+) -> str:
+    """Generate a release version, converting rc/b markers to milestone format."""
+    milestone = split_milestone_version(upstream_version)
+    if milestone:
+        base_version, marker = milestone
+        return generate_milestone_version(
+            base_version,
+            marker,
+            ubuntu_revision=ubuntu_revision,
+            epoch=epoch,
+        )
+    return generate_release_version(
+        upstream_version,
+        ubuntu_revision=ubuntu_revision,
+        epoch=epoch,
+    )
+
+
 def increment_upstream_version(version: str) -> str:
     """Increment the last numeric component of an upstream version.
 
@@ -362,6 +437,8 @@ def _update_changelog_gbp_dch(
                 error_msg = f"dch --append failed: {append_result.stderr or append_result.stdout}"
                 return False, error_msg
 
+        _dedupe_new_upstream_version_lines(changelog_path)
+
         return True, ""
     except Exception as e:
         return False, f"Exception in _update_changelog_gbp_dch: {e}"
@@ -389,6 +466,22 @@ def _update_changelog_python_debian(
         else:
             cl = Changelog()
 
+        # Merge any existing UNRELEASED entry into the new entry.
+        merged_changes: list[str] = []
+        if cl and len(cl) > 0:
+            top = cl[0]
+            top_dist = str(getattr(top, "distributions", "")).strip()
+            if top_dist.upper() == "UNRELEASED":
+                for change in top.changes:
+                    normalized = change.strip()
+                    if normalized.startswith("* "):
+                        normalized = normalized[2:]
+                    elif normalized.startswith("  * "):
+                        normalized = normalized[4:]
+                    if normalized:
+                        merged_changes.append(normalized)
+                del cl[0]
+
         # Create new block
         cl.new_block(
             package=package,
@@ -400,7 +493,7 @@ def _update_changelog_python_debian(
         )
 
         # Add changes
-        for change in changes:
+        for change in merged_changes + changes:
             cl.add_change(f"  * {change}")
 
         # Write back
@@ -541,6 +634,50 @@ def generate_changelog_message(
         changes.append(f"Note: {signature_warning}")
 
     return changes
+
+
+def _dedupe_new_upstream_version_lines(changelog_path: Path) -> None:
+    """Remove duplicate 'New upstream version' lines from the top entry."""
+    if not changelog_path.exists():
+        return
+
+    lines = changelog_path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return
+
+    trailer_index = None
+    for i, line in enumerate(lines):
+        if line.startswith(" -- "):
+            trailer_index = i
+            break
+    if trailer_index is None:
+        return
+
+    end_index = trailer_index + 1
+    while end_index < len(lines) and lines[end_index].strip() != "":
+        end_index += 1
+    if end_index < len(lines):
+        end_index += 1
+
+    entry = lines[:end_index]
+    remainder = lines[end_index:]
+
+    seen_version_line = False
+    deduped: list[str] = []
+    for idx, line in enumerate(entry):
+        if idx < trailer_index:
+            stripped = line.strip()
+            if stripped.startswith("* New upstream version"):
+                if seen_version_line:
+                    continue
+                seen_version_line = True
+        deduped.append(line)
+
+    if deduped != entry:
+        output = "\n".join(deduped + remainder)
+        if output:
+            output += "\n"
+        changelog_path.write_text(output, encoding="utf-8")
 
 
 if __name__ == "__main__":

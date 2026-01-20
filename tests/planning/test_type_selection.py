@@ -406,8 +406,8 @@ class TestSelectBuildType:
             assert result.chosen_type == BuildType.RELEASE
             assert result.reason_code == ReasonCode.HAS_RELEASE
 
-    def test_pre_final_beta_rc_classified_as_snapshot(self, tmp_path: Path) -> None:
-        """Beta/RC with upstream artifact should be classified as SNAPSHOT."""
+    def test_pre_final_beta_rc_classified_as_release(self, tmp_path: Path) -> None:
+        """Beta/RC releases should be classified as RELEASE."""
         releases_repo = tmp_path
         mock_project = MagicMock()
         mock_project.type = "service"
@@ -435,11 +435,11 @@ class TestSelectBuildType:
                 deliverable="nova",
                 cycle_stage=CycleStage.PRE_FINAL,
             )
-            assert result.chosen_type == BuildType.SNAPSHOT
-            assert result.reason_code == ReasonCode.HAS_PRE_RELEASE_ONLY
+            assert result.chosen_type == BuildType.RELEASE
+            assert result.reason_code == ReasonCode.HAS_RELEASE
 
     def test_pre_final_beta_rc_without_artifact_falls_back(self, tmp_path: Path) -> None:
-        """Beta/RC without artifacts should fall back to RELEASE."""
+        """Beta/RC without artifacts should still be RELEASE."""
         releases_repo = tmp_path
         mock_project = MagicMock()
         mock_project.type = "service"
