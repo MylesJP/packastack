@@ -56,7 +56,7 @@ class PackageVersion:
     full_version: str = ""
     # Whether this version was computed (True) or pre-existing (False)
     computed: bool = True
-    # Source of version (release, milestone tag, git snapshot, archive)
+    # Source of version (release, git snapshot, archive)
     version_source: str = ""
 
     def __post_init__(self) -> None:
@@ -229,7 +229,7 @@ def resolve_version_for_package(
 
     Args:
         source_package: Source package name.
-        build_type: The build type (release, milestone, snapshot).
+        build_type: The build type (release, snapshot).
         releases_repo: Path to openstack/releases checkout.
         series: Target OpenStack series.
         deliverable: OpenStack deliverable name.
@@ -240,7 +240,6 @@ def resolve_version_for_package(
     """
     # This is a stub - actual implementation will use:
     # - For RELEASE: Get latest release from openstack/releases
-    # - For MILESTONE: Get milestone tag from releases or git
     # - For SNAPSHOT: Generate version from git describe
     #
     # The packaging_repo's d/changelog provides epoch and debian revision hints.
@@ -262,22 +261,6 @@ def resolve_version_for_package(
             )
             if releases:
                 # Get the latest release version
-                latest = releases[-1] if releases else None
-                if latest:
-                    upstream_version = latest.version
-                    version_source = "openstack/releases"
-    elif build_type == BuildType.MILESTONE:
-        # Look up milestone from openstack/releases
-        if releases_repo and releases_repo.exists():
-            from packastack.upstream.releases import load_project_releases
-
-            releases = load_project_releases(
-                releases_repo=releases_repo,
-                series=series,
-                project=deliverable,
-            )
-            if releases:
-                # Get the latest milestone (could be beta/rc)
                 latest = releases[-1] if releases else None
                 if latest:
                     upstream_version = latest.version

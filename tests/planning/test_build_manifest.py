@@ -317,38 +317,17 @@ class TestResolveVersionForPackage:
         assert version == "0.0.0"
         assert source == "placeholder"
 
-    def test_milestone_without_repo(self):
-        """Milestone without releases repo returns placeholder."""
+    def test_snapshot_without_repo(self):
+        """Snapshot without releases repo returns git-snapshot source."""
         version, _revision, _epoch, source = resolve_version_for_package(
             source_package="nova",
-            build_type=BuildType.MILESTONE,
+            build_type=BuildType.SNAPSHOT,
             releases_repo=None,
             series="dalmatian",
             deliverable="nova",
         )
         assert version == "0.0.0"
-        assert source == "placeholder"
-
-    def test_milestone_with_repo(self, tmp_path):
-        """Milestone with releases repo loads version from releases."""
-        from unittest.mock import MagicMock, patch
-
-        releases_repo = tmp_path / "releases"
-        releases_repo.mkdir()
-
-        mock_release = MagicMock()
-        mock_release.version = "30.0.0b1"
-
-        with patch("packastack.upstream.releases.load_project_releases", return_value=[mock_release]):
-            version, _revision, _epoch, source = resolve_version_for_package(
-                source_package="nova",
-                build_type=BuildType.MILESTONE,
-                releases_repo=releases_repo,
-                series="dalmatian",
-                deliverable="nova",
-            )
-        assert version == "30.0.0b1"
-        assert source == "openstack/releases"
+        assert source == "git-snapshot"
 
 
 class TestCreateManifest:

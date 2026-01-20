@@ -78,7 +78,7 @@ def sample_report() -> TypeSelectionReport:
         )
     )
 
-    # Add a milestone result
+    # Add a pre-release snapshot result
     report.add_result(
         TypeSelectionResult(
             source_package="glance",
@@ -90,9 +90,9 @@ def sample_report() -> TypeSelectionReport:
             has_beta_rc_final=False,
             latest_version="26.0.0.0a1",
             cycle_stage=CycleStage.PRE_FINAL,
-            chosen_type=BuildType.MILESTONE,
-            reason_code=ReasonCode.HAS_MILESTONE_ONLY,
-            reason_human="Only milestone release 26.0.0.0a1",
+            chosen_type=BuildType.SNAPSHOT,
+            reason_code=ReasonCode.HAS_PRE_RELEASE_ONLY,
+            reason_human="Only pre-release 26.0.0.0a1",
             package_status=PackageStatus.ACTIVE,
         )
     )
@@ -231,8 +231,7 @@ class TestRenderJson:
         data = json.loads(output_path.read_text())
         assert "summary" in data
         assert data["summary"]["release"] == 1
-        assert data["summary"]["milestone"] == 1
-        assert data["summary"]["snapshot"] == 1
+        assert data["summary"]["snapshot"] == 2
 
     def test_json_contains_packages(self, tmp_path: Path, sample_report: TypeSelectionReport):
         """Should contain package results."""
@@ -280,7 +279,6 @@ class TestRenderHtml:
         content = output_path.read_text()
         assert "Total Packages" in content
         assert "Release" in content
-        assert "Milestone" in content
         assert "Snapshot" in content
 
     def test_html_contains_package_table(self, tmp_path: Path, sample_report: TypeSelectionReport):
@@ -402,7 +400,6 @@ class TestRenderCompactSummary:
         """Should show counts by type."""
         result = render_compact_summary(sample_report)
         assert "Release:" in result
-        assert "Milestone:" in result
         assert "Snapshot:" in result
 
     def test_contains_examples(self, sample_report: TypeSelectionReport):

@@ -221,7 +221,7 @@ def load_openstack_packages(
     Scans the deliverables directory for the given series and builds a mapping
     from Ubuntu source package names to OpenStack project names. The mapping
     is determined by the project type:
-    - Libraries (type: library) use python-{project} as source package
+    - Libraries (type: library or client-library) use python-{project} as source package
     - Services and other types use {project} as source package
 
     Args:
@@ -253,7 +253,7 @@ def load_openstack_packages(
             project_type = data.get("type", "")
 
             # Determine Ubuntu source package name based on type
-            if project_type == "library":
+            if project_type in ("library", "client-library"):
                 source_pkg = project if project.startswith("python-") else f"python-{project}"
             else:
                 source_pkg = project
@@ -425,7 +425,7 @@ def is_snapshot_eligible(
             latest.version,
         )
 
-    # Has releases but none are beta/rc/final (e.g., milestones only)
+    # Has releases but none are beta/rc/final (e.g., pre-release only)
     # Allow snapshots but warn
     return (
         True,

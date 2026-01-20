@@ -296,7 +296,6 @@ class RunnerConfig:
     ubuntu_series: str
     cloud_archive: str = ""
     build_type: str = "auto"
-    milestone: str = ""
     binary: bool = True
     force: bool = False
     timeout: int = 3600  # 1 hour default
@@ -436,10 +435,6 @@ class PackageBuildRunner:
             cmd.extend(["--type", "auto"])
         elif self.config.build_type == "snapshot":
             cmd.extend(["--type", "snapshot"])
-        elif self.config.build_type == "milestone":
-            cmd.extend(["--type", "milestone"])
-            if self.config.milestone:
-                cmd.extend(["--milestone", self.config.milestone])
         elif self.config.build_type == "release":
             cmd.extend(["--type", "release"])
 

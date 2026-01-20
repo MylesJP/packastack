@@ -221,7 +221,7 @@ def run_single_build(
         target: OpenStack target series.
         ubuntu_series: Ubuntu series.
         cloud_archive: Cloud archive pocket.
-        build_type: release/snapshot/milestone.
+        build_type: release/snapshot.
         binary: Build binary packages.
         force: Force through warnings.
         run_dir: Directory for logs.
@@ -258,8 +258,6 @@ def run_single_build(
         cmd.extend(["--type", "auto"])
     elif build_type == "snapshot":
         cmd.extend(["--type", "snapshot"])
-    elif build_type == "milestone":
-        cmd.extend(["--type", "milestone", "--milestone", "b1"])
     elif build_type == "release":
         cmd.extend(["--type", "release"])
 

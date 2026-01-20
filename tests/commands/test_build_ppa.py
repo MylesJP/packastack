@@ -19,7 +19,6 @@ def _call_run_build(run: MagicMock, **kwargs) -> int:
         "ubuntu_series": "noble",
         "cloud_archive": "",
         "build_type_str": "release",
-        "milestone": "",
         "force": False,
         "offline": False,
         "include_retired": False,

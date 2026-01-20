@@ -122,7 +122,6 @@ def _call_run_build(
     ubuntu_series: str = "devel",
     cloud_archive: str = "",
     build_type_str: str = "release",
-    milestone: str = "",
     force: bool = False,
     offline: bool = False,
     validate_plan_only: bool = False,
@@ -149,7 +148,6 @@ def _call_run_build(
         ubuntu_series=ubuntu_series,
         cloud_archive=cloud_archive,
         build_type_str=build_type_str,
-        milestone=milestone,
         force=force,
         offline=offline,
         include_retired=include_retired,
@@ -172,44 +170,29 @@ class TestResolveBuildTypeFromCli:
 
     def test_release_type(self) -> None:
         """Test --type release."""
-        result, milestone = build._resolve_build_type_from_cli("release", "")
+        result = build._resolve_build_type_from_cli("release")
         assert result == "release"
-        assert milestone == ""
 
     def test_snapshot_type(self) -> None:
         """Test --type snapshot."""
-        result, milestone = build._resolve_build_type_from_cli("snapshot", "")
+        result = build._resolve_build_type_from_cli("snapshot")
         assert result == "snapshot"
-        assert milestone == ""
 
     def test_auto_type(self) -> None:
         """Test --type auto."""
-        result, milestone = build._resolve_build_type_from_cli("auto", "")
+        result = build._resolve_build_type_from_cli("auto")
         assert result == "auto"
-        assert milestone == ""
-
-    def test_milestone_flag_overrides_type(self) -> None:
-        """Test --milestone flag overrides --type."""
-        result, milestone = build._resolve_build_type_from_cli("release", "b1")
-        assert result == "milestone"
-        assert milestone == "b1"
-
-    def test_milestone_type(self) -> None:
-        """Test --type milestone without milestone version is still milestone."""
-        result, milestone = build._resolve_build_type_from_cli("milestone", "")
-        assert result == "milestone"
-        assert milestone == ""
 
     def test_case_insensitive(self) -> None:
         """Test type is case insensitive."""
-        result, _milestone = build._resolve_build_type_from_cli("RELEASE", "")
+        result = build._resolve_build_type_from_cli("RELEASE")
         assert result == "release"
 
     def test_invalid_type_raises(self) -> None:
         """Test invalid type raises BadParameter."""
         import typer
         with pytest.raises(typer.BadParameter):
-            build._resolve_build_type_from_cli("invalid", "")
+            build._resolve_build_type_from_cli("invalid")
 
 class TestSetWorkspace:
     """Tests for _set_workspace helper."""
@@ -307,7 +290,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -360,7 +342,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=True,
@@ -407,7 +388,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -449,7 +429,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="snapshot",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -500,7 +479,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="auto",  # Auto should resolve to release
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=True,  # Stop after planning
@@ -547,7 +525,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="snapshot",
-                milestone="",
                 force=True,
                 offline=False,
                 validate_plan_only=True,  # Stop early
@@ -594,7 +571,6 @@ class TestRunBuildPhases:
                 ubuntu_series="devel",
                 cloud_archive="caracal",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=True,
@@ -624,7 +600,6 @@ class TestBuildIntegration:
         """Test BuildType enum is available."""
         assert BuildType.RELEASE.value == "release"
         assert BuildType.SNAPSHOT.value == "snapshot"
-        assert BuildType.MILESTONE.value == "milestone"
 
 
 class TestFetchPhase:
@@ -680,7 +655,7 @@ class TestFetchPhase:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -767,7 +742,6 @@ class TestReleaseTarballFetch:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -850,7 +824,6 @@ class TestReleaseTarballFetch:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -942,7 +915,6 @@ class TestReleaseTarballFetch:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -1036,7 +1008,6 @@ class TestReleaseTarballFetch:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -1052,81 +1023,6 @@ class TestReleaseTarballFetch:
 
         assert result == build.EXIT_SUCCESS
         git_archive.assert_called_once()
-
-    def test_milestone_uses_uscan_first(self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock) -> None:
-        """Milestone builds should also try uscan before official."""
-        pkg_dir = mock_paths["local_apt_repo"] / "nova" / "debian"
-        pkg_dir.mkdir(parents=True, exist_ok=True)
-        (pkg_dir / "control").touch()
-
-        mock_fetch_result = MagicMock()
-        mock_fetch_result.error = None
-        mock_fetch_result.path = tmp_path / "repo"
-        mock_fetch_result.path.mkdir(parents=True, exist_ok=True)
-        (mock_fetch_result.path / "debian").mkdir(exist_ok=True)
-        mock_fetch_result.branches = ["main"]
-        mock_fetch_result.cloned = True
-        mock_fetch_result.updated = False
-
-        mock_upstream = MagicMock()
-        mock_upstream.version = "1.0.0b1"
-        mock_upstream.tarball_url = "https://example.com/nova-1.0.0b1.tar.gz"
-
-        mock_tarball_path = tmp_path / "nova-1.0.0b1.tar.gz"
-        mock_tarball_path.touch()
-
-        mock_registry = _create_mock_registry("nova")
-
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
-            stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
-            stack.enter_context(patch.object(plan_module, "run_plan_for_package", return_value=(_make_plan_result(), 0)))
-            stack.enter_context(patch("packastack.upstream.registry.UpstreamsRegistry", return_value=mock_registry))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
-            stack.enter_context(patch.object(build, "check_required_tools", return_value=MagicMock(is_complete=lambda: True)))
-            stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
-            stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
-            stack.enter_context(patch("packastack.upstream.source.select_upstream_source", return_value=mock_upstream))
-            stack.enter_context(patch("packastack.upstream.source.apply_signature_policy", return_value=[]))
-            # uscan succeeds for milestone
-            stack.enter_context(patch.object(tarball_module, "run_uscan", return_value=(True, mock_tarball_path, "")))
-            official_dl = stack.enter_context(patch.object(tarball_module, "download_and_verify_tarball"))
-            stack.enter_context(patch("packastack.debpkg.gbp.ensure_upstream_branch", return_value=MagicMock(success=True, created=False)))
-            stack.enter_context(patch("packastack.debpkg.gbp.import_orig", return_value=MagicMock(success=True, upstream_version="1.0.0b1", output="")))
-            stack.enter_context(patch.object(single_build_module, "run_command"))
-            stack.enter_context(patch("packastack.debpkg.changelog.get_current_version", return_value="1.0-0ubuntu1"))
-            stack.enter_context(patch("packastack.debpkg.changelog.parse_version", return_value=MagicMock(upstream="1.0", epoch=0)))
-            stack.enter_context(patch("packastack.debpkg.changelog.generate_milestone_version", return_value="1.0.0~b1-0ubuntu1"))
-            stack.enter_context(patch("packastack.debpkg.changelog.generate_changelog_message", return_value="Milestone b1"))
-            stack.enter_context(patch("packastack.debpkg.changelog.update_changelog", return_value=True))
-            stack.enter_context(patch("packastack.debpkg.gbp.check_upstreamed_patches", return_value=[]))
-            stack.enter_context(patch("packastack.debpkg.gbp.pq_import", return_value=MagicMock(success=True, needs_refresh=False, patch_reports=[])))
-            stack.enter_context(patch("packastack.debpkg.gbp.build_source", return_value=MagicMock(success=True, artifacts=[], dsc_file=None, changes_file=None, output="")))
-
-            result = _call_run_build(
-                run=mock_run,
-                package="nova",
-                target="devel",
-                ubuntu_series="devel",
-                cloud_archive="",
-                build_type_str="milestone",
-                milestone="b1",
-                force=False,
-                offline=False,
-                validate_plan_only=False,
-                plan_upload=False,
-                upload=False,
-                binary=False,
-                builder="sbuild",
-                build_deps=True,
-                no_spinner=True,
-                yes=False,
-                workspace_ref=lambda w: None,
-            )
-
-        assert result == build.EXIT_SUCCESS
-        # uscan succeeded, official not called
-        official_dl.assert_not_called()
 
     def test_pypi_fallback_when_official_fails(self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock) -> None:
         """If uscan and official fail, PyPI fallback should be used when preferred."""
@@ -1204,7 +1100,6 @@ class TestReleaseTarballFetch:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -1309,7 +1204,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1329,7 +1224,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1398,7 +1293,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1421,7 +1316,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=True, binary=True, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1464,7 +1359,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1484,7 +1379,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1526,7 +1421,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1543,7 +1438,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1588,7 +1483,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1606,7 +1501,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1667,7 +1562,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1689,7 +1584,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1729,7 +1624,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1745,7 +1640,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1771,7 +1666,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1779,7 +1674,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1813,7 +1708,7 @@ class TestFullBuildPhases:
             stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -1823,7 +1718,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -1925,78 +1820,7 @@ class TestFullBuildPhases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="snapshot", milestone="",
-                force=False, offline=False, validate_plan_only=False, plan_upload=False,
-                upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
-                workspace_ref=lambda w: None,
-            )
-
-        assert result == build.EXIT_SUCCESS
-
-    def test_milestone_build(
-        self, tmp_path: Path, mock_paths: dict, mock_run: MagicMock
-    ) -> None:
-        """Test milestone build."""
-        mock_fetch_result = self._setup_package(mock_paths, tmp_path)
-
-        mock_index = MagicMock()
-        mock_index.packages = {}
-        mock_tool_result = MagicMock()
-        mock_tool_result.is_complete.return_value = True
-
-        mock_upstream = MagicMock()
-        mock_upstream.version = "30.0.0.0b1"
-        mock_upstream.tarball_url = "http://example.com/nova-30.0.0.0b1.tar.gz"
-
-        mock_tarball_result = MagicMock()
-        mock_tarball_result.success = True
-        mock_tarball_result.path = tmp_path / "nova-30.0.0.0b1.tar.gz"
-        mock_tarball_result.signature_verified = True
-        mock_tarball_result.signature_warning = ""
-
-        mock_pq_result = MagicMock()
-        mock_pq_result.success = True
-
-        mock_dsc = tmp_path / "nova_30.0.0.0~b1-0ubuntu1.dsc"
-        mock_dsc.touch()
-        mock_changes = tmp_path / "nova_30.0.0.0~b1-0ubuntu1_source.changes"
-        mock_changes.touch()
-
-        mock_build_result = MagicMock()
-        mock_build_result.success = True
-        mock_build_result.artifacts = [mock_dsc, mock_changes]
-        mock_build_result.dsc_file = mock_dsc
-        mock_build_result.changes_file = mock_changes
-        mock_build_result.output = ""
-
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(build, "load_config", return_value={"defaults": {}}))
-            stack.enter_context(patch.object(build, "resolve_paths", return_value=mock_paths))
-            stack.enter_context(patch.object(build, "resolve_series", return_value="noble"))
-            stack.enter_context(patch.object(build, "get_current_development_series", return_value="caracal"))
-            stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
-            stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
-            stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
-            stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
-            stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
-            stack.enter_context(patch("packastack.upstream.source.select_upstream_source", return_value=mock_upstream))
-            stack.enter_context(patch("packastack.upstream.source.apply_signature_policy", return_value=[]))
-            stack.enter_context(patch.object(tarball_module, "download_and_verify_tarball", return_value=mock_tarball_result))
-            stack.enter_context(patch("packastack.debpkg.changelog.get_current_version", return_value="1.0-0ubuntu1"))
-            stack.enter_context(patch("packastack.debpkg.changelog.parse_version", return_value=MagicMock(upstream="1.0")))
-            stack.enter_context(patch("packastack.debpkg.changelog.generate_milestone_version", return_value="30.0.0.0~b1-0ubuntu1"))
-            stack.enter_context(patch("packastack.debpkg.changelog.generate_changelog_message", return_value="Milestone b1."))
-            stack.enter_context(patch("packastack.debpkg.changelog.update_changelog", return_value=True))
-            stack.enter_context(patch("packastack.debpkg.gbp.check_upstreamed_patches", return_value=[]))
-            stack.enter_context(patch("packastack.debpkg.gbp.pq_import", return_value=mock_pq_result))
-            stack.enter_context(patch("packastack.debpkg.gbp.ensure_upstream_branch", return_value=MagicMock(success=True, branch_name="upstream-caracal", created=False, error="")))
-            stack.enter_context(patch("packastack.debpkg.gbp.import_orig", return_value=MagicMock(success=True, output="", upstream_version="")))
-            stack.enter_context(patch("packastack.debpkg.gbp.build_source", return_value=mock_build_result))
-
-            result = _call_run_build(
-                run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="milestone", milestone="b1",
+                cloud_archive="", build_type_str="snapshot",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2102,7 +1926,7 @@ class TestBuildWithUpstreamedPatchesForce:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2124,7 +1948,7 @@ class TestBuildWithUpstreamedPatchesForce:
             # force=True should allow build to continue
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=True,  # Force to continue with upstreamed patches
                 offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
@@ -2210,7 +2034,7 @@ class TestBuildWithUpstreamedPatchesForce:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2232,7 +2056,7 @@ class TestBuildWithUpstreamedPatchesForce:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2333,7 +2157,7 @@ class TestSnapshotAcquisitionIntegration:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2355,7 +2179,7 @@ class TestSnapshotAcquisitionIntegration:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="snapshot", milestone="",
+                cloud_archive="", build_type_str="snapshot",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2410,7 +2234,7 @@ class TestSnapshotAcquisitionIntegration:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2427,7 +2251,7 @@ class TestSnapshotAcquisitionIntegration:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="snapshot", milestone="",
+                cloud_archive="", build_type_str="snapshot",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2535,7 +2359,7 @@ class TestLocalRepoPublishingIntegration:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2574,7 +2398,7 @@ class TestLocalRepoPublishingIntegration:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2649,7 +2473,7 @@ class TestLocalRepoPublishingIntegration:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2682,7 +2506,7 @@ class TestLocalRepoPublishingIntegration:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -2762,7 +2586,7 @@ class TestLocalRepoPublishingIntegration:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2813,7 +2637,6 @@ class TestLocalRepoPublishingIntegration:
                 ubuntu_series="devel",
                 cloud_archive="",
                 build_type_str="release",
-                milestone="",
                 force=False,
                 offline=False,
                 validate_plan_only=False,
@@ -2933,7 +2756,7 @@ class TestBuildVersionEdgeCases:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             stack.enter_context(patch.object(single_build_module.GitFetcher, "fetch_and_checkout", return_value=mock_fetch_result))
             stack.enter_context(patch("packastack.debpkg.launchpad_yaml.update_launchpad_yaml_series", return_value=(True, [], None)))
@@ -2954,7 +2777,7 @@ class TestBuildVersionEdgeCases:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -3012,7 +2835,7 @@ class TestValidatePlanOnly:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
             # These should not be called in validate_plan_only mode
             mock_fetch = stack.enter_context(
@@ -3021,7 +2844,7 @@ class TestValidatePlanOnly:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=True, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -3052,7 +2875,7 @@ class TestValidatePlanOnly:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
 
             # Patch run_plan_for_package to return a PlanResult with a PlanGraph
@@ -3071,7 +2894,7 @@ class TestValidatePlanOnly:
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=True, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -3102,12 +2925,12 @@ class TestValidatePlanOnly:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=True,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,
@@ -3167,12 +2990,12 @@ class TestToolMissing:
             stack.enter_context(patch.object(build, "get_previous_series", return_value="bobcat"))
             stack.enter_context(patch.object(build, "is_snapshot_eligible", return_value=(True, "", "")))
             stack.enter_context(patch.object(build, "load_package_index", return_value=mock_index))
-            stack.enter_context(patch.object(build, "load_openstack_packages", return_value=["nova"]))
+            stack.enter_context(patch.object(build, "load_openstack_packages", return_value={"nova": "nova"}))
             stack.enter_context(patch.object(build, "check_required_tools", return_value=mock_tool_result))
 
             result = _call_run_build(
                 run=mock_run, package="nova", target="devel", ubuntu_series="devel",
-                cloud_archive="", build_type_str="release", milestone="",
+                cloud_archive="", build_type_str="release",
                 force=False, offline=False, validate_plan_only=False, plan_upload=False,
                 upload=False, binary=False, builder="sbuild", build_deps=True, no_spinner=True, yes=False,
                 workspace_ref=lambda w: None,

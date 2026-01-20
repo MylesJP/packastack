@@ -167,7 +167,6 @@ class SingleBuildContext:
     # Build configuration
     build_type: BuildType
     build_type_str: str
-    milestone: str
     binary: bool
     builder: str
     force: bool
@@ -243,7 +242,6 @@ class SetupInputs:
     ubuntu_series: str
     cloud_archive: str
     build_type_str: str
-    milestone: str
     binary: bool
     builder: str
     force: bool
@@ -262,7 +260,6 @@ class SetupInputs:
 
     # Resolved values from planning
     resolved_build_type_str: str
-    milestone_from_cli: str
 
     # Paths and config
     paths: dict[str, Path]
@@ -326,9 +323,6 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     cfg = inputs.cfg
     pkg_name = inputs.pkg_name
 
-    # Derive project name from package name
-    package = pkg_name[7:] if pkg_name.startswith("python-") else pkg_name
-
     # Resolve series
     resolved_ubuntu = resolve_series(inputs.ubuntu_series)
     releases_repo = paths["openstack_releases_repo"]
@@ -337,6 +331,12 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     else:
         openstack_target = inputs.target
     local_repo = paths["local_apt_repo"]
+
+    # Derive project name from releases metadata when possible
+    openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
+    package = openstack_pkgs.get(pkg_name)
+    if not package:
+        package = pkg_name[7:] if pkg_name.startswith("python-") else pkg_name
 
     activity("resolve", f"Package: {pkg_name}")
     run.log_event({"event": "resolve.package", "name": pkg_name})
@@ -401,7 +401,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
                 # No deliverable set, use pkg_name
                 deliverable_name = pkg_name
 
-            chosen, auto_milestone, reason = resolve_build_type_auto(
+            chosen, reason = resolve_build_type_auto(
                 releases_repo=releases_repo,
                 series=openstack_target,
                 source_package=pkg_name,
@@ -413,19 +413,15 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
             # Propagate exceptions as fatal for this package
             raise
         build_type = chosen
-        # milestone returned from auto resolver is rarely used; prefer CLI milestone
-        milestone_str = auto_milestone or inputs.milestone_from_cli
         run.log_event({
             "event": "resolve.build_type",
             "type": build_type.value,
-            "milestone": milestone_str,
             "auto_reason": reason,
         })
         activity("resolve", f"Chosen build type: {build_type.value} (auto: {reason})")
     else:
         build_type = _build_type_from_string(inputs.resolved_build_type_str)
-        milestone_str = inputs.milestone_from_cli
-        run.log_event({"event": "resolve.build_type", "type": build_type.value, "milestone": milestone_str})
+        run.log_event({"event": "resolve.build_type", "type": build_type.value})
 
     # Get previous series
     prev_series = get_previous_series(releases_repo, openstack_target)
@@ -527,8 +523,6 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
             activity("warn", f"Failed to load current LTS index ({current_lts_codename}): {exc}")
             run.log_event({"event": "plan.current_lts_index_failed", "series": current_lts_codename, "error": str(exc)})
 
-    # Load OpenStack packages
-    openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
     activity("plan", f"OpenStack packages: {len(openstack_pkgs)} in {openstack_target}")
 
     # -------------------------------------------------------------------------
@@ -561,7 +555,6 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         openstack_target,
         package,
         build_type,
-        milestone_str,
     )
 
     # Calculate tarball cache base
@@ -583,7 +576,6 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         cloud_archive=inputs.cloud_archive,
         build_type=build_type,
         build_type_str=build_type.value,
-        milestone=milestone_str,
         binary=inputs.binary,
         builder=inputs.builder,
         force=inputs.force,
@@ -885,7 +877,6 @@ def prepare_upstream_source(
         Tuple of (PhaseResult, PrepareResult).
     """
     from packastack.debpkg.changelog import (
-        generate_milestone_version,
         generate_release_version,
         get_current_version,
         increment_upstream_version,
@@ -938,7 +929,6 @@ def prepare_upstream_source(
         ctx.openstack_target,
         ctx.package,
         ctx.build_type,
-        ctx.milestone,
     )
     ctx.upstream = upstream
 
@@ -1136,7 +1126,7 @@ def prepare_upstream_source(
 
             signature_warning = "Snapshot build - no signature verification"
     else:
-        # Release/milestone: uscan first, then official, then fallbacks
+        # Release: uscan first, then official, then fallbacks
         upstream_tarball, signature_verified, signature_warning = _fetch_release_tarball(
             upstream=upstream,
             upstream_config=ctx.upstream_config,
@@ -1180,11 +1170,6 @@ def prepare_upstream_source(
     if ctx.build_type == BuildType.RELEASE and ctx.upstream:
         new_version = generate_release_version(
             ctx.upstream.version, epoch=parsed.epoch if parsed else 0
-        )
-    elif ctx.build_type == BuildType.MILESTONE and ctx.upstream:
-        milestone_str = ctx.milestone or ""
-        new_version = generate_milestone_version(
-            ctx.upstream.version, milestone_str, epoch=parsed.epoch if parsed else 0
         )
     elif ctx.build_type == BuildType.SNAPSHOT:
         # Use the version computed by acquire_upstream_snapshot using git describe
@@ -2083,7 +2068,7 @@ def import_and_patch(
 
         lp_bugs = ctx.cfg.get("launchpad_bugs", {})
         # Try to find bug for this series and build type
-        build_type_str = ctx.build_type.value if ctx.build_type else "release"
+        lookup_type = ctx.build_type.value if ctx.build_type else "release"
 
         # Check if this is a library project from openstack-releases registry
         is_library = False
@@ -2093,21 +2078,19 @@ def import_and_patch(
             if proj_info:
                 is_library = proj_info.is_library()
 
-        if build_type_str == "release" and is_library:
+        if lookup_type == "release" and is_library:
             # Try release-client first, then fall back to release
             key = f"{ctx.openstack_target}:release-client"
             lp_bug = lp_bugs.get(key)
+
+        # Primary lookup: use the normalized lookup_type
         if not lp_bug:
-            key = f"{ctx.openstack_target}:{build_type_str}"
-            lp_bug = lp_bugs.get(key)
-        # For snapshot builds, fall back to milestone bug if no snapshot-specific bug
-        if not lp_bug and build_type_str == "snapshot":
-            key = f"{ctx.openstack_target}:milestone"
+            key = f"{ctx.openstack_target}:{lookup_type}"
             lp_bug = lp_bugs.get(key)
 
     # Determine upstream version for changelog message
     # For snapshots, use the version from snapshot_result
-    # For releases/milestones, use the version from ctx.upstream
+    # For releases, use the version from ctx.upstream
     if snapshot_result and snapshot_result.upstream_version:
         upstream_version_for_changelog = snapshot_result.upstream_version
     elif ctx.upstream:
@@ -2612,4 +2595,3 @@ def build_single_package(
     outcome.success = True
     outcome.exit_code = EXIT_SUCCESS
     return outcome
-

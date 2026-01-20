@@ -396,7 +396,7 @@ The following event keys are used and must remain compatible:
 
 All Typer options in `build()` function (lines 1566-1674) must remain unchanged:
 - Positional: `package`
-- Options: `--target`, `--ubuntu-series`, `--cloud-archive`, `--type`, `--milestone`, `--force`, `--offline`, `--validate-plan`, `--plan-upload`, `--upload`, `--binary/--no-binary`, `--builder`, `--build-deps/--no-build-deps`, `--no-cleanup`, `--no-spinner`, `--yes`, `--use-gbp-dch/--no-gbp-dch`, `--include-retired`, `--skip-repo-regen` (hidden)
+- Options: `--target`, `--ubuntu-series`, `--cloud-archive`, `--type`, `--force`, `--offline`, `--validate-plan`, `--plan-upload`, `--upload`, `--binary/--no-binary`, `--builder`, `--build-deps/--no-build-deps`, `--no-cleanup`, `--no-spinner`, `--yes`, `--use-gbp-dch/--no-gbp-dch`, `--include-retired`, `--skip-repo-regen` (hidden)
 - Build-all options: `--all`, `--keep-going/--fail-fast`, `--max-failures`, `--resume`, `--resume-run-id`, `--retry-failed`, `--skip-failed/--no-skip-failed`, `--parallel`, `--packages-file`, `--dry-run`
 
 ---

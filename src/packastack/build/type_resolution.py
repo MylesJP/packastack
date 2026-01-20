@@ -41,30 +41,24 @@ if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
 
 # Valid build type values for CLI
-VALID_BUILD_TYPES = {"auto", "release", "snapshot", "milestone"}
+VALID_BUILD_TYPES = {"auto", "release", "snapshot"}
 
 
 def resolve_build_type_from_cli(
     build_type_str: str,
-    milestone: str,
-) -> tuple[str, str]:
+) -> str:
     """Parse and validate CLI build type options.
 
     Args:
-        build_type_str: --type value (auto, release, snapshot, milestone)
-        milestone: --milestone value (e.g., "b1", "rc1")
+        build_type_str: --type value (auto, release, snapshot)
 
     Returns:
-        Tuple of (build_type_str, milestone_string).
-        For "auto", returns ("auto", "") to indicate auto-selection needed.
+        Normalized build type string.
+        For "auto", returns "auto" to indicate auto-selection needed.
 
     Raises:
         typer.BadParameter: If invalid build type specified.
     """
-    # Milestone flag implies milestone type
-    if milestone:
-        return "milestone", milestone
-
     build_type_str = build_type_str.lower()
     if build_type_str not in VALID_BUILD_TYPES:
         raise typer.BadParameter(
@@ -72,7 +66,7 @@ def resolve_build_type_from_cli(
             f"Must be one of: {', '.join(sorted(VALID_BUILD_TYPES))}"
         )
 
-    return build_type_str, ""
+    return build_type_str
 
 
 def resolve_build_type_auto(
@@ -82,7 +76,7 @@ def resolve_build_type_auto(
     deliverable: str,
     offline: bool,
     run: RunContextType,
-) -> tuple[BuildType, str, str]:
+) -> tuple[BuildType, str]:
     """Auto-select build type based on openstack/releases data.
 
     Args:
@@ -94,7 +88,7 @@ def resolve_build_type_auto(
         run: RunContext for logging.
 
     Returns:
-        Tuple of (BuildType, milestone_string, reason).
+        Tuple of (BuildType, reason).
 
     Raises:
         typer.Exit: If releases repo is missing in offline mode.
@@ -112,7 +106,7 @@ def resolve_build_type_auto(
         else:
             # Would fetch here in online mode, but for now just use snapshot
             activity("resolve", "WARNING: openstack/releases repo not found, defaulting to snapshot")
-            return BuildType.SNAPSHOT, "", "releases_repo_unavailable"
+            return BuildType.SNAPSHOT, "releases_repo_unavailable"
 
     # Get cycle stage
     cycle_stage = determine_cycle_stage(releases_repo, series)
@@ -141,7 +135,7 @@ def resolve_build_type_auto(
 
         from packastack.upstream.releases import load_project_releases
 
-        proj_info = load_project_releases(releases_repo, series, source_package)
+        proj_info = load_project_releases(releases_repo, series, deliverable)
         if proj_info and proj_info.type in ("client-library", "library"):
             error_msg = (
                 f"Package {source_package} is a {proj_info.type} and cannot be built as a snapshot. "
@@ -158,7 +152,7 @@ def resolve_build_type_auto(
 
     activity("resolve", f"Auto-selected: {result.chosen_type.value} ({result.reason_human})")
 
-    return result.chosen_type, "", result.reason_code.value
+    return result.chosen_type, result.reason_code.value
 
 
 def build_type_from_string(build_type_str: str) -> BuildType:

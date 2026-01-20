@@ -18,9 +18,9 @@
 
 """Upstream source handling for Packastack build operations.
 
-Handles selection and fetching of upstream sources (release tarballs,
-snapshots from git, milestones), signature verification, and signature
-policy management.
+Handles selection and fetching of upstream sources (release tarballs
+and snapshots from git), signature verification, and signature policy
+management.
 """
 
 from __future__ import annotations
@@ -54,7 +54,6 @@ class UpstreamSource:
     tarball_url: str = ""
     signature_url: str = ""
     build_type: BuildType = BuildType.RELEASE
-    milestone: str = ""  # e.g., "b1", "rc1"
 
     @property
     def is_release(self) -> bool:
@@ -64,9 +63,6 @@ class UpstreamSource:
     def is_snapshot(self) -> bool:
         return self.build_type == BuildType.SNAPSHOT
 
-    @property
-    def is_milestone(self) -> bool:
-        return self.build_type == BuildType.MILESTONE
 
 
 @dataclass
@@ -173,7 +169,6 @@ def select_upstream_source(
     series: str,
     project: str,
     build_type: BuildType,
-    milestone: str = "",
     git_ref: str = "",
 ) -> UpstreamSource | None:
     """Select the appropriate upstream source for a build.
@@ -182,8 +177,7 @@ def select_upstream_source(
         releases_repo: Path to openstack/releases repository.
         series: OpenStack series (e.g., "2024.2").
         project: Project name.
-        build_type: Type of build (release, snapshot, milestone).
-        milestone: Milestone identifier for milestone builds (e.g., "b1", "rc1").
+        build_type: Type of build (release, snapshot).
         git_ref: Git ref for snapshot builds (default: HEAD of stable branch).
 
     Returns:
@@ -220,22 +214,6 @@ def select_upstream_source(
             signature_url=signature_url,
             build_type=BuildType.RELEASE,
         )
-
-    elif build_type == BuildType.MILESTONE:
-        # Find the milestone release
-        for rel in reversed(proj.releases):
-            if milestone.lower() in rel.version.lower():
-                tarball_url = build_tarball_url(proj.name, rel.version)
-                signature_url = build_signature_url(tarball_url)
-
-                return UpstreamSource(
-                    version=rel.version,
-                    tarball_url=tarball_url,
-                    signature_url=signature_url,
-                    build_type=BuildType.MILESTONE,
-                    milestone=milestone,
-                )
-        return None
 
     return None
 
@@ -584,7 +562,7 @@ def apply_signature_policy(debian_dir: Path, build_type: BuildType) -> list[Path
     removed: list[Path] = []
 
     if build_type != BuildType.SNAPSHOT:
-        # Keep signing keys for release and milestone builds
+        # Keep signing keys for release builds
         return removed
 
     # Remove signing key files for snapshots

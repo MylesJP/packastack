@@ -86,6 +86,7 @@ from packastack.planning.build_all_state import (
 from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
 from packastack.reports.plan_graph import render_waves
 from packastack.target.series import resolve_series
+from packastack.upstream.releases import load_openstack_packages
 from packastack.upstream.releases import (
     get_current_development_series,
 )
@@ -314,7 +315,6 @@ def run_build_all(
     ubuntu_series: str,
     cloud_archive: str,
     build_type: str,
-    milestone: str,
     binary: bool,
     keep_going: bool,
     max_failures: int,
@@ -336,8 +336,7 @@ def run_build_all(
         target: OpenStack series target (e.g., "devel", "caracal").
         ubuntu_series: Ubuntu series target (e.g., "noble").
         cloud_archive: Cloud archive pocket (e.g., "caracal").
-        build_type: Build type: auto, release, snapshot, or milestone.
-        milestone: Milestone version (e.g., b1, rc1).
+        build_type: Build type: auto, release, snapshot.
         binary: Whether to build binary packages.
         keep_going: Continue on failure.
         max_failures: Stop after N failures (0=unlimited).
@@ -363,7 +362,6 @@ def run_build_all(
                 ubuntu_series=ubuntu_series,
                 cloud_archive=cloud_archive,
                 build_type=build_type,
-                milestone=milestone,
                 binary=binary,
                 keep_going=keep_going,
                 max_failures=max_failures,
@@ -399,8 +397,7 @@ def build(
     target: str = typer.Option("devel", "-t", "--target", help="OpenStack series target"),
     ubuntu_series: str = typer.Option("devel", "-u", "--ubuntu-series", help="Ubuntu series target"),
     cloud_archive: str = typer.Option("", "-c", "--cloud-archive", help="Cloud archive pocket (e.g., caracal)"),
-    build_type: str = typer.Option("auto", "--type", help="Build type: auto, release, snapshot, or milestone"),
-    milestone: str = typer.Option("", "-m", "--milestone", help="Milestone version (e.g., b1, rc1) - implies --type milestone"),
+    build_type: str = typer.Option("auto", "--type", help="Build type: auto, release, snapshot"),
     force: bool = typer.Option(False, "-f", "--force", help="Proceed despite warnings"),
     offline: bool = typer.Option(False, "-o", "--offline", help="Run in offline mode"),
     validate_plan_only: bool = typer.Option(False, "-v", "--validate-plan", help="Stop after validated plan"),
@@ -501,7 +498,6 @@ def build(
             ubuntu_series=ubuntu_series,
             cloud_archive=cloud_archive,
             build_type=build_type,
-            milestone=milestone,
             force=force,
             offline=offline,
             binary=binary,
@@ -526,7 +522,6 @@ def build(
             ubuntu_series=ubuntu_series,
             cloud_archive=cloud_archive,
             build_type=build_type,
-            milestone=milestone,
             force=force,
             offline=offline,
             validate_plan_only=validate_plan_only,
@@ -558,7 +553,6 @@ def _build_single_mode(
     ubuntu_series: str,
     cloud_archive: str,
     build_type: str,
-    milestone: str,
     force: bool,
     offline: bool,
     validate_plan_only: bool,
@@ -600,7 +594,6 @@ def _build_single_mode(
                 ubuntu_series=ubuntu_series,
                 cloud_archive=cloud_archive,
                 build_type_str=build_type,
-                milestone=milestone,
                 force=force,
                 offline=offline,
                 include_retired=include_retired,
@@ -652,7 +645,6 @@ def _build_all_mode(
     ubuntu_series: str,
     cloud_archive: str,
     build_type: str,
-    milestone: str,
     force: bool,
     offline: bool,
     binary: bool,
@@ -672,7 +664,6 @@ def _build_all_mode(
         ubuntu_series=ubuntu_series,
         cloud_archive=cloud_archive,
         build_type=build_type,
-        milestone=milestone,
         binary=binary,
         keep_going=keep_going,
         max_failures=max_failures,
@@ -778,9 +769,7 @@ def _run_build(
     # =========================================================================
 
     # Parse CLI build type options
-    parsed_type_str, milestone_from_cli = _resolve_build_type_from_cli(
-        request.build_type_str, request.milestone
-    )
+    parsed_type_str = _resolve_build_type_from_cli(request.build_type_str)
 
     # Resolve build type early (especially for auto)
     resolved_build_type_str: str | None = None
@@ -795,12 +784,11 @@ def _run_build(
         else:
             openstack_target = request.target
 
-        # Infer deliverable name from package
-        deliverable = request.package
-        if request.package.startswith("python-"):
-            deliverable = request.package[7:]
+        # Infer deliverable name from releases metadata when possible
+        openstack_pkgs = load_openstack_packages(releases_repo, openstack_target)
+        deliverable = openstack_pkgs.get(request.package, request.package)
 
-        build_type_resolved, _milestone_resolved, _reason = _resolve_build_type_auto(
+        build_type_resolved, _reason = _resolve_build_type_auto(
             releases_repo=releases_repo,
             series=openstack_target,
             source_package=request.package,
@@ -820,7 +808,7 @@ def _run_build(
     from packastack.commands.plan import run_plan_for_package
 
     plan_request = request.to_plan_request()
-    # Pass resolved build type to planning to skip snapshot checks for release/milestone
+    # Pass resolved build type to planning to skip snapshot checks for release
     from dataclasses import replace
     # If the CLI asked for auto, leave plan_request.build_type as 'auto'
     # so each package can decide individually. Only override when the
@@ -1008,7 +996,6 @@ def _run_build(
             ubuntu_series=request.ubuntu_series,
             cloud_archive=request.cloud_archive,
             build_type_str=request.build_type_str,
-            milestone=request.milestone,
             binary=request.binary,
             builder=request.builder,
             force=request.force,
@@ -1028,7 +1015,6 @@ def _run_build(
             # selection can occur during setup. Otherwise pass the resolved
             # build type determined earlier.
             resolved_build_type_str=(parsed_type_str if parsed_type_str == "auto" else resolved_build_type_str),
-            milestone_from_cli=milestone_from_cli,
             paths=paths,
             cfg=cfg,
             run=run,
@@ -1185,4 +1171,3 @@ def _run_build(
     # All packages built successfully
     activity("build", f"Successfully built all {len(plan_result.build_order)} package(s)")
     return EXIT_SUCCESS
-

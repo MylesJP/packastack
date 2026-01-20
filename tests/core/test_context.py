@@ -68,22 +68,9 @@ class TestBuildOptions:
         """Test default build options."""
         options = BuildOptions()
         assert options.build_type == BuildType.RELEASE
-        assert options.milestone == ""
         assert options.binary is True
 
-    def test_milestone_requires_build_type_milestone(self) -> None:
-        """Test that milestone requires build_type=MILESTONE."""
-        with pytest.raises(ValueError, match="milestone='b1' requires build_type=MILESTONE"):
-            BuildOptions(
-                milestone="b1",
-                build_type=BuildType.RELEASE,
-            )
-
-    def test_milestone_with_correct_build_type(self) -> None:
-        """Test milestone with correct build_type."""
-        options = BuildOptions(
-            milestone="b1",
-            build_type=BuildType.MILESTONE,
-        )
-        assert options.milestone == "b1"
-        assert options.build_type == BuildType.MILESTONE
+    def test_snapshot_build_type(self) -> None:
+        """Test snapshot build type is accepted."""
+        options = BuildOptions(build_type=BuildType.SNAPSHOT)
+        assert options.build_type == BuildType.SNAPSHOT

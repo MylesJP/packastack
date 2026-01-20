@@ -399,13 +399,13 @@ class TestIsSnapshotEligible:
         assert preferred == "2.0.0.0rc1"
 
     def test_prebeta_releases_allowed_with_warning(self, releases_repo: Path) -> None:
-        """Only pre-beta releases (like milestones), should be allowed with warning."""
+        """Only pre-beta releases should be allowed with warning."""
         dalmatian_dir = releases_repo / "deliverables" / "2024.2"
         # Pre-beta releases typically look like "1.0.0.0a1" or don't contain b/rc
-        # but also aren't "final" versions - they're development milestones
-        # Actually, the policy states "before first beta" - these would be milestone
+        # but also aren't "final" versions - they're development pre-releases
+        # Actually, the policy states "before first beta" - these would be
         # releases that don't match beta/rc/final patterns.
-        # For testing, let's assume "a" versions are pre-beta milestones
+        # For testing, let's assume "a" versions are pre-beta pre-releases
         prebeta_data = {
             "team": "Test",
             "type": "service",

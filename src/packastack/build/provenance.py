@@ -126,7 +126,7 @@ class BuildProvenance:
     )
 
     # Build type
-    build_type: str = ""  # release, snapshot, milestone
+    build_type: str = ""  # release, snapshot
 
 
 def create_provenance(

@@ -161,7 +161,7 @@ class BuildAllState:
     """Ubuntu series."""
 
     build_type: str
-    """Build type: release, snapshot, or milestone."""
+    """Build type: release or snapshot."""
 
     started_at: str = ""
     """ISO timestamp of run start."""
@@ -414,7 +414,7 @@ def create_initial_state(
         run_id: Unique run identifier.
         target: OpenStack target series.
         ubuntu_series: Ubuntu series.
-        build_type: Build type (release/snapshot/milestone).
+        build_type: Build type (release/snapshot).
         packages: All packages to build.
         build_order: Topologically sorted build order.
         max_failures: Maximum failures before stopping.

@@ -907,7 +907,7 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     """Update or remove debian/upstream/signing-key.asc based on build type.
 
     For snapshot builds, removes the signing key file since snapshots are unsigned.
-    For release/milestone builds, updates the signing key for the current series.
+    For release builds, updates the signing key for the current series.
 
     Args:
         pkg_repo: Path to the package repository.
@@ -930,7 +930,7 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
                 return False
         return False
 
-    # For release/milestone builds, update the signing key
+    # For release builds, update the signing key
     index_path = releases_repo / "doc" / "source" / "index.rst"
     if not index_path.exists():
         return False

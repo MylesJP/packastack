@@ -45,7 +45,6 @@ def base_setup_inputs(tmp_path, mock_run):
         ubuntu_series="resolute",
         cloud_archive="",
         build_type_str="auto",
-        milestone="",
         binary=False,
         builder="sbuild",
         force=False,
@@ -62,7 +61,6 @@ def base_setup_inputs(tmp_path, mock_run):
         normalize_to_prev_lts_floor=False,
         dry_run_control_edit=False,
         resolved_build_type_str="auto",
-        milestone_from_cli="",
         paths={
             "cache_root": tmp_path / "cache",
             "openstack_releases_repo": tmp_path / "releases",
@@ -386,6 +384,5 @@ class TestDeliverableNameHandling:
                 # Should have been called with "cinder" and found it
                 load_calls = [call.args[2] for call in mock_load_releases.call_args_list]
                 assert "cinder" in load_calls, "Should have checked if 'cinder' exists in releases"
-
 
 

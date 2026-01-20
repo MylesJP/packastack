@@ -137,37 +137,6 @@ def generate_snapshot_version(
     return version
 
 
-def generate_milestone_version(
-    base_version: str,
-    milestone: str,
-    ubuntu_revision: int = 1,
-    epoch: int = 0,
-) -> str:
-    """Generate version string for a milestone build.
-
-    Format: [epoch:]<version>~<milestone>-0ubuntu<N>
-    Where milestone is like "b1", "b2", "rc1", "rc2".
-
-    Args:
-        base_version: Base upstream version (e.g., "30.0.0").
-        milestone: Milestone identifier (e.g., "b1", "rc1").
-        ubuntu_revision: Ubuntu package revision number.
-        epoch: Debian epoch (prepended as epoch:version if non-zero).
-
-    Returns:
-        Full Debian version string.
-    """
-    # Normalize milestone format
-    milestone = milestone.lower()
-    if not milestone.startswith(("b", "rc")):
-        milestone = f"b{milestone}"
-
-    version = f"{base_version}~{milestone}-0ubuntu{ubuntu_revision}"
-    if epoch:
-        return f"{epoch}:{version}"
-    return version
-
-
 def increment_upstream_version(version: str) -> str:
     """Increment the last numeric component of an upstream version.
 
@@ -540,7 +509,7 @@ def generate_changelog_message(
     """Generate changelog entry messages for a build.
 
     Args:
-        build_type: Type of build (release, snapshot, milestone).
+        build_type: Type of build (release, snapshot).
         upstream_version: Upstream version string.
         git_ref: Git ref for snapshots.
         signature_verified: Whether upstream signature was verified.
@@ -561,8 +530,6 @@ def generate_changelog_message(
         changes.append(f"New upstream release{series_name}.{lp_ref}")
     elif build_type == "snapshot":
         changes.append(f"New upstream snapshot from {git_ref}{series_name}.{lp_ref}")
-    elif build_type == "milestone":
-        changes.append(f"New upstream milestone {upstream_version}{series_name}.{lp_ref}")
     else:
         changes.append(f"New upstream version {upstream_version}{series_name}.{lp_ref}")
 

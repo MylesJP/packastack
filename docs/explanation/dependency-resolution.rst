@@ -15,7 +15,7 @@ Upstream version floors are enforced by default. Use ``--min-version-policy repo
 
 Packaging type propagation
 --------------------------
-Release vs snapshot vs milestone is a promise you make for the target only. Dependencies keep whatever versions the archive or your local repo provide unless you explicitly rebuild them. Flipping ``--snapshot`` does not cascade; PackaStack prefers stability for the rest of the graph.
+Release vs snapshot is a promise you make for the target only. Dependencies keep whatever versions the archive or your local repo provide unless you explicitly rebuild them. Flipping ``--snapshot`` does not cascade; PackaStack prefers stability for the rest of the graph.
 
 Offline considerations
 ----------------------

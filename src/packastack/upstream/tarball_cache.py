@@ -66,7 +66,7 @@ class TarballCacheEntry:
         project: Project name (e.g., "glance", "nova").
         package_name: Debian source package name.
         version: Version string.
-        build_type: Build type ("release", "snapshot", "milestone").
+        build_type: Build type ("release", "snapshot").
         source_method: How tarball was acquired ("uscan", "official", etc.).
         source_url: URL where tarball was fetched from.
         git_sha: Git commit SHA for snapshots.

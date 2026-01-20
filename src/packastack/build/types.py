@@ -180,7 +180,7 @@ class BuildOutcome:
         exit_code: Final exit code.
         package: Source package name.
         version: Built version string.
-        build_type: Build type used (release, snapshot, milestone).
+        build_type: Build type used (release, snapshot).
         artifacts: List of produced artifact paths.
         provenance: Build provenance record.
         error: Error message if build failed.

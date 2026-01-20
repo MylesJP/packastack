@@ -303,9 +303,9 @@ def run_plan_for_package(
     targets = target_names
 
     # Phase: policy - check snapshot eligibility
-    # Skip this check if build_type is explicitly set to RELEASE or MILESTONE
-    # (means caller already resolved build type and wants to use release/milestone)
-    skip_snapshot_check = request.build_type in ("release", "milestone")
+    # Skip this check if build_type is explicitly set to RELEASE
+    # (means caller already resolved build type and wants to use release)
+    skip_snapshot_check = request.build_type in ("release", "snapshot")
 
     policy_issues = []
     preferred_versions = {}
@@ -1538,7 +1538,7 @@ def plan(
     skip_local: bool = typer.Option(False, "-s", "--skip-local", help="Skip local apt repo search"),
     pretty: bool = typer.Option(False, "-r", "--pretty", help="Print the dependency graph"),
     all_packages: bool = typer.Option(False, "-a", "--all", help="Plan all discovered packages"),
-    type_mode: str = typer.Option("auto", "--type", help="Build type: auto|release|milestone|snapshot"),
+    type_mode: str = typer.Option("auto", "--type", help="Build type: auto|release|snapshot"),
     table: bool = typer.Option(False, "--table", help="Print full type selection table"),
     explain_types: bool = typer.Option(False, "--explain-types", help="Explain type selection reasoning"),
     parallel: int = typer.Option(0, "-j", "--parallel", help="Parallel workers (0=auto)"),
@@ -1588,7 +1588,7 @@ def plan(
             sys.exit(EXIT_CONFIG_ERROR)
 
         # Validate type mode
-        valid_type_modes = ("auto", "release", "milestone", "snapshot")
+        valid_type_modes = ("auto", "release", "snapshot")
         if type_mode not in valid_type_modes:
             activity("error", f"Invalid --type: {type_mode}. Must be one of: {', '.join(valid_type_modes)}")
             sys.exit(EXIT_CONFIG_ERROR)

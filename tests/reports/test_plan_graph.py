@@ -387,14 +387,12 @@ class TestRenderDot:
         )
         graph.nodes["release_pkg"] = GraphNode(id="release_pkg", build_type="release")
         graph.nodes["snapshot_pkg"] = GraphNode(id="snapshot_pkg", build_type="snapshot")
-        graph.nodes["milestone_pkg"] = GraphNode(id="milestone_pkg", build_type="milestone")
 
         dot = render_dot(graph)
 
         # Check that each node has a fillcolor attribute
         assert 'fillcolor="#90EE90"' in dot  # release - light green
         assert 'fillcolor="#ADD8E6"' in dot  # snapshot - light blue
-        assert 'fillcolor="#FFE4B5"' in dot  # milestone - moccasin
 
     def test_cycle_status(self) -> None:
         """Test that cycle nodes get red color."""
@@ -614,7 +612,6 @@ class TestRenderAscii:
         output = render_ascii(graph)
 
         assert "[R]=Release" in output
-        assert "[M]=Milestone" in output
         assert "[S]=Snapshot" in output
 
     def test_cycle_warning(self) -> None:

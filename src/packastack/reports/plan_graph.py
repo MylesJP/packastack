@@ -45,7 +45,7 @@ class GraphNode:
     """A node in the plan graph representing a source package."""
 
     id: str
-    build_type: str = "snapshot"  # release, milestone, snapshot
+    build_type: str = "snapshot"  # release, snapshot
     status: str = "ok"  # ok, blocked, cycle
     order: int = -1  # Position in topological order (-1 = not computed)
     wave: int = -1  # Build wave number (-1 = not computed)
@@ -369,8 +369,6 @@ def render_waves(
                 bt = node.build_type.lower()
                 if bt == "snapshot":
                     return f"{n} (s)"
-                if bt == "milestone":
-                    return f"{n} (m)"
                 # default to release
                 return f"{n} (r)"
             return n
@@ -528,7 +526,6 @@ def render_dot(
     # Color mapping for build types
     type_colors = {
         "release": "#90EE90",  # Light green
-        "milestone": "#FFE4B5",  # Moccasin
         "snapshot": "#ADD8E6",  # Light blue
     }
 
@@ -624,7 +621,7 @@ def render_ascii(
 
             node = graph.nodes[node_id]
             connector = "└── " if is_last else "├── "
-            type_marker = {"release": "R", "milestone": "M", "snapshot": "S"}.get(node.build_type, "?")
+            type_marker = {"release": "R", "snapshot": "S"}.get(node.build_type, "?")
             status_marker = "" if node.status == "ok" else f" [{node.status}]"
             lines.append(f"{prefix}{connector}[{type_marker}] {node.id}{status_marker}")
 
@@ -654,7 +651,7 @@ def render_ascii(
             if not node:
                 continue
 
-            type_marker = {"release": "R", "milestone": "M", "snapshot": "S"}.get(node.build_type, "?")
+            type_marker = {"release": "R", "snapshot": "S"}.get(node.build_type, "?")
             status_marker = "" if node.status == "ok" else f" [{node.status}]"
             deps_str = ""
             if node.dependencies:
@@ -670,7 +667,7 @@ def render_ascii(
         lines.append(f"⚠️  Output truncated to {max_nodes} nodes. Use --graph-focus or see HTML report for full graph.")
 
     lines.append("")
-    lines.append("Legend: [R]=Release [M]=Milestone [S]=Snapshot")
+    lines.append("Legend: [R]=Release [S]=Snapshot")
 
     return '\n'.join(lines)
 
@@ -712,7 +709,7 @@ def render_html(graph: PlanGraph) -> str:
     topo_json = json.dumps(graph.topo_order)
 
     # Count by type
-    type_counts = {"release": 0, "milestone": 0, "snapshot": 0}
+    type_counts = {"release": 0, "snapshot": 0}
     for node in graph.nodes.values():
         if node.build_type in type_counts:
             type_counts[node.build_type] += 1
@@ -808,7 +805,6 @@ def render_html(graph: PlanGraph) -> str:
     <style>
         :root {{
             --color-release: #90EE90;
-            --color-milestone: #FFE4B5;
             --color-snapshot: #ADD8E6;
             --color-cycle: #FF6B6B;
             --color-blocked: #FFB347;
@@ -852,7 +848,6 @@ def render_html(graph: PlanGraph) -> str:
         .card-title {{ font-size: 0.85em; color: #666; margin-bottom: 5px; }}
         .card-value {{ font-size: 1.8em; font-weight: bold; }}
         .card-release {{ border-left: 4px solid var(--color-release); }}
-        .card-milestone {{ border-left: 4px solid var(--color-milestone); }}
         .card-snapshot {{ border-left: 4px solid var(--color-snapshot); }}
 
         .warning-box {{
@@ -926,7 +921,6 @@ def render_html(graph: PlanGraph) -> str:
             font-weight: 500;
         }}
         .type-release {{ background: var(--color-release); color: #155724; }}
-        .type-milestone {{ background: var(--color-milestone); color: #856404; }}
         .type-snapshot {{ background: var(--color-snapshot); color: #0c5460; }}
 
         .wave-lanes {{
@@ -971,7 +965,6 @@ def render_html(graph: PlanGraph) -> str:
             cursor: pointer;
         }}
         .wave-pill.type-release {{ background: var(--color-release); color: #155724; border-color: #9fd59f; }}
-        .wave-pill.type-milestone {{ background: var(--color-milestone); color: #856404; border-color: #e8c98b; }}
         .wave-pill.type-snapshot {{ background: var(--color-snapshot); color: #0c5460; border-color: #9bc8da; }}
         .wave-empty {{ color: #666; font-style: italic; }}
 
@@ -1067,10 +1060,6 @@ def render_html(graph: PlanGraph) -> str:
                 <div class="card-title">Release</div>
                 <div class="card-value">{type_counts['release']}</div>
             </div>
-            <div class="card card-milestone">
-                <div class="card-title">Milestone</div>
-                <div class="card-value">{type_counts['milestone']}</div>
-            </div>
             <div class="card card-snapshot">
                 <div class="card-title">Snapshot</div>
                 <div class="card-value">{type_counts['snapshot']}</div>
@@ -1104,7 +1093,6 @@ def render_html(graph: PlanGraph) -> str:
                 </div>
                 <div class="legend">
                     <div class="legend-item"><div class="legend-color" style="background: var(--color-release)"></div> Release</div>
-                    <div class="legend-item"><div class="legend-color" style="background: var(--color-milestone)"></div> Milestone</div>
                     <div class="legend-item"><div class="legend-color" style="background: var(--color-snapshot)"></div> Snapshot</div>
                     <div class="legend-item"><div class="legend-color" style="background: var(--color-cycle)"></div> Cycle</div>
                 </div>
@@ -1254,7 +1242,6 @@ def render_html(graph: PlanGraph) -> str:
             // Nodes
             const typeColors = {{
                 'release': '#90EE90',
-                'milestone': '#FFE4B5',
                 'snapshot': '#ADD8E6'
             }};
             const statusColors = {{

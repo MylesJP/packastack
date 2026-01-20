@@ -33,7 +33,7 @@ Why it works this way: planning before building catches missing packages and cyc
 
 4) build: orchestration in motion
 ---------------------------------
-Build time: PackaStack checks that ``packastack-<series>-<arch>`` exists, creating or refreshing as needed. It preps sources (release tarballs, snapshots, or milestones), applies policy, resolves build-deps (and can build them if you allowed ``--build-deps``), then drives the builder—``sbuild`` by default, ``dpkg-buildpackage`` if you insist—inside the schroot. Artifacts, indexes, and logs land under ``<workspace>/output`` and get published into ``<workspace>/localrepo``. With ``--offline``, the schroot’s network card is metaphorically yanked; pre-seeding is mandatory.
+Build time: PackaStack checks that ``packastack-<series>-<arch>`` exists, creating or refreshing as needed. It preps sources (release tarballs or snapshots), applies policy, resolves build-deps (and can build them if you allowed ``--build-deps``), then drives the builder—``sbuild`` by default, ``dpkg-buildpackage`` if you insist—inside the schroot. Artifacts, indexes, and logs land under ``<workspace>/output`` and get published into ``<workspace>/localrepo``. With ``--offline``, the schroot’s network card is metaphorically yanked; pre-seeding is mandatory.
 
 What actually runs: ``sbuild -d <series> --arch <arch> -c packastack-<series>-<arch> <foo>.dsc`` plus a handful of ``--chroot-setup-commands`` that bind-mount the local repo into ``/srv/packastack-apt`` and add it to APT sources, followed by matching cleanup commands. Switch to ``--builder dpkg`` and PackaStack swaps sbuild for ``dpkg-buildpackage``—useful for source-only spins but less hermetic.
 

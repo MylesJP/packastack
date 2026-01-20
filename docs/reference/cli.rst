@@ -53,7 +53,7 @@ Builds an OpenStack package end-to-end: validates the plan, fetches sources, app
 
 - ``package`` (positional): source package or OpenStack project name.
 - ``-u``, ``--ubuntu-series`` and ``-t``, ``--target``: choose Ubuntu and OpenStack targets (default ``devel`` for both).
-- ``-r/-R``, ``--release/--no-release``: build from release tarball (default on). Use ``--snapshot`` for git snapshots or ``--milestone`` for milestone tarballs.
+- ``-r/-R``, ``--release/--no-release``: build from release tarball (default on). Use ``--snapshot`` for git snapshots.
 - ``-c``, ``--cloud-archive``: include the cloud archive index in dependency resolution (planning only).
 - ``-o``, ``--offline``: disable PackaStack network fetches; requires cached tarballs and an existing schroot.
 - ``-b/-B``, ``--binary/--no-binary``: toggle building binary packages (default on); ``--builder`` selects ``sbuild`` (default) or ``dpkg``.

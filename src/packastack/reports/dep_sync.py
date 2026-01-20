@@ -338,7 +338,6 @@ class ManifestReport:
     build_order: list[str] = field(default_factory=list)
     # Stats by build type
     release_count: int = 0
-    milestone_count: int = 0
     snapshot_count: int = 0
 
     def __post_init__(self) -> None:
@@ -355,7 +354,6 @@ class ManifestReport:
             "build_order": self.build_order,
             "stats": {
                 "release_count": self.release_count,
-                "milestone_count": self.milestone_count,
                 "snapshot_count": self.snapshot_count,
                 "total_packages": len(self.packages),
             },
@@ -392,8 +390,6 @@ def create_manifest_report(manifest: BuildManifest) -> ManifestReport:
         # Count by type
         if pkg.build_type == BuildType.RELEASE:
             report.release_count += 1
-        elif pkg.build_type == BuildType.MILESTONE:
-            report.milestone_count += 1
         else:
             report.snapshot_count += 1
 
@@ -438,7 +434,6 @@ def render_manifest_report_text(report: ManifestReport) -> str:
     lines.append("-" * 40)
     lines.append(f"  Total packages: {len(report.packages)}")
     lines.append(f"  Release builds: {report.release_count}")
-    lines.append(f"  Milestone builds: {report.milestone_count}")
     lines.append(f"  Snapshot builds: {report.snapshot_count}")
 
     return "\n".join(lines)

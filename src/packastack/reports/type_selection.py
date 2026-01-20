@@ -76,10 +76,6 @@ def render_html(report: TypeSelectionReport, output_path: Path) -> Path:
             <div class="card-title">Release</div>
             <div class="card-value">{report.count_release}</div>
         </div>
-        <div class="card card-milestone">
-            <div class="card-title">Milestone</div>
-            <div class="card-value">{report.count_milestone}</div>
-        </div>
         <div class="card card-snapshot">
             <div class="card-title">Snapshot</div>
             <div class="card-value">{report.count_snapshot}</div>
@@ -275,7 +271,6 @@ def render_html(report: TypeSelectionReport, output_path: Path) -> Path:
     <style>
         :root {{
             --color-release: #28a745;
-            --color-milestone: #ffc107;
             --color-snapshot: #17a2b8;
             --color-bg: #f8f9fa;
             --color-border: #dee2e6;
@@ -326,8 +321,6 @@ def render_html(report: TypeSelectionReport, output_path: Path) -> Path:
         .card-value {{ font-size: 2em; font-weight: bold; }}
         .card-release {{ border-left: 4px solid var(--color-release); }}
         .card-release .card-value {{ color: var(--color-release); }}
-        .card-milestone {{ border-left: 4px solid var(--color-milestone); }}
-        .card-milestone .card-value {{ color: #856404; }}
         .card-snapshot {{ border-left: 4px solid var(--color-snapshot); }}
         .card-snapshot .card-value {{ color: var(--color-snapshot); }}
         .card-retired {{ border-left: 4px solid #6c757d; }}
@@ -391,7 +384,6 @@ def render_html(report: TypeSelectionReport, output_path: Path) -> Path:
         }}
         .main-table tbody tr:hover {{ background: #f1f3f5; }}
         .type-release td:nth-child(7) {{ color: var(--color-release); }}
-        .type-milestone td:nth-child(7) {{ color: #856404; }}
         .type-snapshot td:nth-child(7) {{ color: var(--color-snapshot); }}
         details {{ cursor: pointer; }}
         details summary {{ color: #007bff; }}
@@ -565,7 +557,7 @@ def render_compact_summary(report: TypeSelectionReport) -> str:
         f"[plan] Type selection ({report.type_mode}):",
         f"[plan]   Cycle stage: {report.cycle_stage.value}",
         f"[plan]   Total: {len(report.packages)} packages",
-        f"[plan]   Release: {report.count_release}, Milestone: {report.count_milestone}, Snapshot: {report.count_snapshot}",
+        f"[plan]   Release: {report.count_release}, Snapshot: {report.count_snapshot}",
     ]
 
     # Show a few examples

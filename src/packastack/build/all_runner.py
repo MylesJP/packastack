@@ -99,7 +99,6 @@ def _run_build_all(
     ubuntu_series = request.ubuntu_series
     cloud_archive = request.cloud_archive
     build_type = request.build_type
-    milestone = request.milestone
     binary = request.binary
     keep_going = request.keep_going
     max_failures = request.max_failures
@@ -121,9 +120,6 @@ def _run_build_all(
     if parallel == 0:
         parallel = get_default_parallel_workers()
 
-    # Handle milestone as override
-    if milestone and build_type == "auto":
-        build_type = "milestone"
 
     # Resolve series
     resolved_ubuntu = resolve_series(ubuntu_series)

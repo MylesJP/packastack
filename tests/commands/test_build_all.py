@@ -53,7 +53,6 @@ def _call_run_build_all(
     cloud_archive: str = "",
     release: bool = True,
     snapshot: bool = False,
-    milestone: str = "",
     binary: bool = False,
     keep_going: bool = True,
     max_failures: int = 0,
@@ -72,9 +71,7 @@ def _call_run_build_all(
     This bridges the old kwarg-style test calls to the new BuildAllRequest-based API.
     """
     # Convert old-style release/snapshot bools to new build_type string
-    if milestone:
-        build_type = "milestone"
-    elif snapshot:
+    if snapshot:
         build_type = "snapshot"
     elif release:
         build_type = "release"
@@ -86,7 +83,6 @@ def _call_run_build_all(
         ubuntu_series=ubuntu_series,
         cloud_archive=cloud_archive,
         build_type=build_type,
-        milestone=milestone,
         binary=binary,
         keep_going=keep_going,
         max_failures=max_failures,
@@ -672,7 +668,6 @@ class TestRunBuildAllIndexLoading:
             cloud_archive="caracal",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -875,7 +870,7 @@ class TestRunSingleBuild:
             target="dalmatian",
             ubuntu_series="noble",
             cloud_archive="",
-            build_type="milestone",
+            build_type="snapshot",
             binary=True,
             force=False,
             run_dir=tmp_path,
@@ -1079,7 +1074,6 @@ class TestRunBuildAllResume:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1129,7 +1123,6 @@ class TestRunBuildAllResume:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1184,7 +1177,6 @@ class TestRunBuildAllDiscovery:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1276,7 +1268,6 @@ class TestRunBuildAllCycles:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1358,7 +1349,6 @@ class TestRunBuildAllMissingDeps:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=1,
@@ -1453,7 +1443,6 @@ class TestRunBuildAllExecution:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1522,7 +1511,6 @@ class TestRunBuildAllRetired:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1593,7 +1581,6 @@ class TestRunBuildAllDevelTarget:
             cloud_archive="",
             release=True,
             snapshot=False,
-            milestone="b1",
             binary=False,
             keep_going=True,
             max_failures=0,
@@ -1636,7 +1623,6 @@ class TestBuildAllCli:
             ubuntu_series="devel",
             cloud_archive="",
             build_type="release",
-            milestone="",
             binary=True,
             keep_going=True,
             max_failures=0,

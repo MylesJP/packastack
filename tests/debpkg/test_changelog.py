@@ -209,42 +209,6 @@ class TestUpdateChangelogGbp:
         assert ver == "3:30.0.0~git20240115.abc1234-0ubuntu2"
 
 
-class TestGenerateMilestoneVersion:
-    """Tests for generate_milestone_version function."""
-
-    def test_beta_milestone(self) -> None:
-        """Test beta milestone version."""
-        ver = changelog.generate_milestone_version("30.0.0", "b1")
-        assert ver == "30.0.0~b1-0ubuntu1"
-
-    def test_rc_milestone(self) -> None:
-        """Test release candidate milestone version."""
-        ver = changelog.generate_milestone_version("30.0.0", "rc1")
-        assert ver == "30.0.0~rc1-0ubuntu1"
-
-    def test_milestone_normalization(self) -> None:
-        """Test milestone normalization (add 'b' prefix)."""
-        ver = changelog.generate_milestone_version("30.0.0", "1")
-        assert ver == "30.0.0~b1-0ubuntu1"
-
-    def test_milestone_uppercase(self) -> None:
-        """Test uppercase milestone is lowercased."""
-        ver = changelog.generate_milestone_version("30.0.0", "RC2")
-        assert ver == "30.0.0~rc2-0ubuntu1"
-
-    def test_milestone_with_epoch(self) -> None:
-        """Test milestone version with epoch."""
-        ver = changelog.generate_milestone_version("30.0.0", "b1", epoch=1)
-        assert ver == "1:30.0.0~b1-0ubuntu1"
-
-    def test_milestone_with_epoch_and_revision(self) -> None:
-        """Test milestone with epoch and revision."""
-        ver = changelog.generate_milestone_version(
-            "30.0.0", "rc1", ubuntu_revision=2, epoch=2
-        )
-        assert ver == "2:30.0.0~rc1-0ubuntu2"
-
-
 class TestIncrementUpstreamVersion:
     """Tests for increment_upstream_version function."""
 
@@ -422,20 +386,6 @@ class TestGenerateChangelogMessage:
         assert len(changes) == 1  # No signature line anymore
         assert "snapshot" in changes[0].lower()
         assert "abc1234" in changes[0]
-
-    def test_milestone_message(self) -> None:
-        """Test milestone changelog message."""
-        changes = changelog.generate_changelog_message(
-            build_type="milestone",
-            upstream_version="30.0.0.0b1",
-            git_ref="",
-            signature_verified=False,
-            signature_warning="Signature missing",
-        )
-        assert "milestone" in changes[0].lower()
-        assert "30.0.0.0b1" in changes[0]
-        # Warning is still included
-        assert "Signature missing" in changes[1]
 
     def test_unknown_build_type(self) -> None:
         """Test unknown build type uses default message."""

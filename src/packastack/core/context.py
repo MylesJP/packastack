@@ -61,7 +61,7 @@ class PlanRequest:
         offline: --offline flag for offline mode.
         include_retired: --include-retired flag.
         skip_local: Skip local apt repo search.
-        build_type: Optional resolved build type to skip snapshot checks for RELEASE/MILESTONE.
+        build_type: Optional resolved build type to skip snapshot checks for RELEASE.
     """
 
     package: str
@@ -87,7 +87,6 @@ class BuildRequest:
         ubuntu_series: Ubuntu series target (e.g., "devel", "noble").
         cloud_archive: Cloud archive pocket or empty string.
         build_type_str: Build type as string ("auto", "release", etc.).
-        milestone: Milestone version string if applicable.
         force: --force flag.
         offline: --offline flag.
         include_retired: --include-retired flag.
@@ -109,7 +108,6 @@ class BuildRequest:
     ubuntu_series: str = "devel"
     cloud_archive: str = ""
     build_type_str: str = "auto"
-    milestone: str = ""
     force: bool = False
     offline: bool = False
     include_retired: bool = False
@@ -160,8 +158,7 @@ class BuildAllRequest:
         target: OpenStack series target (e.g., "devel", "caracal").
         ubuntu_series: Ubuntu series target (e.g., "devel", "noble").
         cloud_archive: Cloud archive pocket or empty string.
-        build_type: Build type string ("auto", "release", "snapshot", "milestone").
-        milestone: Milestone version string if applicable.
+        build_type: Build type string ("auto", "release", "snapshot").
         binary: Build binary packages.
         keep_going: Continue on failure.
         max_failures: Stop after N failures (0=unlimited).
@@ -180,7 +177,6 @@ class BuildAllRequest:
     ubuntu_series: str = "devel"
     cloud_archive: str = ""
     build_type: str = "auto"
-    milestone: str = ""
     binary: bool = True
     keep_going: bool = True
     max_failures: int = 0
@@ -242,8 +238,7 @@ class BuildOptions:
     """Immutable configuration for build-specific settings.
 
     Attributes:
-        build_type: Type of build (release, milestone, snapshot).
-        milestone: Milestone version string (e.g., "b1", "rc1").
+        build_type: Type of build (release, snapshot).
         binary: Whether to build binary packages.
         builder: Builder for binary packages ("sbuild" or "dpkg").
         build_deps: Whether to auto-build missing dependencies.
@@ -255,7 +250,6 @@ class BuildOptions:
     """
 
     build_type: BuildType = BuildType.RELEASE
-    milestone: str = ""
     binary: bool = True
     builder: str = "sbuild"
     build_deps: bool = True
@@ -266,11 +260,10 @@ class BuildOptions:
     upload: bool = False
 
     def __post_init__(self) -> None:
-        """Validate milestone/build_type consistency."""
-        if self.milestone and self.build_type != BuildType.MILESTONE:
+        """Validate build_type consistency."""
+        if self.build_type not in (BuildType.RELEASE, BuildType.SNAPSHOT):
             raise ValueError(
-                f"milestone='{self.milestone}' requires build_type=MILESTONE, "
-                f"got build_type={self.build_type.value}"
+                f"build_type must be RELEASE or SNAPSHOT, got {self.build_type.value}"
             )
 
 
@@ -346,7 +339,6 @@ class BuildContext:
         yes: bool = False,
         # Build option args
         build_type: BuildType = BuildType.RELEASE,
-        milestone: str = "",
         binary: bool = True,
         builder: str = "sbuild",
         build_deps: bool = True,
@@ -376,7 +368,6 @@ class BuildContext:
             include_retired: --include-retired flag.
             yes: --yes flag.
             build_type: Resolved BuildType enum.
-            milestone: Milestone string if applicable.
             binary: --binary flag.
             builder: --builder value.
             build_deps: --build-deps flag.
@@ -409,7 +400,6 @@ class BuildContext:
 
         options = BuildOptions(
             build_type=build_type,
-            milestone=milestone,
             binary=binary,
             builder=builder,
             build_deps=build_deps,
@@ -478,7 +468,6 @@ class BuildAllContext:
         offline: bool = False,
         # Build option args
         build_type: BuildType = BuildType.RELEASE,
-        milestone: str = "",
         binary: bool = True,
         # Resume args
         resume: bool = False,
@@ -510,7 +499,6 @@ class BuildAllContext:
 
         options = BuildOptions(
             build_type=build_type,
-            milestone=milestone,
             binary=binary,
         )
 

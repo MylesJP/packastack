@@ -18,7 +18,7 @@
 
 """Auto type selection for package builds based on openstack/releases data.
 
-Determines whether to build from release, milestone, or snapshot based on:
+Determines whether to build from release or snapshot based on:
 - Series phase (pre-final vs post-final)
 - Project release status (has releases, beta/RC/final)
 - Release model (cycle-with-rc, cycle-with-intermediary, cycle-trailing, etc.)
@@ -50,7 +50,6 @@ class BuildType(str, Enum):
     """Build type for a package."""
 
     RELEASE = "release"
-    MILESTONE = "milestone"
     SNAPSHOT = "snapshot"
 
 
@@ -66,8 +65,9 @@ class DeliverableKind(str, Enum):
     """Kind of OpenStack deliverable."""
 
     SERVICE = "service"  # Core services like nova, glance
-    LIBRARY = "library"  # Oslo libraries, clients
-    CLIENT = "client"  # API clients (python-*client)
+    LIBRARY = "library"  # Oslo and other libraries
+    CLIENT_LIBRARY = "client-library"  # Python client libraries (python-*client)
+    CLIENT = "client"  # API clients that are not client libraries
     HORIZON_PLUGIN = "horizon_plugin"  # Horizon dashboard plugins
     TEMPEST_PLUGIN = "tempest_plugin"  # Tempest test plugins
     OTHER = "other"  # Everything else
@@ -90,8 +90,8 @@ class ReasonCode(str, Enum):
     POST_FINAL_RELEASE = "POST_FINAL_RELEASE"  # Post-final, use release
     CYCLE_TRAILING_RELEASE = "CYCLE_TRAILING_RELEASE"  # Cycle-trailing has release
 
-    # Milestone reasons
-    HAS_MILESTONE_ONLY = "HAS_MILESTONE_ONLY"  # Only pre-beta releases
+    # Pre-release reasons
+    HAS_PRE_RELEASE_ONLY = "HAS_PRE_RELEASE_ONLY"  # Only pre-beta releases
     INTERMEDIARY_RELEASE = "INTERMEDIARY_RELEASE"  # cycle-with-intermediary has release
 
     # Snapshot reasons
@@ -99,7 +99,7 @@ class ReasonCode(str, Enum):
     PRE_FINAL_NO_RELEASE = "PRE_FINAL_NO_RELEASE"  # Pre-final and no release
     NOT_IN_RELEASES = "NOT_IN_RELEASES"  # Project not in openstack/releases
     SNAPSHOT_FORCED = "SNAPSHOT_FORCED"  # User forced snapshot mode
-    CLIENT_LIBRARY_NO_SNAPSHOT = "CLIENT_LIBRARY_NO_SNAPSHOT"  # Clients/oslo packages always use releases
+    CLIENT_LIBRARY_NO_SNAPSHOT = "CLIENT_LIBRARY_NO_SNAPSHOT"  # Libraries/client-libraries always use releases
 
     # Retirement reasons
     RETIRED_PROJECT = "RETIRED_PROJECT"  # Project is retired upstream
@@ -324,13 +324,13 @@ class TypeSelectionReport:
     target: str
     ubuntu_series: str
     generated_at_utc: str
-    type_mode: str  # "auto", "release", "milestone", "snapshot"
+    type_mode: str  # "auto", "release", "snapshot"
     cycle_stage: CycleStage
     packages: list[TypeSelectionResult] = field(default_factory=list)
 
     # Summary counts
     count_release: int = 0
-    count_milestone: int = 0
+    # Snapshot counts are tracked explicitly
     count_snapshot: int = 0
     count_retired: int = 0
 
@@ -369,7 +369,6 @@ class TypeSelectionReport:
         """Counts grouped by build type."""
         return {
             "release": self.count_release,
-            "milestone": self.count_milestone,
             "snapshot": self.count_snapshot,
         }
 
@@ -380,9 +379,8 @@ class TypeSelectionReport:
         # Update type counts
         if result.chosen_type == BuildType.RELEASE:
             self.count_release += 1
-        elif result.chosen_type == BuildType.MILESTONE:
-            self.count_milestone += 1
         else:
+            # Snapshot builds count toward snapshot totals
             self.count_snapshot += 1
 
         # Update reason counts
@@ -414,7 +412,7 @@ class TypeSelectionReport:
             "summary": {
                 "total": len(self.packages),
                 "release": self.count_release,
-                "milestone": self.count_milestone,
+                # Snapshot counts are stored under the snapshot key
                 "snapshot": self.count_snapshot,
                 "retired": self.count_retired,
             },
@@ -443,7 +441,6 @@ class TypeSelectionReport:
         )
         summary = data.get("summary", {})
         report.count_release = summary.get("release", 0)
-        report.count_milestone = summary.get("milestone", 0)
         report.count_snapshot = summary.get("snapshot", 0)
         report.count_retired = summary.get("retired", 0)
         report.counts_by_reason = data.get("counts_by_reason", {})
@@ -528,6 +525,7 @@ def infer_deliverable_kind(
         type_mapping = {
             "service": DeliverableKind.SERVICE,
             "library": DeliverableKind.LIBRARY,
+            "client-library": DeliverableKind.CLIENT_LIBRARY,
             "client": DeliverableKind.CLIENT,
             "horizon-plugin": DeliverableKind.HORIZON_PLUGIN,
             "tempest-plugin": DeliverableKind.TEMPEST_PLUGIN,
@@ -535,6 +533,10 @@ def infer_deliverable_kind(
         }
         kind = type_mapping.get(project.type, DeliverableKind.OTHER)
         return kind, KindConfidence.METADATA
+
+    # Heuristic: python client libraries
+    if source_package.startswith("python-") and source_package.endswith("client"):
+        return DeliverableKind.CLIENT_LIBRARY, KindConfidence.HEURISTIC
 
     # Heuristic: client packages
     if deliverable.endswith("client") or source_package.endswith("client"):
@@ -604,10 +606,10 @@ def select_build_type(
     4. PRE-FINAL series with beta/RC/final release:
        - RELEASE (HAS_RELEASE)
 
-    5. PRE-FINAL series with only milestone/alpha releases:
+    5. PRE-FINAL series with only pre-release/alpha releases:
        - cycle-with-intermediary: RELEASE (INTERMEDIARY_RELEASE)
        - cycle-trailing with release: RELEASE (CYCLE_TRAILING_RELEASE)
-       - others: MILESTONE (HAS_MILESTONE_ONLY)
+       - others: SNAPSHOT (HAS_PRE_RELEASE_ONLY)
 
     6. PRE-FINAL series with no releases:
        - SNAPSHOT (NO_RELEASE_YET)
@@ -646,9 +648,9 @@ def select_build_type(
     has_beta_rc_final = project.has_beta_rc_or_final() if project else False
     latest_version = project.get_latest_version() or "" if project else ""
 
-    # Policy: Client libraries and oslo packages should never be built as snapshots
+    # Policy: Libraries and client libraries should never be built as snapshots
     # They should always use released tarballs to reduce maintenance burden
-    is_client_or_library = kind in (DeliverableKind.CLIENT, DeliverableKind.LIBRARY)
+    is_client_or_library = kind in (DeliverableKind.LIBRARY, DeliverableKind.CLIENT_LIBRARY)
     should_prevent_snapshot = is_client_or_library and not force_snapshot
 
     # Helper to add watch/uscan info to result
@@ -857,9 +859,9 @@ def select_build_type(
         # Prefer to treat final releases as RELEASE; however, if the latest
         # release is a beta or RC and there is evidence of an upstream
         # tarball (indicated by a release entry with project info), classify
-        # it as a MILESTONE build instead of a full RELEASE. This captures
+        # it as a SNAPSHOT build instead of a full RELEASE. This captures
         # the case where a pre-release artifact (beta/rc) exists upstream
-        # and we should perform a milestone-style build.
+        # and we should perform a pre-release snapshot build.
         latest_release = project.get_latest_release() if project else None
 
         if latest_release is not None:
@@ -881,7 +883,7 @@ def select_build_type(
                     package_status=package_status,
                 ))
 
-            # Beta or RC release: classify as MILESTONE only if there's
+            # Beta or RC release: classify as SNAPSHOT only if there's
             # evidence of an upstream release artifact (projects list).
             if latest_release.is_beta() or latest_release.is_rc():
                 has_upstream_artifact = bool(getattr(latest_release, "projects", None))
@@ -896,9 +898,9 @@ def select_build_type(
                         has_beta_rc_final=True,
                         latest_version=latest_version,
                         cycle_stage=cycle_stage,
-                        chosen_type=BuildType.MILESTONE,
-                        reason_code=ReasonCode.HAS_MILESTONE_ONLY,
-                        reason_human=f"Beta/RC release {latest_version} available -> milestone",
+                        chosen_type=BuildType.SNAPSHOT,
+                        reason_code=ReasonCode.HAS_PRE_RELEASE_ONLY,
+                        reason_human=f"Beta/RC release {latest_version} available -> snapshot",
                         package_status=package_status,
                     ))
 
@@ -920,10 +922,10 @@ def select_build_type(
         ))
 
     if has_releases:
-        # Has releases but no beta/RC/final (only milestones/alphas)
+        # Has releases but no beta/RC/final (only pre-releases/alphas)
         # Check release model for special handling
 
-        # cycle-with-intermediary: release at each milestone
+        # cycle-with-intermediary: release at each pre-release
         if release_model == "cycle-with-intermediary":
             return _add_watch_info(TypeSelectionResult(
                 source_package=source_package,
@@ -959,7 +961,7 @@ def select_build_type(
                 package_status=package_status,
             ))
 
-        # Default: use milestone for pre-beta releases
+        # Default: use snapshot for pre-beta releases
         return _add_watch_info(TypeSelectionResult(
             source_package=source_package,
             deliverable=deliverable,
@@ -970,9 +972,9 @@ def select_build_type(
             has_beta_rc_final=False,
             latest_version=latest_version,
             cycle_stage=cycle_stage,
-            chosen_type=BuildType.MILESTONE,
-            reason_code=ReasonCode.HAS_MILESTONE_ONLY,
-            reason_human=f"Only pre-beta releases (milestone {latest_version})",
+            chosen_type=BuildType.SNAPSHOT,
+            reason_code=ReasonCode.HAS_PRE_RELEASE_ONLY,
+            reason_human=f"Only pre-beta releases (pre-release {latest_version})",
             package_status=package_status,
         ))
 
@@ -1101,7 +1103,7 @@ def select_build_types_for_packages(
         packages: List of (source_package, deliverable) tuples.
         run_id: Run identifier for the report.
         ubuntu_series: Ubuntu series target.
-        type_mode: "auto", "release", "milestone", or "snapshot".
+        type_mode: "auto", "release", or "snapshot".
         force_snapshot: Force snapshot for all packages.
         parallel: Number of parallel workers (None = default).
         local_packages: Set of all local package names for new/defunct detection.
@@ -1186,9 +1188,6 @@ def select_build_types_for_packages(
     if type_mode == "release":
         force_type = BuildType.RELEASE
         force_reason = ReasonCode.HAS_RELEASE
-    elif type_mode == "milestone":
-        force_type = BuildType.MILESTONE
-        force_reason = ReasonCode.HAS_MILESTONE_ONLY
     elif type_mode == "snapshot":
         force_type = BuildType.SNAPSHOT
         force_reason = ReasonCode.SNAPSHOT_FORCED

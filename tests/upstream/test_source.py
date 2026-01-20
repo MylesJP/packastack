@@ -33,7 +33,6 @@ class TestBuildType:
         """Test that all expected build types exist."""
         assert upstream.BuildType.RELEASE.value == "release"
         assert upstream.BuildType.SNAPSHOT.value == "snapshot"
-        assert upstream.BuildType.MILESTONE.value == "milestone"
 
 
 class TestUpstreamSource:
@@ -46,7 +45,6 @@ class TestUpstreamSource:
         )
         assert source.is_release is True
         assert source.is_snapshot is False
-        assert source.is_milestone is False
 
     def test_is_snapshot(self) -> None:
         """Test is_snapshot property."""
@@ -56,18 +54,6 @@ class TestUpstreamSource:
         )
         assert source.is_release is False
         assert source.is_snapshot is True
-        assert source.is_milestone is False
-
-    def test_is_milestone(self) -> None:
-        """Test is_milestone property."""
-        source = upstream.UpstreamSource(
-            version="30.0.0~b1",
-            build_type=upstream.BuildType.MILESTONE,
-            milestone="b1",
-        )
-        assert source.is_release is False
-        assert source.is_snapshot is False
-        assert source.is_milestone is True
 
 
 class TestTarballResult:
@@ -392,53 +378,6 @@ class TestDownloadAndVerifyTarball:
                 assert result.signature_verified is True
 
 
-class TestSelectUpstreamSourceMilestone:
-    """Tests for milestone selection in select_upstream_source."""
-
-    def test_milestone_found(self, tmp_path: Path) -> None:
-        """Test finding a milestone release."""
-        with patch("packastack.upstream.releases.load_project_releases") as mock_load:
-            mock_proj = MagicMock()
-            mock_b1 = MagicMock()
-            mock_b1.version = "30.0.0.0b1"
-            mock_b2 = MagicMock()
-            mock_b2.version = "30.0.0.0b2"
-            mock_proj.releases = [mock_b1, mock_b2]
-            mock_load.return_value = mock_proj
-
-            source = upstream.select_upstream_source(
-                releases_repo=tmp_path,
-                series="2024.2",
-                project="nova",
-                build_type=upstream.BuildType.MILESTONE,
-                milestone="b2",
-            )
-
-            assert source is not None
-            assert source.version == "30.0.0.0b2"
-            assert source.build_type == upstream.BuildType.MILESTONE
-            assert source.milestone == "b2"
-
-    def test_milestone_not_found(self, tmp_path: Path) -> None:
-        """Test milestone not found returns None."""
-        with patch("packastack.upstream.releases.load_project_releases") as mock_load:
-            mock_proj = MagicMock()
-            mock_b1 = MagicMock()
-            mock_b1.version = "30.0.0.0b1"
-            mock_proj.releases = [mock_b1]
-            mock_load.return_value = mock_proj
-
-            source = upstream.select_upstream_source(
-                releases_repo=tmp_path,
-                series="2024.2",
-                project="nova",
-                build_type=upstream.BuildType.MILESTONE,
-                milestone="rc1",
-            )
-
-            assert source is None
-
-
 class TestGenerateSnapshotTarball:
     """Tests for generate_snapshot_tarball function."""
 
@@ -697,18 +636,6 @@ class TestApplySignaturePolicy:
         (upstream_dir / "signing-key.asc").touch()
 
         removed = upstream.apply_signature_policy(debian_dir, upstream.BuildType.RELEASE)
-
-        assert removed == []
-        assert (upstream_dir / "signing-key.asc").exists()
-
-    def test_milestone_build_keeps_keys(self, tmp_path: Path) -> None:
-        """Test that milestone builds keep signing keys."""
-        debian_dir = tmp_path / "debian"
-        upstream_dir = debian_dir / "upstream"
-        upstream_dir.mkdir(parents=True)
-        (upstream_dir / "signing-key.asc").touch()
-
-        removed = upstream.apply_signature_policy(debian_dir, upstream.BuildType.MILESTONE)
 
         assert removed == []
         assert (upstream_dir / "signing-key.asc").exists()

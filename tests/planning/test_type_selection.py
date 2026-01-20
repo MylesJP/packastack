@@ -56,6 +56,7 @@ from packastack.upstream.retirement import (
     RetirementInfo,
     RetirementStatus,
 )
+from packastack.upstream.releases import load_project_releases
 
 
 class TestGetDefaultParallelWorkers:
@@ -177,9 +178,22 @@ class TestInferDeliverableKind:
         assert kind == DeliverableKind.CLIENT
         assert conf == KindConfidence.METADATA
 
-    def test_heuristic_client_suffix(self):
-        """Should detect client packages by suffix."""
+    def test_uses_metadata_type_client_library(self):
+        """Should use metadata type field when available - client library."""
+        project = MagicMock(type="client-library")
+        kind, conf = infer_deliverable_kind(project, "python-cinderclient", "cinderclient")
+        assert kind == DeliverableKind.CLIENT_LIBRARY
+        assert conf == KindConfidence.METADATA
+
+    def test_heuristic_python_client_library(self):
+        """Should detect python-*client packages as client libraries."""
         kind, conf = infer_deliverable_kind(None, "python-novaclient", "python-novaclient")
+        assert kind == DeliverableKind.CLIENT_LIBRARY
+        assert conf == KindConfidence.HEURISTIC
+
+    def test_heuristic_non_python_client(self):
+        """Should detect non-python client packages by suffix."""
+        kind, conf = infer_deliverable_kind(None, "cinderclient", "cinderclient")
         assert kind == DeliverableKind.CLIENT
         assert conf == KindConfidence.HEURISTIC
 
@@ -209,7 +223,7 @@ class TestInferDeliverableKind:
 
     def test_heuristic_core_service(self):
         """Should detect core services from known list."""
-        kind, conf = infer_deliverable_kind(None, "nova", "nova")
+        kind, conf = infer_deliverable_kind(None, "cinder", "cinder")
         assert kind == DeliverableKind.SERVICE
         assert conf == KindConfidence.HEURISTIC
 
@@ -224,6 +238,33 @@ class TestInferDeliverableKind:
         kind, conf = infer_deliverable_kind(None, "python-oslo.config", "oslo.config")
         assert kind == DeliverableKind.LIBRARY
         assert conf == KindConfidence.HEURISTIC
+
+    @pytest.mark.parametrize(
+        ("deliverable", "source_package", "expected_kind"),
+        [
+            ("cinder", "cinder", DeliverableKind.SERVICE),
+            ("python-cinderclient", "python-cinderclient", DeliverableKind.CLIENT_LIBRARY),
+            ("oslo.config", "python-oslo.config", DeliverableKind.LIBRARY),
+        ],
+    )
+    def test_gazpacho_metadata_classification(
+        self,
+        deliverable: str,
+        source_package: str,
+        expected_kind: DeliverableKind,
+    ) -> None:
+        """Should use gazpacho deliverables as source of truth."""
+        releases_repo = Path("/home/myles/.cache/packastack/openstack-releases")
+        if not releases_repo.exists():
+            pytest.skip("openstack-releases cache not found")
+
+        project = load_project_releases(releases_repo, "gazpacho", deliverable)
+        if project is None:
+            pytest.skip(f"deliverable {deliverable} not found in gazpacho metadata")
+
+        kind, conf = infer_deliverable_kind(project, source_package, deliverable)
+        assert kind == expected_kind
+        assert conf == KindConfidence.METADATA
 
 
 class TestSelectBuildType:
@@ -258,6 +299,40 @@ class TestSelectBuildType:
             )
             assert result.chosen_type == BuildType.SNAPSHOT
             assert result.reason_code == ReasonCode.NOT_IN_RELEASES
+
+    def test_library_not_in_releases_uses_release(self, tmp_path: Path):
+        """Libraries should not be built as snapshots when missing in releases."""
+        releases_repo = tmp_path
+        with patch(
+            "packastack.planning.type_selection.load_project_releases",
+            return_value=None,
+        ):
+            result = select_build_type(
+                releases_repo=releases_repo,
+                series="dalmatian",
+                source_package="python-oslo.config",
+                deliverable="oslo.config",
+                cycle_stage=CycleStage.PRE_FINAL,
+            )
+            assert result.chosen_type == BuildType.RELEASE
+            assert result.reason_code == ReasonCode.CLIENT_LIBRARY_NO_SNAPSHOT
+
+    def test_client_library_not_in_releases_uses_release(self, tmp_path: Path):
+        """Client libraries should not be built as snapshots when missing in releases."""
+        releases_repo = tmp_path
+        with patch(
+            "packastack.planning.type_selection.load_project_releases",
+            return_value=None,
+        ):
+            result = select_build_type(
+                releases_repo=releases_repo,
+                series="dalmatian",
+                source_package="python-cinderclient",
+                deliverable="python-cinderclient",
+                cycle_stage=CycleStage.PRE_FINAL,
+            )
+            assert result.chosen_type == BuildType.RELEASE
+            assert result.reason_code == ReasonCode.CLIENT_LIBRARY_NO_SNAPSHOT
 
     def test_post_final_with_release(self, tmp_path: Path):
         """Should return RELEASE for post-final series with releases."""
@@ -331,8 +406,8 @@ class TestSelectBuildType:
             assert result.chosen_type == BuildType.RELEASE
             assert result.reason_code == ReasonCode.HAS_RELEASE
 
-    def test_pre_final_beta_rc_classified_as_milestone(self, tmp_path: Path) -> None:
-        """Beta/RC with upstream artifact should be classified as MILESTONE."""
+    def test_pre_final_beta_rc_classified_as_snapshot(self, tmp_path: Path) -> None:
+        """Beta/RC with upstream artifact should be classified as SNAPSHOT."""
         releases_repo = tmp_path
         mock_project = MagicMock()
         mock_project.type = "service"
@@ -360,8 +435,8 @@ class TestSelectBuildType:
                 deliverable="nova",
                 cycle_stage=CycleStage.PRE_FINAL,
             )
-            assert result.chosen_type == BuildType.MILESTONE
-            assert result.reason_code == ReasonCode.HAS_MILESTONE_ONLY
+            assert result.chosen_type == BuildType.SNAPSHOT
+            assert result.reason_code == ReasonCode.HAS_PRE_RELEASE_ONLY
 
     def test_pre_final_beta_rc_without_artifact_falls_back(self, tmp_path: Path) -> None:
         """Beta/RC without artifacts should fall back to RELEASE."""
@@ -393,8 +468,8 @@ class TestSelectBuildType:
             assert result.chosen_type == BuildType.RELEASE
             assert result.reason_code == ReasonCode.HAS_RELEASE
 
-    def test_pre_final_milestone_only(self, tmp_path: Path):
-        """Should return MILESTONE for pre-final with only milestone releases."""
+    def test_pre_final_pre_release_only(self, tmp_path: Path):
+        """Should return SNAPSHOT for pre-final with only pre-release releases."""
         releases_repo = tmp_path
         mock_project = MagicMock()
         mock_project.type = "service"
@@ -414,8 +489,8 @@ class TestSelectBuildType:
                 deliverable="nova",
                 cycle_stage=CycleStage.PRE_FINAL,
             )
-            assert result.chosen_type == BuildType.MILESTONE
-            assert result.reason_code == ReasonCode.HAS_MILESTONE_ONLY
+            assert result.chosen_type == BuildType.SNAPSHOT
+            assert result.reason_code == ReasonCode.HAS_PRE_RELEASE_ONLY
 
     def test_pre_final_cycle_with_intermediary(self, tmp_path: Path):
         """Should return RELEASE for cycle-with-intermediary with releases."""
@@ -570,10 +645,9 @@ class TestTypeSelectionReport:
         report.add_result(release_result)
 
         assert report.count_release == 1
-        assert report.count_milestone == 0
         assert report.count_snapshot == 0
         assert report.total_count == 1
-        assert report.counts_by_type == {"release": 1, "milestone": 0, "snapshot": 0}
+        assert report.counts_by_type == {"release": 1, "snapshot": 0}
 
     def test_add_result_tracks_new_packages(self):
         """Should track new packages."""
@@ -758,33 +832,6 @@ class TestSelectBuildTypesForPackages:
                 type_mode="release",
             )
             assert report.packages[0].chosen_type == BuildType.RELEASE
-
-    def test_force_milestone_mode(self, tmp_path: Path):
-        """Should force MILESTONE type when type_mode is 'milestone'."""
-        mock_project = MagicMock()
-        mock_project.type = "service"
-        mock_project.release_model = "cycle-with-rc"
-        mock_project.has_releases.return_value = True
-        mock_project.has_beta_rc_or_final.return_value = True
-        mock_project.get_latest_version.return_value = "25.0.0"
-
-        with patch(
-            "packastack.planning.type_selection.determine_cycle_stage",
-            return_value=CycleStage.PRE_FINAL,
-        ), patch(
-            "packastack.planning.type_selection.load_project_releases",
-            return_value=mock_project,
-        ):
-            packages = [("nova", "nova")]
-            report = select_build_types_for_packages(
-                releases_repo=tmp_path,
-                series="dalmatian",
-                packages=packages,
-                run_id="test-run",
-                ubuntu_series="plucky",
-                type_mode="milestone",
-            )
-            assert report.packages[0].chosen_type == BuildType.MILESTONE
 
     def test_force_snapshot_mode(self, tmp_path: Path):
         """Should force SNAPSHOT type when force_snapshot is True."""

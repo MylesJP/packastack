@@ -157,7 +157,7 @@ def fetch_release_tarball(
     force: bool,
     run,
 ) -> tuple[Path | None, bool, str]:
-    """Fetch release/milestone tarball with uscan-first strategy.
+    """Fetch release tarball with uscan-first strategy.
 
     Implements the tarball acquisition strategy with fallback:
     1. uscan in packaging repo (uses debian/watch)
