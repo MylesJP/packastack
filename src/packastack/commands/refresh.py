@@ -309,7 +309,7 @@ def refresh(
             paths = resolve_paths(cfg)
             releases_path = paths["openstack_releases_repo"]
             try:
-                _clone_or_update_releases(releases_path, run, phase="refresh")
+                _clone_or_update_releases(releases_path, run, phase="refresh", force_reclone=True)
             except Exception as e:  # pragma: no cover
                 activity("refresh", f"Warning: Could not update openstack-releases: {e}")
                 run.log_event({"event": "openstack_releases.warning", "error": str(e)})

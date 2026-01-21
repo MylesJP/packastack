@@ -59,8 +59,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Map OpenStack series and build type to Launchpad bug numbers
         # Format: "<series>:<build_type>" -> bug_number
         # Example: "gazpacho:release": 2116155
-        # Valid build types: snapshot, release, release-client
-        # milestone is a deprecated alias for snapshot (kept for compatibility)
+        # Valid keys: release, release-client, milestone (snapshots)
+        # snapshot is a deprecated alias for milestone (kept for compatibility)
     },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
 }

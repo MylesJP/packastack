@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import sys
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,8 +46,20 @@ OPENSTACK_RELEASES_URL = "https://opendev.org/openstack/releases"
 OPENSTACK_PROJECT_CONFIG_URL = "https://opendev.org/openstack/project-config"
 
 
-def _clone_or_update_releases(path: Path, run: RunContextType, phase: str = "init") -> None:
+def _clone_or_update_releases(
+    path: Path,
+    run: RunContextType,
+    phase: str = "init",
+    force_reclone: bool = False,
+) -> None:
     """Clone or update the openstack/releases repository."""
+    if force_reclone and path.exists():
+        run.log_event({"event": "openstack_releases.reclone", "path": str(path)})
+        with activity_spinner(phase, f"Recloning openstack-releases to {path}"):
+            shutil.rmtree(path)
+            git.Repo.clone_from(OPENSTACK_RELEASES_URL, path)
+        return
+
     if path.exists() and (path / ".git").is_dir():
         # Repository exists, fetch and prune
         run.log_event({"event": "openstack_releases.fetch", "path": str(path)})
@@ -55,6 +68,21 @@ def _clone_or_update_releases(path: Path, run: RunContextType, phase: str = "ini
                 repo = git.Repo(path)
                 origin = repo.remotes.origin
                 origin.fetch(prune=True)
+                remote_heads = {ref.remote_head for ref in origin.refs}
+                if "master" in remote_heads:
+                    default_branch = "master"
+                elif "main" in remote_heads:
+                    default_branch = "main"
+                else:
+                    default_branch = origin.refs[0].remote_head if origin.refs else "master"
+                repo.git.checkout(default_branch)
+                repo.git.reset("--hard", f"origin/{default_branch}")
+                repo.git.clean("-fdx")
+                run.log_event({
+                    "event": "openstack_releases.reset",
+                    "branch": default_branch,
+                    "path": str(path),
+                })
             except git.GitCommandError as e:  # pragma: no cover
                 run.log_event({"event": "openstack_releases.fetch_error", "error": str(e)})
                 raise
@@ -79,6 +107,21 @@ def _clone_or_update_project_config(path: Path, run: RunContextType, phase: str 
                 repo = git.Repo(path)
                 origin = repo.remotes.origin
                 origin.fetch(prune=True)
+                remote_heads = {ref.remote_head for ref in origin.refs}
+                if "master" in remote_heads:
+                    default_branch = "master"
+                elif "main" in remote_heads:
+                    default_branch = "main"
+                else:
+                    default_branch = origin.refs[0].remote_head if origin.refs else "master"
+                repo.git.checkout(default_branch)
+                repo.git.reset("--hard", f"origin/{default_branch}")
+                repo.git.clean("-fdx")
+                run.log_event({
+                    "event": "openstack_project_config.reset",
+                    "branch": default_branch,
+                    "path": str(path),
+                })
             except git.GitCommandError as e:  # pragma: no cover
                 run.log_event({"event": "openstack_project_config.fetch_error", "error": str(e)})
                 raise

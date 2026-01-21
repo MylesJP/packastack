@@ -2063,40 +2063,38 @@ def import_and_patch(
 
     # Look up Launchpad bug from config
     lp_bug = None
-    if ctx.cfg:
+    from packastack.core.config import load_config
+
+    cfg = load_config()
+    if cfg:
         from packastack.upstream.releases import load_project_releases
 
-        lp_bugs = ctx.cfg.get("launchpad_bugs", {})
-        # Try to find bug for this series and build type
-        lookup_type = ctx.build_type.value if ctx.build_type else "release"
+        lp_bugs = cfg.get("launchpad_bugs", {})
+        build_type = ctx.build_type.value if ctx.build_type else "release"
 
         # Check deliverable type from openstack-releases registry
         is_library = False
-        is_service = False
         releases_repo = ctx.paths.get("openstack_releases_repo")
         if releases_repo:
             proj_info = load_project_releases(releases_repo, ctx.openstack_target, ctx.package)
             if proj_info:
                 is_library = proj_info.is_library()
-                is_service = proj_info.type == "service"
 
-        lookup_candidates: list[str] = []
-        if lookup_type == "release" and is_library:
-            lookup_candidates.append("release-client")
-        if lookup_type == "snapshot" and is_service:
-            lookup_candidates.append("milestone")
-            lookup_candidates.append("snapshot")
+        bug_key_type: str | None = None
+        if build_type == "snapshot":
+            bug_key_type = "milestone"
+        elif build_type == "release":
+            bug_key_type = "release-client" if is_library else "release"
         else:
-            lookup_candidates.append(lookup_type)
-            if lookup_type == "snapshot":
-                # Backwards compatibility for configs that still use milestone keys.
-                lookup_candidates.append("milestone")
+            bug_key_type = build_type
 
-        for candidate in lookup_candidates:
-            key = f"{ctx.openstack_target}:{candidate}"
+        if bug_key_type:
+            key = f"{ctx.openstack_target}:{bug_key_type}"
             lp_bug = lp_bugs.get(key)
-            if lp_bug is not None:
-                break
+            if lp_bug is None and build_type == "snapshot":
+                # Backwards compatibility for configs that still use snapshot keys.
+                legacy_key = f"{ctx.openstack_target}:snapshot"
+                lp_bug = lp_bugs.get(legacy_key)
 
     # Determine upstream version for changelog message
     # For snapshots, use the version from snapshot_result
