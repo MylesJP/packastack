@@ -61,6 +61,10 @@ class GitFetcher:
 
     Uses file-based locking to prevent concurrent clone/fetch operations
     on the same package.
+
+    When a launchpad_username is provided, clones use SSH URLs directly
+    (git+ssh://<username>@git.launchpad.net/...) instead of HTTPS. This
+    requires SSH keys to be configured for Launchpad access.
     """
 
     def __init__(
@@ -80,15 +84,21 @@ class GitFetcher:
         self.lock_timeout = lock_timeout
         self.launchpad_username = launchpad_username
 
-    def build_url(self, package: str) -> str:
+    def build_url(self, package: str, use_ssh: bool | None = None) -> str:
         """Build the git URL for a package.
 
         Args:
             package: Source package name.
+            use_ssh: If True, build SSH URL. If None, use SSH if launchpad_username is set.
 
         Returns:
             Full git clone URL.
         """
+        if use_ssh is None:
+            use_ssh = self.launchpad_username is not None
+
+        if use_ssh and self.launchpad_username:
+            return f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}"
         return f"{self.base_url}/{package}"
 
     def _acquire_lock(self, lock_path: Path) -> int | None:
@@ -253,7 +263,9 @@ class GitFetcher:
     def _ensure_ssh_remote(self, repo: git.Repo, package: str) -> None:
         """Ensure the origin remote uses SSH if username is configured.
 
-        Converts HTTPS URLs to SSH format for push access.
+        Converts HTTPS URLs to SSH format for push access. This handles
+        repositories that were cloned before launchpad_username was configured,
+        upgrading them to SSH on the next fetch operation.
 
         Args:
             repo: Git repository object.

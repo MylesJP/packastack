@@ -67,7 +67,10 @@ from packastack.planning.build_all_state import (
 )
 from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
 from packastack.planning.graph import DependencyGraph
-from packastack.planning.package_discovery import discover_packages
+from packastack.planning.package_discovery import (
+    discover_packages,
+    filter_by_managed_packages,
+)
 from packastack.planning.type_selection import get_default_parallel_workers
 from packastack.reports.plan_graph import PlanGraph, render_waves
 from packastack.target.arch import get_host_arch
@@ -229,6 +232,26 @@ def _run_build_all(
                     "packages": possibly_retired,
                 })
             activity("all", f"  Build targets after retirement filter: {len(discovery.packages)}")
+
+        # Filter by managed_packages from cached file (fetched by init/refresh)
+        from packastack.upstream.pkg_scripts import load_managed_packages
+
+        cache_root = paths.get("cache_root", Path.home() / ".cache" / "packastack")
+        managed_packages = load_managed_packages(cache_root)
+        if managed_packages:
+            managed_filtered, skipped = filter_by_managed_packages(
+                discovery.packages, managed_packages
+            )
+            if skipped:
+                activity("all", f"Filtered to managed packages: {len(managed_filtered)} of {len(discovery.packages)}")
+                activity("all", f"  Skipped (not in managed_packages): {len(skipped)}")
+                run.log_event({
+                    "event": "build_all.managed_packages_filtered",
+                    "managed_count": len(managed_filtered),
+                    "skipped_count": len(skipped),
+                    "skipped": skipped[:20],  # Only log first 20 to avoid huge logs
+                })
+                discovery.packages = managed_filtered
 
         # Load package indexes for dependency resolution
         activity("all", "Loading package indexes...")

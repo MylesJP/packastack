@@ -42,7 +42,10 @@ from packastack.commands.init import (
 from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
-from packastack.planning.package_discovery import discover_packages
+from packastack.planning.package_discovery import (
+    discover_packages,
+    filter_by_managed_packages,
+)
 from packastack.planning.type_selection import DeliverableKind, infer_deliverable_kind
 from packastack.upstream.releases import (
     get_current_development_series,
@@ -54,7 +57,7 @@ if TYPE_CHECKING:
     from packastack.core.run import RunContext as RunContextType
 
 
-class SubsetType(str, Enum):  # noqa: UP042
+class SubsetType(str, Enum):
     """Type of package subset to build."""
 
     LIBRARIES = "libraries"
@@ -266,6 +269,27 @@ def run_subset_build(
                 releases_repo=releases_repo,
                 openstack_target=resolved_target,
             )
+
+            # Step 4b: Filter by managed_packages from cached file (fetched by init/refresh)
+            from packastack.upstream.pkg_scripts import load_managed_packages
+
+            cache_root = paths.get("cache_root")
+            managed_packages = load_managed_packages(cache_root) if cache_root else []
+            if managed_packages:
+                managed_filtered, skipped = filter_by_managed_packages(
+                    filtered_packages, managed_packages
+                )
+                if skipped:
+                    activity(
+                        "subset",
+                        f"Filtered to managed packages: {len(managed_filtered)} of {len(filtered_packages)}"
+                    )
+                    run.log_event({
+                        "event": "subset.managed_packages_filtered",
+                        "managed_count": len(managed_filtered),
+                        "skipped_count": len(skipped),
+                    })
+                    filtered_packages = managed_filtered
 
             if not filtered_packages:
                 activity("subset", f"No {subset_type.value} found in discovered packages")

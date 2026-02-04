@@ -214,21 +214,37 @@ def init(
             activity("init", f"Warning: Could not clone/update openstack-project-config: {e}")
             run.log_event({"event": "openstack_project_config.warning", "error": str(e)})
 
-        # Step 5: Create ubuntu-archive README and config
+        # Step 5: Fetch managed packages list from ubuntu-cloud-archive
+        try:
+            from packastack.upstream.pkg_scripts import refresh_managed_packages
+
+            cache_root = paths["cache_root"]
+            packages, errors = refresh_managed_packages(cache_root, run=run)
+            if packages:
+                steps_completed.append("managed_packages_fetched")
+                activity("init", f"Fetched {len(packages)} managed packages")
+            if errors:
+                for err in errors:
+                    activity("init", f"Warning: {err}")
+        except Exception as e:  # pragma: no cover
+            activity("init", f"Warning: Could not fetch managed packages: {e}")
+            run.log_event({"event": "pkg_scripts.warning", "error": str(e)})
+
+        # Step 6: Create ubuntu-archive README and config
         ubuntu_cache = paths["ubuntu_archive_cache"]
         with activity_spinner("init", "Creating ubuntu-archive metadata"):
             _create_ubuntu_archive_files(ubuntu_cache)
             steps_completed.append("ubuntu_archive_files_created")
             run.log_event({"event": "ubuntu_archive.files_created"})
 
-        # Step 6: Resolve devel series
+        # Step 7: Resolve devel series
         with activity_spinner("init", "Resolving Ubuntu development series"):
             devel_series = resolve_series("devel")
             run.log_event({"event": "series.resolved", "devel": devel_series})
             steps_completed.append("series_resolved")
         activity("init", f"Development series: {devel_series}")
 
-        # Step 7: Optionally prime minimal metadata
+        # Step 8: Optionally prime minimal metadata
         if prime:  # pragma: no cover - integration test path
             activity("init", "Priming minimal Ubuntu archive metadata")
             run.log_event({"event": "prime.start"})

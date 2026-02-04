@@ -842,24 +842,25 @@ class TestRunSingleBuild:
         assert captured["env"]["PACKASTACK_BUILD_DEPTH"] == "10"
 
     @pytest.mark.parametrize(
-        ("returncode", "expected"),
+        ("returncode", "expected", "expected_msg_fragment"),
         [
-            (3, FailureType.FETCH_FAILED),
-            (4, FailureType.PATCH_FAILED),
-            (5, FailureType.MISSING_DEP),
-            (6, FailureType.CYCLE),
-            (7, FailureType.BUILD_FAILED),
-            (8, FailureType.POLICY_BLOCKED),
+            (3, FailureType.FETCH_FAILED, "Fetch failed"),
+            (4, FailureType.PATCH_FAILED, "Patch application failed"),
+            (5, FailureType.MISSING_DEP, "Missing dependencies"),
+            (6, FailureType.CYCLE, "Dependency cycle"),
+            (7, FailureType.BUILD_FAILED, "Build failed"),
+            (8, FailureType.POLICY_BLOCKED, "Policy blocked"),
         ],
     )
     def test_failure_maps_exit_code(
         self,
         returncode: int,
         expected: FailureType,
+        expected_msg_fragment: str,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Should map exit codes to failure types."""
+        """Should map exit codes to failure types with descriptive messages."""
         def fake_run(_cmd: list[str], **_kwargs: object) -> SimpleNamespace:
             return SimpleNamespace(returncode=returncode)
 
@@ -878,7 +879,7 @@ class TestRunSingleBuild:
 
         assert success is False
         assert failure_type == expected
-        assert "Exit code" in message
+        assert expected_msg_fragment in message
 
     def test_timeout_returns_build_failed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Should return BUILD_FAILED on timeout."""

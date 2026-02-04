@@ -291,8 +291,20 @@ def run_single_build(
         if result.returncode == 0:
             return True, None, "", str(log_file)
 
-        # Determine failure type from exit code
+        # Determine failure type and message from exit code
         failure_type = FailureType.UNKNOWN
+        exit_code_messages = {
+            1: "Configuration error",
+            2: "Required tools missing",
+            3: "Fetch failed (tarball/source download)",
+            4: "Patch application failed",
+            5: "Missing dependencies",
+            6: "Dependency cycle detected",
+            7: "Build failed (sbuild/dpkg error)",
+            8: "Policy blocked (snapshot not allowed)",
+            9: "Registry error",
+            10: "Retired project",
+        }
         if result.returncode == 3:
             failure_type = FailureType.FETCH_FAILED
         elif result.returncode == 4:
@@ -306,7 +318,27 @@ def run_single_build(
         elif result.returncode == 8:
             failure_type = FailureType.POLICY_BLOCKED
 
-        return False, failure_type, f"Exit code {result.returncode}", str(log_file)
+        # Build descriptive error message
+        base_msg = exit_code_messages.get(result.returncode, f"Unknown error (code {result.returncode})")
+
+        # Try to extract last meaningful line from log for context
+        error_context = ""
+        try:
+            if log_file.exists():
+                lines = log_file.read_text().strip().splitlines()
+                # Find last non-empty line that looks like an error
+                for line in reversed(lines[-20:]):
+                    line = line.strip()
+                    if line and not line.startswith("[") and len(line) > 10:
+                        # Truncate long lines
+                        if len(line) > 80:
+                            line = line[:77] + "..."
+                        error_context = f": {line}"
+                        break
+        except Exception:
+            pass
+
+        return False, failure_type, f"{base_msg}{error_context}", str(log_file)
 
     except subprocess.TimeoutExpired:
         return False, FailureType.BUILD_FAILED, "Build timed out after 1 hour", str(log_file)

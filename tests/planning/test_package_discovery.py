@@ -29,6 +29,7 @@ from packastack.planning.package_discovery import (
     discover_packages_from_cache,
     discover_packages_from_launchpad,
     discover_packages_from_list,
+    filter_by_managed_packages,
     get_releases_libraries_and_services,
     read_packages_from_file,
 )
@@ -791,3 +792,74 @@ class TestCrossReferencePackages:
         # Should not error, lists remain empty
         assert result.missing_upstream == []
         assert result.missing_packaging == []
+
+
+class TestFilterByManagedPackages:
+    """Tests for filter_by_managed_packages function."""
+
+    def test_returns_all_when_no_managed_list(self) -> None:
+        """Test that all packages are returned when managed_packages is empty."""
+        packages = ["nova", "glance", "keystone"]
+        filtered, skipped = filter_by_managed_packages(packages, None)
+
+        assert filtered == packages
+        assert skipped == []
+
+    def test_returns_all_when_managed_list_empty(self) -> None:
+        """Test that all packages are returned when managed_packages is empty list."""
+        packages = ["nova", "glance", "keystone"]
+        filtered, skipped = filter_by_managed_packages(packages, [])
+
+        assert filtered == packages
+        assert skipped == []
+
+    def test_filters_to_managed_list(self) -> None:
+        """Test that packages are filtered to only those in managed list."""
+        packages = ["nova", "glance", "keystone", "cinder"]
+        managed = ["nova", "keystone"]
+
+        filtered, skipped = filter_by_managed_packages(packages, managed)
+
+        assert filtered == ["nova", "keystone"]
+        assert sorted(skipped) == ["cinder", "glance"]
+
+    def test_preserves_order(self) -> None:
+        """Test that filtered packages preserve original order."""
+        packages = ["zz-last", "aa-first", "mm-middle"]
+        managed = ["mm-middle", "zz-last", "aa-first"]
+
+        filtered, skipped = filter_by_managed_packages(packages, managed)
+
+        # Order should match original packages list, not managed list
+        assert filtered == ["zz-last", "aa-first", "mm-middle"]
+        assert skipped == []
+
+    def test_handles_packages_not_in_discovered(self) -> None:
+        """Test managed packages not in discovered list are not added."""
+        packages = ["nova", "glance"]
+        managed = ["nova", "keystone", "cinder"]  # keystone/cinder not discovered
+
+        filtered, skipped = filter_by_managed_packages(packages, managed)
+
+        assert filtered == ["nova"]
+        assert skipped == ["glance"]
+
+    def test_empty_packages_list(self) -> None:
+        """Test with empty discovered packages."""
+        packages: list[str] = []
+        managed = ["nova", "glance"]
+
+        filtered, skipped = filter_by_managed_packages(packages, managed)
+
+        assert filtered == []
+        assert skipped == []
+
+    def test_no_overlap(self) -> None:
+        """Test when discovered and managed have no overlap."""
+        packages = ["nova", "glance"]
+        managed = ["keystone", "cinder"]
+
+        filtered, skipped = filter_by_managed_packages(packages, managed)
+
+        assert filtered == []
+        assert sorted(skipped) == ["glance", "nova"]

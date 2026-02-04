@@ -683,3 +683,36 @@ def discover_packages(
         errors=["No discovery method available: offline mode with no cache"],
         source="none",
     )
+
+
+def filter_by_managed_packages(
+    packages: list[str],
+    managed_packages: list[str] | None,
+) -> tuple[list[str], list[str]]:
+    """Filter packages to include only those in the managed packages list.
+
+    If managed_packages is empty or None, returns all packages unchanged.
+
+    Args:
+        packages: List of discovered package names.
+        managed_packages: List of packages the team manages (from config).
+
+    Returns:
+        Tuple of (filtered_packages, skipped_packages).
+        filtered_packages: Packages that are in the managed list.
+        skipped_packages: Packages that were filtered out.
+    """
+    if not managed_packages:
+        return packages, []
+
+    managed_set = set(managed_packages)
+    filtered = []
+    skipped = []
+
+    for pkg in packages:
+        if pkg in managed_set:
+            filtered.append(pkg)
+        else:
+            skipped.append(pkg)
+
+    return filtered, skipped

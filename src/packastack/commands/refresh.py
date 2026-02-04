@@ -322,6 +322,18 @@ def refresh(
                 activity("refresh", f"Warning: Could not update openstack-project-config: {e}")
                 run.log_event({"event": "openstack_project_config.warning", "error": str(e)})
 
+            # Refresh managed packages list from ubuntu-cloud-archive
+            try:
+                from packastack.upstream.pkg_scripts import refresh_managed_packages
+
+                cache_root = paths["cache_root"]
+                packages, errors = refresh_managed_packages(cache_root, run=run)
+                if packages:
+                    activity("refresh", f"Updated managed packages list ({len(packages)} packages)")
+            except Exception as e:  # pragma: no cover
+                activity("refresh", f"Warning: Could not refresh managed packages: {e}")
+                run.log_event({"event": "pkg_scripts.warning", "error": str(e)})
+
         # Parse comma-separated lists
         pocket_list = [p.strip() for p in pockets.split(",") if p.strip()]
         component_list = [c.strip() for c in components.split(",") if c.strip()]
