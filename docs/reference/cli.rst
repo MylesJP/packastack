@@ -49,6 +49,15 @@ packastack build
 
 Builds an OpenStack package end-to-end: validates the plan, fetches sources, applies policy, drives sbuild or dpkg, and publishes results into the local repo. For sbuild-based binary builds, PackaStack ensures a schroot exists (creating it if missing). It upgrades ``debian/watch`` to ``version=5`` when present, enables the ``sphinxdoc`` addon in ``debian/rules``, defaults to ``gbp dch`` for changelog entries, and exports the patch queue back to ``master`` before finishing. Artifacts, logs, and a run summary are written to configured cache paths.
 
+**Subset builds**
+
+Two special package names trigger subset build modes:
+
+- ``packastack build libraries`` — Build all Oslo and other library packages (``DeliverableKind.LIBRARY`` and ``DeliverableKind.CLIENT_LIBRARY``).
+- ``packastack build clients`` — Build all Python client packages (``DeliverableKind.CLIENT_LIBRARY`` only).
+
+Before building a subset, PackaStack automatically updates the ``openstack/releases`` and ``openstack/project-config`` repositories by running ``git pull`` to ensure the latest package metadata is available. Use ``--offline`` to skip the repository updates.
+
 **Common options**
 
 - ``package`` (positional): source package or OpenStack project name.

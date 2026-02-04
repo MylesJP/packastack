@@ -41,16 +41,10 @@ from packastack.build import (
     EXIT_ALL_BUILD_FAILED,
     EXIT_BUILD_FAILED,
     EXIT_CONFIG_ERROR,
-    EXIT_CYCLE_DETECTED,
     EXIT_DISCOVERY_FAILED,
-    EXIT_FETCH_FAILED,
     EXIT_GRAPH_ERROR,
-    EXIT_MISSING_PACKAGES,
-    EXIT_PATCH_FAILED,
-    EXIT_POLICY_BLOCKED,
     EXIT_RESUME_ERROR,
     EXIT_SUCCESS,
-    EXIT_TOOL_MISSING,
 )
 from packastack.build.all_helpers import (
     build_dependency_graph,
@@ -86,9 +80,9 @@ from packastack.planning.build_all_state import (
 from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
 from packastack.reports.plan_graph import render_waves
 from packastack.target.series import resolve_series
-from packastack.upstream.releases import load_openstack_packages
 from packastack.upstream.releases import (
     get_current_development_series,
+    load_openstack_packages,
 )
 
 if TYPE_CHECKING:
@@ -473,6 +467,10 @@ def build(
     and builds them in topological (dependency) order. Supports parallel
     execution and resuming interrupted runs.
 
+    Special subset commands:
+      `packastack build libraries` - Build all Oslo and other library packages
+      `packastack build clients` - Build all Python client packages
+
     Exit codes:
       0 - Success
       1 - Configuration error
@@ -486,6 +484,27 @@ def build(
       9 - Registry error
       10 - Retired project (skipped)
     """
+    # Check for special subset commands: "libraries" or "clients"
+    if package in ("libraries", "clients"):
+        from packastack.commands.build_subset import SubsetType, run_subset_build
+
+        subset_type = SubsetType.LIBRARIES if package == "libraries" else SubsetType.CLIENTS
+        exit_code = run_subset_build(
+            subset_type=subset_type,
+            target=target,
+            ubuntu_series=ubuntu_series,
+            cloud_archive=cloud_archive,
+            build_type=build_type,
+            binary=binary,
+            keep_going=keep_going,
+            max_failures=max_failures,
+            parallel=parallel,
+            force=force,
+            offline=offline,
+            dry_run=dry_run,
+        )
+        sys.exit(exit_code)
+
     # Validate inputs
     if not package and not all_packages:
         activity("error", "Either specify a package or use --all")
