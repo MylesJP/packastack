@@ -15,6 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from packastack.build.single_build import (
     BuildResult,
     FetchResult,
@@ -22,6 +24,7 @@ from packastack.build.single_build import (
     PrepareResult,
     SingleBuildContext,
     ValidateDepsResult,
+    resolve_lp_bug_key,
 )
 
 
@@ -169,6 +172,35 @@ class TestSingleBuildContext:
         assert ctx.package == "oslo.config"
         assert ctx.build_type == BuildType.SNAPSHOT
         assert ctx.binary is True
+
+
+class TestResolveLpBugKey:
+    """Tests for resolve_lp_bug_key helper."""
+
+    @pytest.mark.parametrize(
+        "build_type, is_library, upstream_version, expected",
+        [
+            # Snapshots always map to milestone2
+            ("snapshot", False, "", "milestone2"),
+            ("snapshot", True, "", "milestone2"),
+            ("snapshot", False, "26.0.0.0b1", "milestone2"),
+            # Library releases -> client-lib-release (regardless of version)
+            ("release", True, "4.7.0", "client-lib-release"),
+            ("release", True, "4.7.0rc1", "client-lib-release"),
+            # Service RC releases -> service-rc1
+            ("release", False, "26.0.0.0rc1", "service-rc1"),
+            ("release", False, "2024.2.0rc2", "service-rc1"),
+            # Service final releases -> service-release
+            ("release", False, "26.0.0", "service-release"),
+            ("release", False, "2024.2.0", "service-release"),
+            ("release", False, "", "service-release"),
+            # Unknown build types pass through as-is
+            ("custom", False, "", "custom"),
+        ],
+    )
+    def test_resolve_lp_bug_key(self, build_type, is_library, upstream_version, expected):
+        """Test that build scenarios map to the correct config key."""
+        assert resolve_lp_bug_key(build_type, is_library, upstream_version) == expected
 
 
 class TestFetchPackagingRepo:

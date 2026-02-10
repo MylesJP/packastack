@@ -140,6 +140,37 @@ class BuildResult:
 
 
 # =============================================================================
+# Launchpad Bug Key Resolution
+# =============================================================================
+
+
+def resolve_lp_bug_key(
+    build_type: str, is_library: bool, upstream_version: str
+) -> str | None:
+    """Resolve the Launchpad bug config key type for a build.
+
+    Maps a build scenario to the appropriate ``launchpad_bugs`` config key:
+
+    * ``snapshot``          -> ``milestone2``
+    * ``release`` + library -> ``client-lib-release``
+    * ``release`` + RC ver  -> ``service-rc1``
+    * ``release`` (other)   -> ``service-release``
+
+    Returns the key suffix (without the series prefix) or *build_type* itself
+    for unrecognised types.
+    """
+    if build_type == "snapshot":
+        return "milestone2"
+    if build_type == "release":
+        if is_library:
+            return "client-lib-release"
+        if "rc" in upstream_version.lower():
+            return "service-rc1"
+        return "service-release"
+    return build_type
+
+
+# =============================================================================
 # Build Context
 # =============================================================================
 
@@ -2080,13 +2111,12 @@ def import_and_patch(
             if proj_info:
                 is_library = proj_info.is_library()
 
-        bug_key_type: str | None = None
-        if build_type == "snapshot":
-            bug_key_type = "milestone"
-        elif build_type == "release":
-            bug_key_type = "release-client" if is_library else "release"
-        else:
-            bug_key_type = build_type
+        # Determine the upstream version to check for RC markers
+        upstream_version = ""
+        if ctx.upstream:
+            upstream_version = ctx.upstream.version
+
+        bug_key_type = resolve_lp_bug_key(build_type, is_library, upstream_version)
 
         if bug_key_type:
             key = f"{ctx.openstack_target}:{bug_key_type}"
