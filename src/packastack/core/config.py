@@ -56,10 +56,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "launchpad_username": None,  # Set to your Launchpad username for SSH push access
     },
     "launchpad_bugs": {
-        # Map OpenStack series and build type to Launchpad bug numbers
-        # Format: "<series>:<build_type>" -> bug_number
-        # Example: "gazpacho:service-release": 2116155
-        # Valid build types:
+        # Launchpad bug numbers for changelog entries, keyed by build type.
+        # Example: "service-release": 2116155
         #   client-lib-release  - Client library final releases
         #   milestone2          - Milestone 2 builds
         #   service-rc1         - Service release candidates

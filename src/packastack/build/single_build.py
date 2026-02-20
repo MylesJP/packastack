@@ -2119,12 +2119,7 @@ def import_and_patch(
         bug_key_type = resolve_lp_bug_key(build_type, is_library, upstream_version)
 
         if bug_key_type:
-            key = f"{ctx.openstack_target}:{bug_key_type}"
-            lp_bug = lp_bugs.get(key)
-            if lp_bug is None and build_type == "snapshot":
-                # Backwards compatibility for configs that still use snapshot keys.
-                legacy_key = f"{ctx.openstack_target}:snapshot"
-                lp_bug = lp_bugs.get(legacy_key)
+            lp_bug = lp_bugs.get(bug_key_type)
 
     # Determine upstream version for changelog message
     # For snapshots, use the version from snapshot_result

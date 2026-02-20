@@ -98,8 +98,8 @@ class GitFetcher:
             use_ssh = self.launchpad_username is not None
 
         if use_ssh and self.launchpad_username:
-            return f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}"
-        return f"{self.base_url}/{package}"
+            return f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
+        return f"{self.base_url}/{package}/+git/{package}"
 
     def _acquire_lock(self, lock_path: Path) -> int | None:
         """Acquire a file lock, waiting up to lock_timeout seconds.
@@ -283,7 +283,7 @@ class GitFetcher:
 
         # Convert HTTPS to SSH
         if "git.launchpad.net/~ubuntu-openstack-dev" in current_url:
-            ssh_url = f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}"
+            ssh_url = f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
             origin.set_url(ssh_url)
 
     def _list_branches(self, repo_path: Path) -> list[str]:
