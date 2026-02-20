@@ -617,6 +617,43 @@ class TestUpdateSigningKey:
         assert signing_key.exists()
         assert "releases-repo-key" in signing_key.read_text()
 
+    def test_release_fallback_key_unchanged_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        """Returns False when fallback key content matches existing signing key."""
+        pkg_repo = tmp_path / "pkg"
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        signing_key.parent.mkdir(parents=True)
+
+        key_content = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nsame-key\n"
+        signing_key.write_text(key_content)
+
+        # Fallback key has identical content
+        fallback_dir = tmp_path / "home" / "openstack-signing-keys"
+        fallback_dir.mkdir(parents=True)
+        (fallback_dir / "gazpacho-signing-key.asc").write_text(key_content)
+
+        releases_repo = self._make_releases_repo(tmp_path)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
+
+        assert result is False
+
+    def test_release_releases_repo_key_unchanged_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        """Returns False when releases repo key content matches existing signing key."""
+        pkg_repo = tmp_path / "pkg"
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        signing_key.parent.mkdir(parents=True)
+
+        key_content = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nreleases-repo-key\n"
+        signing_key.write_text(key_content)
+
+        releases_repo = self._make_releases_repo(tmp_path)
+
+        # No fallback key
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
+
+        assert result is False
+
     def test_release_no_key_found_returns_false(self, tmp_path: Path, monkeypatch) -> None:
         """Returns False when neither fallback nor releases repo has a key."""
         pkg_repo = tmp_path / "pkg"

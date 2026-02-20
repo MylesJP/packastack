@@ -941,12 +941,22 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
 
     signing_key_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Read current content (if any) so we only return True when content changes
+    existing_content = ""
+    if signing_key_path.exists():
+        try:
+            existing_content = signing_key_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+
     # 1. Try local fallback key file first
     series_lower = series.lower()
     fallback_key = Path.home() / "openstack-signing-keys" / f"{series_lower}-signing-key.asc"
     if fallback_key.exists():
         try:
             key_content = fallback_key.read_text(encoding="utf-8", errors="replace")
+            if key_content == existing_content:
+                return False
             signing_key_path.write_text(key_content, encoding="utf-8")
             return True
         except OSError:
@@ -996,6 +1006,8 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
 
     try:
         key_content = key_file_path.read_text(encoding="utf-8", errors="replace")
+        if key_content == existing_content:
+            return False
         signing_key_path.write_text(key_content, encoding="utf-8")
         return True
     except OSError:
