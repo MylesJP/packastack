@@ -64,6 +64,7 @@ class ProjectRelease:
     releases: list[ReleaseVersion] = field(default_factory=list)
     branches: list[dict[str, Any]] = field(default_factory=list)
     type: str = ""  # service, library, other
+    tarball_base: str = ""  # Override for tarball filename stem (e.g., "aodhclient")
 
     def get_latest_version(self) -> str | None:
         """Get the latest release version."""
@@ -351,6 +352,14 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
                     diff_start=rel.get("diff-start", ""),
                 ))
 
+            # Extract tarball-base from repository-settings if present
+            tarball_base = ""
+            repo_settings = data.get("repository-settings", {})
+            for _repo_name, settings in repo_settings.items():
+                if isinstance(settings, dict) and "tarball-base" in settings:
+                    tarball_base = settings["tarball-base"]
+                    break
+
             return ProjectRelease(
                 name=yaml_file.stem,
                 team=data.get("team", ""),
@@ -358,6 +367,7 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
                 releases=releases,
                 branches=data.get("branches", []),
                 type=data.get("type", ""),
+                tarball_base=tarball_base,
             )
     except Exception:
         return None

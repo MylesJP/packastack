@@ -930,7 +930,29 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
                 return False
         return False
 
-    # For release builds, update the signing key
+    # For release builds, update the signing key.
+    #
+    # Preferred source order:
+    #   1. Local fallback key file (~/openstack-signing-keys/<series>-signing-key.asc)
+    #      This file is maintained externally and typically includes rotated subkeys
+    #      that may not yet be reflected in the openstack-releases repository.
+    #   2. Key from the openstack-releases repo (_static/<keyid>.txt)
+    #      This is the static export shipped with the releases repo.
+
+    signing_key_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. Try local fallback key file first
+    series_lower = series.lower()
+    fallback_key = Path.home() / "openstack-signing-keys" / f"{series_lower}-signing-key.asc"
+    if fallback_key.exists():
+        try:
+            key_content = fallback_key.read_text(encoding="utf-8", errors="replace")
+            signing_key_path.write_text(key_content, encoding="utf-8")
+            return True
+        except OSError:
+            pass  # Fall through to openstack-releases lookup
+
+    # 2. Fall back to openstack-releases repo
     index_path = releases_repo / "doc" / "source" / "index.rst"
     if not index_path.exists():
         return False
@@ -945,10 +967,6 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     # * 2025-10-06..present (2026.1/Gazpacho Cycle key):
     #   `key 0x<keyid>`_
     # We look for the "present" line (current key) or the specific series
-
-    # Normalize series for matching (handle both "2026.1" and "gazpacho" forms)
-    series_lower = series.lower()
-
     key_id = None
     lines = content.splitlines()
     for i, line in enumerate(lines):
@@ -968,7 +986,6 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
 
     # Construct the key file path directly - the naming convention is consistent:
     # Key ID 0x<hex> maps to _static/0x<hex>.txt or static/0x<hex>.txt
-    # Note: The RST reference may span multiple lines, so we use direct path construction
     key_file_path = releases_repo / "doc" / "source" / "_static" / f"{key_id}.txt"
     if not key_file_path.exists():
         # Try without underscore prefix
@@ -976,9 +993,6 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
 
     if not key_file_path.exists():
         return False
-
-    # Copy the key file to debian/upstream/signing-key.asc
-    signing_key_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         key_content = key_file_path.read_text(encoding="utf-8", errors="replace")

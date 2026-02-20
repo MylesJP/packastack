@@ -310,6 +310,37 @@ class TestLoadProjectReleases:
         assert release is not None
         assert release.releases[0].version == "25.0.0"
 
+    def test_tarball_base_parsed(self, releases_repo: Path) -> None:
+        """Test that tarball-base is parsed from repository-settings."""
+        deliverables_dir = releases_repo / "deliverables" / "2024.2"
+        data = {
+            "team": "Telemetry",
+            "type": "client-library",
+            "repository-settings": {
+                "openstack/python-aodhclient": {"tarball-base": "aodhclient"},
+            },
+            "releases": [
+                {
+                    "version": "3.10.0",
+                    "projects": [
+                        {"repo": "openstack/python-aodhclient", "hash": "abc123"}
+                    ],
+                },
+            ],
+            "release-model": "cycle-with-intermediary",
+        }
+        (deliverables_dir / "python-aodhclient.yaml").write_text(yaml.dump(data))
+
+        release = load_project_releases(releases_repo, "2024.2", "python-aodhclient")
+        assert release is not None
+        assert release.tarball_base == "aodhclient"
+
+    def test_tarball_base_empty_when_not_set(self, releases_repo: Path) -> None:
+        """Test that tarball_base is empty when not in deliverable YAML."""
+        release = load_project_releases(releases_repo, "2024.2", "nova")
+        assert release is not None
+        assert release.tarball_base == ""
+
 
 class TestIsSnapshotEligible:
     """Tests for is_snapshot_eligible function.

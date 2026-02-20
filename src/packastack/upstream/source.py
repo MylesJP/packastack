@@ -124,28 +124,30 @@ class SnapshotRequest:
 OPENDEV_BASE_URL = "https://opendev.org/openstack"
 
 
-def build_tarball_url(project: str, version: str) -> str:
+def build_tarball_url(project: str, version: str, tarball_base: str = "") -> str:
     """Build URL for an official OpenStack release tarball.
 
     Args:
-        project: Project name (e.g., "nova", "oslo.config", "osc-lib").
+        project: Project name (e.g., "nova", "oslo.config", "python-aodhclient").
         version: Release version (e.g., "29.0.0").
+        tarball_base: Optional override for the tarball filename stem from
+            the openstack-releases ``repository-settings.tarball-base`` field
+            (e.g., "aodhclient" for python-aodhclient).
 
     Returns:
         Full URL to the tarball.
     """
-    # OpenStack tarballs follow pattern: project/project-version.tar.gz
-    # The directory path uses the project name as-is (with hyphens/dots)
-    # but the tarball filename normalizes special characters to underscores:
-    # - oslo.config -> oslo_config (dots to underscores)
-    # - python-openstackclient -> python_openstackclient (hyphens to underscores)
-    # - osc-lib -> osc_lib (hyphens to underscores)
-
-    tarball_name = project
-    # Replace dots with underscores (e.g. oslo.config -> oslo_config)
-    tarball_name = tarball_name.replace(".", "_")
-    # Replace hyphens with underscores (e.g. osc-lib -> osc_lib, python-openstackclient -> python_openstackclient)
-    tarball_name = tarball_name.replace("-", "_")
+    # OpenStack tarballs follow pattern: project/tarball_name-version.tar.gz
+    # The directory path uses the project name as-is (with hyphens/dots).
+    # The tarball filename stem is either the explicit tarball-base from
+    # openstack-releases, or the project name with special characters
+    # normalized to underscores.
+    if tarball_base:
+        tarball_name = tarball_base
+    else:
+        tarball_name = project
+        tarball_name = tarball_name.replace(".", "_")
+        tarball_name = tarball_name.replace("-", "_")
 
     path = f"openstack/{project}/{tarball_name}-{version}.tar.gz"
 
@@ -205,7 +207,7 @@ def select_upstream_source(
         if latest is None:
             return None
 
-        tarball_url = build_tarball_url(proj.name, latest.version)
+        tarball_url = build_tarball_url(proj.name, latest.version, proj.tarball_base)
         signature_url = build_signature_url(tarball_url)
 
         return UpstreamSource(

@@ -529,3 +529,103 @@ class TestUscanCache:
         cached = watch.get_cached_uscan_result("nova", cache)
 
         assert cached is None
+
+
+class TestUpdateSigningKey:
+    """Tests for update_signing_key function."""
+
+    def _make_releases_repo(self, tmp_path: Path, series: str = "gazpacho") -> Path:
+        """Create a minimal openstack-releases repo with a signing key."""
+        releases_repo = tmp_path / "openstack-releases"
+        static_dir = releases_repo / "doc" / "source" / "static"
+        static_dir.mkdir(parents=True)
+
+        # Create index.rst with a cycle key entry
+        index_rst = releases_repo / "doc" / "source" / "index.rst"
+        index_rst.write_text(
+            f"* 2025-10-06..present (2026.1/{series.capitalize()} Cycle key):\n"
+            "  `key 0xdeadbeef1234567890abcdef`_\n"
+        )
+
+        # Create the key file
+        key_file = static_dir / "0xdeadbeef1234567890abcdef.txt"
+        key_file.write_text("-----BEGIN PGP PUBLIC KEY BLOCK-----\nreleases-repo-key\n")
+
+        return releases_repo
+
+    def test_snapshot_removes_existing_key(self, tmp_path: Path) -> None:
+        """Snapshot builds remove the signing key file."""
+        pkg_repo = tmp_path / "pkg"
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        signing_key.parent.mkdir(parents=True)
+        signing_key.write_text("old key")
+
+        releases_repo = self._make_releases_repo(tmp_path)
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=True)
+
+        assert result is True
+        assert not signing_key.exists()
+
+    def test_snapshot_no_key_returns_false(self, tmp_path: Path) -> None:
+        """Snapshot builds return False when no key to remove."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        releases_repo = self._make_releases_repo(tmp_path)
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=True)
+
+        assert result is False
+
+    def test_release_uses_fallback_key_when_available(self, tmp_path: Path, monkeypatch) -> None:
+        """Release builds prefer the local fallback key file over openstack-releases."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        # Create fallback key
+        fallback_dir = tmp_path / "home" / "openstack-signing-keys"
+        fallback_dir.mkdir(parents=True)
+        fallback_key = fallback_dir / "gazpacho-signing-key.asc"
+        fallback_key.write_text("-----BEGIN PGP PUBLIC KEY BLOCK-----\nfallback-key-with-subkeys\n")
+
+        # Also create a releases repo with a different key
+        releases_repo = self._make_releases_repo(tmp_path)
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
+
+        assert result is True
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        assert signing_key.exists()
+        assert "fallback-key-with-subkeys" in signing_key.read_text()
+
+    def test_release_falls_back_to_releases_repo(self, tmp_path: Path, monkeypatch) -> None:
+        """Release builds use openstack-releases key when no fallback exists."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        releases_repo = self._make_releases_repo(tmp_path)
+
+        # Point home to a dir without fallback keys
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
+
+        assert result is True
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        assert signing_key.exists()
+        assert "releases-repo-key" in signing_key.read_text()
+
+    def test_release_no_key_found_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        """Returns False when neither fallback nor releases repo has a key."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        # Empty releases repo
+        releases_repo = tmp_path / "openstack-releases"
+        index_dir = releases_repo / "doc" / "source"
+        index_dir.mkdir(parents=True)
+        (index_dir / "index.rst").write_text("no key info here\n")
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
+
+        assert result is False

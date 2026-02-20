@@ -113,6 +113,16 @@ class TestBuildTarballUrl:
         url = upstream.build_tarball_url("neutron", "24.1.0")
         assert "neutron-24.1.0.tar.gz" in url
 
+    def test_tarball_base_override(self) -> None:
+        """Test tarball_base overrides the default filename stem."""
+        url = upstream.build_tarball_url("python-aodhclient", "3.10.0", tarball_base="aodhclient")
+        assert url == "https://tarballs.opendev.org/openstack/python-aodhclient/aodhclient-3.10.0.tar.gz"
+
+    def test_tarball_base_empty_uses_default(self) -> None:
+        """Test empty tarball_base uses the default normalization."""
+        url = upstream.build_tarball_url("nova", "29.0.0", tarball_base="")
+        assert url == "https://tarballs.opendev.org/openstack/nova/nova-29.0.0.tar.gz"
+
 
 class TestBuildSignatureUrl:
     """Tests for build_signature_url function."""
@@ -131,6 +141,8 @@ class TestSelectUpstreamSource:
         """Test selecting source for release build."""
         with patch("packastack.upstream.releases.load_project_releases") as mock_load:
             mock_proj = MagicMock()
+            mock_proj.name = "nova"
+            mock_proj.tarball_base = ""
             mock_release = MagicMock()
             mock_release.version = "29.0.0"
             mock_proj.get_latest_release.return_value = mock_release
@@ -147,6 +159,28 @@ class TestSelectUpstreamSource:
             assert source.version == "29.0.0"
             assert source.build_type == upstream.BuildType.RELEASE
             assert "nova-29.0.0.tar.gz" in source.tarball_url
+
+    def test_release_build_with_tarball_base(self, tmp_path: Path) -> None:
+        """Test selecting source uses tarball_base for filename when set."""
+        with patch("packastack.upstream.releases.load_project_releases") as mock_load:
+            mock_proj = MagicMock()
+            mock_proj.name = "python-aodhclient"
+            mock_proj.tarball_base = "aodhclient"
+            mock_release = MagicMock()
+            mock_release.version = "3.10.0"
+            mock_proj.get_latest_release.return_value = mock_release
+            mock_load.return_value = mock_proj
+
+            source = upstream.select_upstream_source(
+                releases_repo=tmp_path,
+                series="gazpacho",
+                project="python-aodhclient",
+                build_type=upstream.BuildType.RELEASE,
+            )
+
+            assert source is not None
+            assert "aodhclient-3.10.0.tar.gz" in source.tarball_url
+            assert "python-aodhclient" in source.tarball_url  # directory path
 
     def test_snapshot_build(self, tmp_path: Path) -> None:
         """Test selecting source for snapshot build."""
