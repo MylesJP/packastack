@@ -758,6 +758,7 @@ def fetch_packaging_repo(
         remove_pgp_options_from_watch,
         update_signing_key,
         upgrade_watch_version,
+        verify_signing_key_with_uscan,
     )
 
     watch_path = pkg_repo / "debian" / "watch"
@@ -861,6 +862,41 @@ def fetch_packaging_repo(
                 stderr=commit_result.stderr,
                 returncode=commit_result.returncode,
             )
+
+    # Verify signing key with uscan for non-snapshot builds
+    if not is_snapshot:
+        signing_key_path = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        if signing_key_path.exists():
+            activity("prepare", "Verifying signing key with uscan --force-download...")
+            verify_result = verify_signing_key_with_uscan(pkg_repo)
+            if verify_result.remediation_succeeded:
+                # Key was refreshed from keyserver - commit the updated key
+                activity(
+                    "prepare",
+                    "Signing key refreshed from keyserver after GPG verification failure",
+                )
+                commit_result = git_commit(
+                    pkg_repo,
+                    "d/u/signing-key.asc: refresh from keyserver (subkey rotation)",
+                    files=["debian/upstream/signing-key.asc"],
+                )
+                if commit_result.returncode == 0:
+                    activity("prepare", "Committed keyserver-refreshed signing key")
+                else:
+                    raise GitCommitError(
+                        "Failed to commit keyserver-refreshed signing key",
+                        stderr=commit_result.stderr,
+                        returncode=commit_result.returncode,
+                    )
+                signing_key_updated = True
+            elif verify_result.success:
+                activity("prepare", "Signing key verified successfully")
+            else:
+                # Verification failed but not fatally - warn and continue
+                activity(
+                    "prepare",
+                    f"Signing key verification warning: {verify_result.error}",
+                )
 
     # Ensure sphinxdoc addon is enabled before patch application/commits
     sphinxdoc_updated = maybe_enable_sphinxdoc(pkg_repo)

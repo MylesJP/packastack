@@ -1000,3 +1000,193 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
         return True
     except OSError:
         return False
+
+
+# =============================================================================
+# Signing Key Verification with uscan
+# =============================================================================
+
+# OpenStack signing key defaults for keyserver remediation
+OPENSTACK_PRIMARY_FPR = "B8E9315F48553EC5AFF9FFE5E69D97DA9EFB5AFF"
+DEFAULT_KEYSERVER = "hkps://keys.openpgp.org"
+
+# Patterns indicating GPG verification failure in uscan output
+_GPG_FAILURE_PATTERNS = [
+    "gpgv: Can't check signature: No public key",
+    "OpenPGP signature did not verify",
+    "BAD signature",
+    "no valid OpenPGP data",
+]
+
+
+@dataclass
+class UscanVerifyResult:
+    """Result of verifying the signing key using uscan --force-download."""
+
+    success: bool
+    gpg_error: bool = False
+    remediation_attempted: bool = False
+    remediation_succeeded: bool = False
+    error: str = ""
+
+
+def _is_gpg_verification_failure(output: str) -> bool:
+    """Check if uscan output indicates a GPG verification failure.
+
+    Args:
+        output: Combined stdout+stderr from uscan.
+
+    Returns:
+        True if the output contains GPG verification error patterns.
+    """
+    return any(pattern in output for pattern in _GPG_FAILURE_PATTERNS)
+
+
+def _refresh_key_from_keyserver(
+    primary_fpr: str,
+    keyserver: str,
+    signing_key_path: Path,
+) -> bool:
+    """Refresh the OpenStack signing key from a keyserver and export it.
+
+    Fetches or refreshes the primary key from the keyserver to pick up
+    any rotated signing subkeys, then exports it in ASCII-armor format
+    to the specified signing key path.
+
+    Args:
+        primary_fpr: Primary key fingerprint to fetch/refresh.
+        keyserver: Keyserver URL (e.g., hkps://keys.openpgp.org).
+        signing_key_path: Path to write the exported key.
+
+    Returns:
+        True if the key was successfully refreshed and exported.
+    """
+    try:
+        # Fetch the key if not already in local keyring
+        subprocess.run(
+            ["gpg", "--keyserver", keyserver, "--recv-keys", primary_fpr],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        # Refresh to pick up latest subkeys
+        subprocess.run(
+            ["gpg", "--keyserver", keyserver, "--refresh-keys", primary_fpr],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        # Export with minimal options to signing key file
+        result = subprocess.run(
+            [
+                "gpg",
+                "--export",
+                "--export-options",
+                "export-minimal",
+                "--armor",
+                primary_fpr,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        if result.returncode == 0 and result.stdout:
+            signing_key_path.parent.mkdir(parents=True, exist_ok=True)
+            signing_key_path.write_bytes(result.stdout)
+            return True
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    return False
+
+
+def verify_signing_key_with_uscan(
+    pkg_repo: Path,
+    primary_fpr: str = OPENSTACK_PRIMARY_FPR,
+    keyserver: str = DEFAULT_KEYSERVER,
+) -> UscanVerifyResult:
+    """Verify that the signing key works by running uscan --force-download.
+
+    Runs uscan to test whether the current debian/upstream/signing-key.asc
+    can verify the upstream tarball signature. If verification fails due to
+    a GPG error (e.g., missing subkey after key rotation), attempts to
+    refresh the key from a keyserver and re-verify.
+
+    Args:
+        pkg_repo: Path to the packaging repository containing debian/.
+        primary_fpr: OpenStack primary key fingerprint for keyserver refresh.
+        keyserver: Keyserver URL for key refresh.
+
+    Returns:
+        UscanVerifyResult with verification outcome and remediation details.
+    """
+    signing_key_path = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+
+    # Run uscan with current key
+    try:
+        uscan_result = subprocess.run(
+            ["uscan", "--verbose", "--force-download"],
+            cwd=pkg_repo,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError:
+        return UscanVerifyResult(success=False, error="uscan not installed")
+    except subprocess.TimeoutExpired:
+        return UscanVerifyResult(success=False, error="uscan timed out")
+
+    output = uscan_result.stdout + uscan_result.stderr
+
+    if uscan_result.returncode == 0:
+        return UscanVerifyResult(success=True)
+
+    # Check if it's a GPG failure
+    if not _is_gpg_verification_failure(output):
+        # Not a GPG issue - could be network, missing tarball, etc.
+        # Don't try to fix it; the tarball fetch phase will handle it.
+        return UscanVerifyResult(
+            success=False,
+            error=f"uscan failed (not a GPG issue): {output[:200]}",
+        )
+
+    # GPG failure detected - attempt remediation via keyserver
+    verify_result = UscanVerifyResult(
+        success=False,
+        gpg_error=True,
+        remediation_attempted=True,
+        error=f"GPG verification failed: {output[:200]}",
+    )
+
+    if not _refresh_key_from_keyserver(primary_fpr, keyserver, signing_key_path):
+        verify_result.error = (
+            "GPG verification failed and keyserver refresh also failed"
+        )
+        return verify_result
+
+    # Re-run uscan with refreshed key
+    try:
+        uscan_result = subprocess.run(
+            ["uscan", "--verbose", "--force-download"],
+            cwd=pkg_repo,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        verify_result.error = "uscan failed during re-verification"
+        return verify_result
+
+    if uscan_result.returncode == 0:
+        verify_result.success = True
+        verify_result.remediation_succeeded = True
+        verify_result.error = ""
+        return verify_result
+
+    output = uscan_result.stdout + uscan_result.stderr
+    verify_result.error = (
+        f"GPG verification still failed after keyserver refresh: {output[:200]}"
+    )
+    return verify_result

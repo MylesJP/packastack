@@ -20,8 +20,11 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from packastack.debpkg import watch
 
@@ -629,3 +632,307 @@ class TestUpdateSigningKey:
         result = watch.update_signing_key(pkg_repo, releases_repo, "gazpacho", is_snapshot=False)
 
         assert result is False
+
+
+class TestIsGpgVerificationFailure:
+    """Tests for _is_gpg_verification_failure helper."""
+
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "gpgv: Can't check signature: No public key",
+            "some prefix OpenPGP signature did not verify suffix",
+            "gpgv: BAD signature from ...",
+            "error: no valid OpenPGP data found",
+        ],
+    )
+    def test_detects_gpg_failures(self, output: str) -> None:
+        """Recognises known GPG error patterns."""
+        assert watch._is_gpg_verification_failure(output) is True
+
+    def test_non_gpg_failure(self) -> None:
+        """Returns False for non-GPG errors."""
+        assert watch._is_gpg_verification_failure("404 Not Found") is False
+
+    def test_empty_output(self) -> None:
+        """Returns False for empty output."""
+        assert watch._is_gpg_verification_failure("") is False
+
+
+class TestRefreshKeyFromKeyserver:
+    """Tests for _refresh_key_from_keyserver helper."""
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_successful_refresh(self, mock_run, tmp_path: Path) -> None:
+        """Key is exported when gpg commands succeed."""
+        signing_key = tmp_path / "debian" / "upstream" / "signing-key.asc"
+
+        # Mock: recv-keys ok, refresh-keys ok, export returns key data
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # recv-keys
+            MagicMock(returncode=0),  # refresh-keys
+            MagicMock(returncode=0, stdout=b"-----BEGIN PGP PUBLIC KEY BLOCK-----\nkey-data\n"),
+        ]
+
+        result = watch._refresh_key_from_keyserver(
+            "DEADBEEF", "hkps://keys.openpgp.org", signing_key
+        )
+
+        assert result is True
+        assert signing_key.exists()
+        assert b"key-data" in signing_key.read_bytes()
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_export_fails(self, mock_run, tmp_path: Path) -> None:
+        """Returns False when gpg export fails."""
+        signing_key = tmp_path / "signing-key.asc"
+
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # recv-keys
+            MagicMock(returncode=0),  # refresh-keys
+            MagicMock(returncode=1, stdout=b""),  # export fails
+        ]
+
+        result = watch._refresh_key_from_keyserver(
+            "DEADBEEF", "hkps://keys.openpgp.org", signing_key
+        )
+
+        assert result is False
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_export_empty_stdout(self, mock_run, tmp_path: Path) -> None:
+        """Returns False when gpg export returns empty stdout."""
+        signing_key = tmp_path / "signing-key.asc"
+
+        mock_run.side_effect = [
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0, stdout=b""),  # empty export
+        ]
+
+        result = watch._refresh_key_from_keyserver(
+            "DEADBEEF", "hkps://keys.openpgp.org", signing_key
+        )
+
+        assert result is False
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_timeout_returns_false(self, mock_run, tmp_path: Path) -> None:
+        """Returns False on subprocess timeout."""
+        signing_key = tmp_path / "signing-key.asc"
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="gpg", timeout=30)
+
+        result = watch._refresh_key_from_keyserver(
+            "DEADBEEF", "hkps://keys.openpgp.org", signing_key
+        )
+
+        assert result is False
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_gpg_not_found(self, mock_run, tmp_path: Path) -> None:
+        """Returns False when gpg is not installed."""
+        signing_key = tmp_path / "signing-key.asc"
+        mock_run.side_effect = FileNotFoundError("gpg")
+
+        result = watch._refresh_key_from_keyserver(
+            "DEADBEEF", "hkps://keys.openpgp.org", signing_key
+        )
+
+        assert result is False
+
+
+class TestUscanVerifyResult:
+    """Tests for UscanVerifyResult dataclass."""
+
+    def test_success_defaults(self) -> None:
+        """Successful result has expected defaults."""
+        r = watch.UscanVerifyResult(success=True)
+        assert r.success is True
+        assert r.gpg_error is False
+        assert r.remediation_attempted is False
+        assert r.remediation_succeeded is False
+        assert r.error == ""
+
+    def test_failure_with_all_fields(self) -> None:
+        """Failure result with all fields set."""
+        r = watch.UscanVerifyResult(
+            success=False,
+            gpg_error=True,
+            remediation_attempted=True,
+            remediation_succeeded=False,
+            error="key missing",
+        )
+        assert r.success is False
+        assert r.gpg_error is True
+        assert r.remediation_attempted is True
+        assert r.error == "key missing"
+
+
+class TestVerifySigningKeyWithUscan:
+    """Tests for verify_signing_key_with_uscan function."""
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_uscan_succeeds(self, mock_run, tmp_path: Path) -> None:
+        """Returns success when uscan passes on first attempt."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian" / "upstream").mkdir(parents=True)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is True
+        assert result.gpg_error is False
+        assert result.remediation_attempted is False
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_uscan_not_installed(self, mock_run, tmp_path: Path) -> None:
+        """Returns error when uscan binary is missing."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        mock_run.side_effect = FileNotFoundError("uscan")
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert "not installed" in result.error
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_uscan_timeout(self, mock_run, tmp_path: Path) -> None:
+        """Returns error when uscan times out."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="uscan", timeout=120)
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert "timed out" in result.error
+
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_non_gpg_failure(self, mock_run, tmp_path: Path) -> None:
+        """Non-GPG failures are reported without remediation."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        mock_run.return_value = MagicMock(
+            returncode=1, stdout="", stderr="404 Not Found"
+        )
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert result.gpg_error is False
+        assert result.remediation_attempted is False
+        assert "not a GPG issue" in result.error
+
+    @patch("packastack.debpkg.watch._refresh_key_from_keyserver")
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_gpg_failure_remediation_succeeds(
+        self, mock_run, mock_refresh, tmp_path: Path
+    ) -> None:
+        """GPG failure is remediated by keyserver refresh."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian" / "upstream").mkdir(parents=True)
+
+        # First uscan: GPG failure; second uscan: success
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="gpgv: Can't check signature: No public key",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        mock_refresh.return_value = True
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is True
+        assert result.gpg_error is True
+        assert result.remediation_attempted is True
+        assert result.remediation_succeeded is True
+        assert result.error == ""
+        mock_refresh.assert_called_once()
+
+    @patch("packastack.debpkg.watch._refresh_key_from_keyserver")
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_gpg_failure_refresh_fails(
+        self, mock_run, mock_refresh, tmp_path: Path
+    ) -> None:
+        """Returns failure when keyserver refresh itself fails."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian" / "upstream").mkdir(parents=True)
+
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="OpenPGP signature did not verify",
+        )
+        mock_refresh.return_value = False
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert result.gpg_error is True
+        assert result.remediation_attempted is True
+        assert result.remediation_succeeded is False
+        assert "keyserver refresh also failed" in result.error
+
+    @patch("packastack.debpkg.watch._refresh_key_from_keyserver")
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_gpg_failure_remediation_still_fails(
+        self, mock_run, mock_refresh, tmp_path: Path
+    ) -> None:
+        """Returns failure when remediation succeeds but uscan still fails."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian" / "upstream").mkdir(parents=True)
+
+        # Both uscan runs fail with GPG error
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="BAD signature from key",
+            ),
+            MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="BAD signature from key still",
+            ),
+        ]
+        mock_refresh.return_value = True
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert result.gpg_error is True
+        assert result.remediation_attempted is True
+        assert result.remediation_succeeded is False
+        assert "still failed after keyserver refresh" in result.error
+
+    @patch("packastack.debpkg.watch._refresh_key_from_keyserver")
+    @patch("packastack.debpkg.watch.subprocess.run")
+    def test_gpg_failure_reverify_timeout(
+        self, mock_run, mock_refresh, tmp_path: Path
+    ) -> None:
+        """Returns failure when re-verification times out."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian" / "upstream").mkdir(parents=True)
+
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=1,
+                stdout="",
+                stderr="no valid OpenPGP data",
+            ),
+            subprocess.TimeoutExpired(cmd="uscan", timeout=120),
+        ]
+        mock_refresh.return_value = True
+
+        result = watch.verify_signing_key_with_uscan(pkg_repo)
+
+        assert result.success is False
+        assert "re-verification" in result.error
