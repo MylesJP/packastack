@@ -310,6 +310,69 @@ class TestImportOrig:
             cmd = mock_run.call_args[0][0]
             assert "--upstream-branch=upstream-gazpacho" in cmd
 
+    def test_import_with_component(self, tmp_path: Path) -> None:
+        """Test import with component parameter passes --component flag."""
+        tarball = tmp_path / "foo_1.0.0.orig-xstatic.tar.gz"
+        tarball.touch()
+
+        with patch.object(gbp, "run_command") as mock_run:
+            mock_run.return_value = (0, "Imported", "")
+            result = gbp.import_orig(
+                tmp_path,
+                tarball,
+                upstream_version="1.0.0",
+                component="xstatic",
+            )
+
+            assert result.success is True
+            cmd = mock_run.call_args[0][0]
+            assert "--component=xstatic" in cmd
+            assert str(tarball) in cmd
+
+    def test_import_with_component_skips_tag_check(self, tmp_path: Path) -> None:
+        """Test that component import skips the tag existence check."""
+        tarball = tmp_path / "foo_1.0.0.orig-xstatic.tar.gz"
+        tarball.touch()
+
+        with patch.object(gbp, "run_command") as mock_run:
+            # First call would be tag check if it happened, second is the import
+            mock_run.return_value = (0, "Imported", "")
+            result = gbp.import_orig(
+                tmp_path,
+                tarball,
+                upstream_version="1.0.0",
+                component="xstatic",
+            )
+
+            assert result.success is True
+            # Should only have one call (import), not two (tag check + import)
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert "gbp" in cmd
+            assert "--component=xstatic" in cmd
+
+    def test_import_without_component_checks_tag(self, tmp_path: Path) -> None:
+        """Test that non-component import checks tag existence first."""
+        tarball = tmp_path / "foo_1.0.0.orig.tar.gz"
+        tarball.touch()
+
+        with patch.object(gbp, "run_command") as mock_run:
+            # tag check returns that tag exists
+            mock_run.return_value = (0, "1.0.0", "")
+            result = gbp.import_orig(
+                tmp_path,
+                tarball,
+                upstream_version="1.0.0",
+            )
+
+            # Should skip import since tag exists
+            assert result.success is True
+            assert "already exists" in result.output
+            assert mock_run.call_count == 1
+            cmd = mock_run.call_args[0][0]
+            assert "git" in cmd
+            assert "tag" in cmd
+
 
 class TestEnsureUpstreamBranchResult:
     """Tests for EnsureUpstreamBranchResult dataclass."""

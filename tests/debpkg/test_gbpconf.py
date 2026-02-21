@@ -428,3 +428,123 @@ debian-branch = ubuntu/noble-dalmatian
         assert success is True
         assert updated == []
         assert "No changes needed" in error
+
+
+class TestGetComponents:
+    """Tests for get_components function."""
+
+    def test_no_gbp_conf(self, tmp_path: Path) -> None:
+        """Test returns empty list when no gbp.conf exists."""
+        result = gbpconf.get_components(tmp_path)
+        assert result == []
+
+    def test_no_import_orig_section(self, tmp_path: Path) -> None:
+        """Test returns empty list when gbp.conf has no import-orig section."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = ubuntu/noble-dalmatian
+
+[buildpackage]
+export-dir = ../build-area/
+""")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == []
+
+    def test_component_detected_from_gbp_conf(self, tmp_path: Path) -> None:
+        """Test detects component from [import-orig] section."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = ubuntu/noble-dalmatian
+
+[import-orig]
+component = xstatic
+""")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == ["xstatic"]
+
+    def test_multiple_components(self, tmp_path: Path) -> None:
+        """Test detects multiple comma-separated components."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = ubuntu/noble-dalmatian
+
+[import-orig]
+component = xstatic, vendor
+""")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == ["xstatic", "vendor"]
+
+    def test_fallback_to_bundle_script(self, tmp_path: Path) -> None:
+        """Test detects component from debian/bundle-*.sh scripts."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        bundle_script = debian_dir / "bundle-xstatic.sh"
+        bundle_script.write_text("#!/bin/sh\necho hello\n")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == ["xstatic"]
+
+    def test_gbp_conf_takes_precedence_over_bundle_scripts(self, tmp_path: Path) -> None:
+        """Test gbp.conf component takes precedence over bundle scripts."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = ubuntu/noble-dalmatian
+
+[import-orig]
+component = xstatic
+""")
+        # Also create a bundle script for a different component
+        bundle_script = debian_dir / "bundle-vendor.sh"
+        bundle_script.write_text("#!/bin/sh\necho hello\n")
+
+        result = gbpconf.get_components(tmp_path)
+        # Should use gbp.conf, not fallback
+        assert result == ["xstatic"]
+
+    def test_empty_component_value(self, tmp_path: Path) -> None:
+        """Test returns empty list when component value is empty."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = ubuntu/noble-dalmatian
+
+[import-orig]
+component =
+""")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == []
+
+    def test_no_debian_dir_for_fallback(self, tmp_path: Path) -> None:
+        """Test returns empty list when no debian dir exists for fallback."""
+        result = gbpconf.get_components(tmp_path)
+        assert result == []
+
+    def test_malformed_gbp_conf_falls_back(self, tmp_path: Path) -> None:
+        """Test falls back to bundle scripts on malformed gbp.conf."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("not valid ini content [[[")
+        bundle_script = debian_dir / "bundle-xstatic.sh"
+        bundle_script.write_text("#!/bin/sh\necho hello\n")
+
+        result = gbpconf.get_components(tmp_path)
+        assert result == ["xstatic"]

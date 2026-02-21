@@ -1929,6 +1929,99 @@ def import_and_patch(
                 }
             )
 
+            # Import component tarballs (e.g., xstatic) if declared
+            from packastack.debpkg.gbpconf import get_components
+
+            components = get_components(pkg_repo)
+            for comp_name in components:
+                bundle_script = pkg_repo / "debian" / f"bundle-{comp_name}.sh"
+                if not bundle_script.exists():
+                    activity(
+                        "import-orig",
+                        f"Component '{comp_name}' declared but no bundle script found",
+                    )
+                    continue
+
+                comp_version = import_version or import_result.upstream_version or ""
+                if not comp_version:
+                    activity(
+                        "import-orig",
+                        f"Skipping component '{comp_name}': no version available",
+                    )
+                    continue
+
+                activity(
+                    "import-orig",
+                    f"Generating component tarball: bundle-{comp_name}.sh {comp_version}",
+                )
+                bundle_cmd = [str(bundle_script), comp_version]
+                bundle_rc, bundle_out, bundle_err = run_command(
+                    bundle_cmd, cwd=pkg_repo
+                )
+                if bundle_rc != 0:
+                    activity(
+                        "import-orig",
+                        f"Component bundle script failed: {bundle_err or bundle_out}",
+                    )
+                    run.log_event(
+                        {
+                            "event": "import-orig.component_bundle_failed",
+                            "component": comp_name,
+                            "error": bundle_err or bundle_out,
+                        }
+                    )
+                    continue
+
+                # Locate the generated component tarball
+                comp_tarball = (
+                    pkg_repo.parent
+                    / f"{ctx.pkg_name}_{comp_version}.orig-{comp_name}.tar.gz"
+                )
+                if not comp_tarball.exists():
+                    activity(
+                        "import-orig",
+                        f"Component tarball not found: {comp_tarball.name}",
+                    )
+                    continue
+
+                activity(
+                    "import-orig",
+                    f"Importing component tarball: {comp_tarball.name}",
+                )
+                comp_result = import_orig(
+                    pkg_repo,
+                    comp_tarball,
+                    upstream_version=comp_version,
+                    upstream_branch=upstream_branch_name,
+                    pristine_tar=True,
+                    merge=False,
+                    component=comp_name,
+                )
+                if comp_result.success:
+                    activity(
+                        "import-orig",
+                        f"Component '{comp_name}' imported successfully",
+                    )
+                    run.log_event(
+                        {
+                            "event": "import-orig.component_complete",
+                            "component": comp_name,
+                            "tarball": str(comp_tarball),
+                        }
+                    )
+                else:
+                    activity(
+                        "import-orig",
+                        f"Component '{comp_name}' import failed: {comp_result.output}",
+                    )
+                    run.log_event(
+                        {
+                            "event": "import-orig.component_failed",
+                            "component": comp_name,
+                            "error": comp_result.output,
+                        }
+                    )
+
             # Now manually merge the upstream tag, preserving packaging files
             upstream_tag = import_result.upstream_version
             if upstream_tag:

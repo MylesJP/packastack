@@ -346,6 +346,7 @@ def import_orig(
     upstream_branch: str | None = None,
     pristine_tar: bool = True,
     merge: bool = True,
+    component: str | None = None,
 ) -> ImportOrigResult:
     """Import an upstream tarball using gbp import-orig.
 
@@ -353,6 +354,8 @@ def import_orig(
     and optionally stores it in the pristine-tar branch.
 
     If the upstream tag already exists, skips the import and returns success.
+    Tag checking is skipped for component imports since they update the
+    existing upstream commit rather than creating a new tag.
 
     Args:
         repo_path: Path to the git repository.
@@ -361,12 +364,15 @@ def import_orig(
         upstream_branch: Name of upstream branch (e.g., "upstream-dalmatian").
         pristine_tar: If True, store tarball in pristine-tar branch.
         merge: If True, merge upstream into the current branch.
+        component: Component name for gbp component tarballs (e.g., "xstatic").
+            When set, passes --component=<name> to gbp import-orig.
 
     Returns:
         ImportOrigResult with success status.
     """
     # Check if upstream tag already exists (e.g., from previous push)
-    if upstream_version:
+    # Skip for component imports - they update the existing upstream commit
+    if upstream_version and not component:
         check_tag_cmd = ["git", "tag", "-l", upstream_version]
         tag_rc, tag_out, _ = run_command(check_tag_cmd, cwd=repo_path)
         if tag_rc == 0 and tag_out.strip() == upstream_version:
@@ -393,6 +399,9 @@ def import_orig(
 
     if upstream_version:
         cmd.append(f"--upstream-version={upstream_version}")
+
+    if component:
+        cmd.append(f"--component={component}")
 
     cmd.append(str(tarball_path))
 

@@ -291,6 +291,47 @@ def update_gbp_conf_from_launchpad_yaml(
     return False, [], "Failed to save gbp.conf"
 
 
+def get_components(repo_path: Path) -> list[str]:
+    """Get component names from debian/gbp.conf [import-orig] section.
+
+    Checks for component declarations in the [import-orig] section of
+    debian/gbp.conf. Falls back to detecting debian/bundle-<name>.sh
+    scripts as a secondary detection method.
+
+    Args:
+        repo_path: Path to the git repository root.
+
+    Returns:
+        List of component names (e.g., ["xstatic"]) or empty list.
+    """
+    components: list[str] = []
+
+    # 1. Check gbp.conf [import-orig] section
+    conf_path = repo_path / "debian" / "gbp.conf"
+    if conf_path.exists():
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(conf_path)
+            if parser.has_section("import-orig"):
+                value = parser.get("import-orig", "component", fallback="")
+                if value:
+                    components = [c.strip() for c in value.split(",") if c.strip()]
+        except (configparser.Error, OSError):
+            pass
+
+    # 2. Fallback: detect debian/bundle-<name>.sh scripts
+    if not components:
+        debian_dir = repo_path / "debian"
+        if debian_dir.exists():
+            for script in debian_dir.glob("bundle-*.sh"):
+                # Extract component name from "bundle-xstatic.sh" -> "xstatic"
+                name = script.stem.removeprefix("bundle-")
+                if name:
+                    components.append(name)
+
+    return components
+
+
 if __name__ == "__main__":
     import sys
 
