@@ -441,6 +441,7 @@ def build(
     include_retired: bool = typer.Option(False, "--include-retired", help="Build retired upstream projects (default: refuse)"),
     skip_repo_regen: bool = typer.Option(False, "--skip-repo-regen", hidden=True, help="Skip local repo regeneration (internal use)"),
     ppa_upload: bool = typer.Option(False, "--ppa-upload", help="Upload to configured PPA on success"),
+    ai: bool = typer.Option(True, "--ai/--no-ai", help="AI-powered build failure diagnosis (default: on when API key set)"),
     # --all mode options
     all_packages: bool = typer.Option(False, "-a", "--all", help="Build all discovered packages in dependency order"),
     keep_going: bool = typer.Option(True, "--keep-going/--fail-fast", help="Continue on failure (default: keep-going) [--all only]"),
@@ -644,6 +645,7 @@ def _build_single_mode(
                 upload=upload,
                 skip_repo_regen=skip_repo_regen,
                 ppa_upload=ppa_upload,
+                ai_enabled=ai,
                 resume_workspace=resume_flag,
                 resume_run_id=resume_run_id,
                 workspace_ref=lambda w: _set_workspace(w, locals()),

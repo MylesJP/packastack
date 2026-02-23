@@ -92,6 +92,110 @@ With SSH configured, PackaStack uses URLs like:
 
 Existing repositories cloned via HTTPS are automatically upgraded to SSH on their next fetch when you add a ``launchpad_username``.
 
+AI-Powered Build Diagnosis
+--------------------------
+
+PackaStack can use any AI model exposed via an OpenAI-compatible ``/v1/chat/completions`` endpoint to diagnose build failures and propose patches.  When a build fails and an API key is configured, PackaStack sends the failure context to the model, which either proposes a patch (with DEP3 headers) or provides a text explanation.
+
+AI features are **opt-in** — they activate automatically when an API key is set and are completely non-blocking: if the API call fails, the normal failure output is shown.
+
+Setting an API key
+^^^^^^^^^^^^^^^^^^
+
+The recommended way is via an environment variable.  PackaStack checks these in order:
+
+1. ``PACKASTACK_AI_API_KEY`` — project-specific (highest priority)
+2. ``OPENAI_API_KEY`` — standard OpenAI convention
+3. ``ANTHROPIC_API_KEY`` — backward compatibility
+
+.. code-block:: bash
+
+   # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+   export OPENAI_API_KEY="sk-..."
+
+Alternatively, set the key in ``config.yaml`` (less recommended — keeps credentials on disk):
+
+.. code-block:: yaml
+
+   ai:
+     api_key: "sk-..."
+
+Choosing a provider and model
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``ai`` section controls which model endpoint PackaStack uses:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Key
+     - Purpose
+     - Default
+   * - ``api_key``
+     - API key (env vars take precedence)
+     - ``None``
+   * - ``base_url``
+     - OpenAI-compatible API base URL
+     - ``https://api.openai.com/v1``
+   * - ``model``
+     - Model identifier
+     - ``gpt-4o``
+   * - ``max_tokens``
+     - Maximum response tokens
+     - ``8192``
+   * - ``timeout``
+     - HTTP request timeout in seconds
+     - ``120``
+
+The ``base_url`` can also be set via the ``PACKASTACK_AI_BASE_URL`` environment variable.
+
+Provider examples
+^^^^^^^^^^^^^^^^^
+
+**OpenAI** (default — no config changes needed):
+
+.. code-block:: bash
+
+   export OPENAI_API_KEY="sk-..."
+
+**Anthropic Claude via OpenRouter:**
+
+.. code-block:: bash
+
+   export PACKASTACK_AI_API_KEY="sk-or-..."
+
+.. code-block:: yaml
+
+   ai:
+     base_url: "https://openrouter.ai/api/v1"
+     model: "anthropic/claude-sonnet-4"
+
+**Local model via Ollama:**
+
+.. code-block:: bash
+
+   export PACKASTACK_AI_API_KEY="local"      # any non-empty value
+   export PACKASTACK_AI_BASE_URL="http://localhost:11434/v1"
+
+.. code-block:: yaml
+
+   ai:
+     base_url: "http://localhost:11434/v1"
+     model: "llama3"
+
+**Other OpenAI-compatible providers** (Together, Groq, vLLM, etc.) work the same way — set ``base_url`` to the provider's endpoint and ``model`` to the model identifier.
+
+Disabling AI
+^^^^^^^^^^^^
+
+To disable AI for a single build without removing your key:
+
+.. code-block:: bash
+
+   packastack build <package> --no-ai
+
+To disable it permanently, simply do not set an API key.
+
 Notes
 -----
 - These paths are expanded and resolved when PackaStack starts.

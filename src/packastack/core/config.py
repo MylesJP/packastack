@@ -26,6 +26,52 @@ from typing import Any
 
 import yaml
 
+# Header prepended to config.yaml on first creation to help users
+# discover available options.  yaml.safe_dump cannot emit comments,
+# so we write them separately.
+_CONFIG_HEADER = """\
+# PackaStack configuration
+# Location: ~/.config/packastack/config.yaml
+#
+# ── AI-powered build diagnosis ──────────────────────────────────────────
+#
+# PackaStack can use any OpenAI-compatible AI model to diagnose build
+# failures and propose patches.  To enable it, set an API key via an
+# environment variable (recommended) or in the "ai" section below.
+#
+# Environment variables (checked in order):
+#   PACKASTACK_AI_API_KEY   - project-specific key (highest priority)
+#   OPENAI_API_KEY          - standard OpenAI key
+#   ANTHROPIC_API_KEY       - Anthropic key (backward compatibility)
+#
+# The base_url can be any OpenAI-compatible endpoint.  Examples:
+#
+#   OpenAI (default):
+#     export OPENAI_API_KEY="sk-..."
+#     # base_url: https://api.openai.com/v1  (default, no change needed)
+#     # model: gpt-4o
+#
+#   Anthropic (via OpenRouter):
+#     export PACKASTACK_AI_API_KEY="sk-or-..."
+#     # base_url: https://openrouter.ai/api/v1
+#     # model: anthropic/claude-sonnet-4
+#
+#   Local model (Ollama):
+#     # No API key needed for local models - set any non-empty value:
+#     export PACKASTACK_AI_API_KEY="local"
+#     # base_url: http://localhost:11434/v1
+#     # model: llama3
+#
+# You can also override base_url via environment variable:
+#   PACKASTACK_AI_BASE_URL=http://localhost:11434/v1
+#
+# To disable AI during a build without removing your key:
+#   packastack build <pkg> --no-ai
+#
+# ────────────────────────────────────────────────────────────────────────
+
+"""
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "paths": {
         "cache_root": "~/.cache/packastack",
@@ -68,6 +114,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "service-release": None,
     },
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
+    "ai": {
+        "api_key": None,  # Fallback; env vars take precedence (see client.py)
+        "base_url": "https://api.openai.com/v1",  # Any OpenAI-compatible endpoint
+        "model": "gpt-4o",
+        "max_tokens": 8192,
+        "timeout": 120,
+    },
 }
 
 
@@ -82,7 +135,7 @@ def ensure_config_exists() -> None:
     cfg_dir = cfg_path.parent
     cfg_dir.mkdir(parents=True, exist_ok=True)
     if not cfg_path.exists():
-        cfg_path.write_text(yaml.safe_dump(DEFAULT_CONFIG))
+        cfg_path.write_text(_CONFIG_HEADER + yaml.safe_dump(DEFAULT_CONFIG))
 
 
 def load_config() -> dict[str, Any]:

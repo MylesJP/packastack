@@ -542,6 +542,75 @@ class TestCheckUpstreamedPatches:
         assert reports == []
 
 
+class TestDropPatch:
+    """Tests for drop_patch function."""
+
+    def test_removes_file_and_series_entry(self, tmp_path: Path) -> None:
+        """Test that patch file is deleted and series entry removed."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "fix.patch").write_text("diff content\n")
+        (patches_dir / "series").write_text("fix.patch\nother.patch\n")
+
+        result = gbp.drop_patch(tmp_path, "fix.patch")
+
+        assert result.success is True
+        assert result.patch_name == "fix.patch"
+        assert not (patches_dir / "fix.patch").exists()
+        series_content = (patches_dir / "series").read_text()
+        assert "fix.patch" not in series_content
+        assert "other.patch" in series_content
+
+    def test_nonexistent_file_returns_error(self, tmp_path: Path) -> None:
+        """Test returns error when patch file doesn't exist."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "series").write_text("fix.patch\n")
+
+        result = gbp.drop_patch(tmp_path, "fix.patch")
+
+        assert result.success is False
+        assert "not found" in result.error
+
+    def test_preserves_other_entries(self, tmp_path: Path) -> None:
+        """Test that other series entries are preserved."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "middle.patch").write_text("diff\n")
+        (patches_dir / "series").write_text("first.patch\nmiddle.patch\nlast.patch\n")
+
+        result = gbp.drop_patch(tmp_path, "middle.patch")
+
+        assert result.success is True
+        series_content = (patches_dir / "series").read_text()
+        assert "first.patch" in series_content
+        assert "last.patch" in series_content
+        assert "middle.patch" not in series_content
+
+    def test_oserror_on_unlink(self, tmp_path: Path) -> None:
+        """Test handles OSError during file removal."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "fix.patch").write_text("diff\n")
+
+        with patch("pathlib.Path.unlink", side_effect=OSError("permission denied")):
+            result = gbp.drop_patch(tmp_path, "fix.patch")
+
+        assert result.success is False
+        assert "Failed to remove" in result.error
+
+    def test_series_file_missing(self, tmp_path: Path) -> None:
+        """Test succeeds when series file doesn't exist."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "fix.patch").write_text("diff\n")
+
+        result = gbp.drop_patch(tmp_path, "fix.patch")
+
+        assert result.success is True
+        assert not (patches_dir / "fix.patch").exists()
+
+
 class TestBuildSource:
     """Tests for build_source function."""
 

@@ -136,6 +136,7 @@ class BuildRequest:
     upload: bool = False
     skip_repo_regen: bool = False
     ppa_upload: bool = False
+    ai_enabled: bool = True
     resume_workspace: bool = False
     resume_run_id: str = ""
     workspace_ref: Callable[[Path], None] | None = None

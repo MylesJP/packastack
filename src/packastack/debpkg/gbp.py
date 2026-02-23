@@ -572,6 +572,69 @@ def check_upstreamed_patches(
     return reports
 
 
+@dataclass
+class DropPatchResult:
+    """Result of dropping a patch from debian/patches."""
+
+    success: bool
+    patch_name: str
+    error: str = ""
+
+
+def drop_patch(repo_path: Path, patch_name: str) -> DropPatchResult:
+    """Remove a patch file and its series entry from debian/patches.
+
+    Performs filesystem operations only (delete file, update series).
+    The caller is responsible for git staging and committing the
+    changes.
+
+    Args:
+        repo_path: Path to the git repository.
+        patch_name: Name of the patch file (e.g., ``fix-py312.patch``).
+
+    Returns:
+        DropPatchResult with success status and optional error message.
+    """
+    patches_dir = repo_path / "debian" / "patches"
+    patch_file = patches_dir / patch_name
+    series_file = patches_dir / "series"
+
+    # Remove patch file
+    try:
+        if patch_file.exists():
+            patch_file.unlink()
+        else:
+            return DropPatchResult(
+                success=False,
+                patch_name=patch_name,
+                error=f"Patch file not found: {patch_file}",
+            )
+    except OSError as exc:
+        return DropPatchResult(
+            success=False,
+            patch_name=patch_name,
+            error=f"Failed to remove patch file: {exc}",
+        )
+
+    # Remove from series
+    try:
+        if series_file.exists():
+            lines = series_file.read_text(encoding="utf-8").splitlines()
+            filtered = [line for line in lines if line.strip() != patch_name]
+            series_file.write_text(
+                "\n".join(filtered) + "\n" if filtered else "",
+                encoding="utf-8",
+            )
+    except OSError as exc:
+        return DropPatchResult(
+            success=False,
+            patch_name=patch_name,
+            error=f"Failed to update series file: {exc}",
+        )
+
+    return DropPatchResult(success=True, patch_name=patch_name)
+
+
 def build_source(
     repo_path: Path,
     output_dir: Path | None = None,

@@ -137,6 +137,7 @@ class BuildResult:
     artifacts: list[Path] = field(default_factory=list)
     dsc_file: Path | None = None
     changes_file: Path | None = None
+    sbuild_result: Any = None  # SbuildResult, kept as Any to avoid circular import
 
 
 # =============================================================================
@@ -212,14 +213,10 @@ class SingleBuildContext:
     update_control_min_versions: bool
     normalize_to_prev_lts_floor: bool
     dry_run_control_edit: bool
-    fail_on_cloud_archive_required: bool
-    fail_on_mir_required: bool
-    update_control_min_versions: bool
-    normalize_to_prev_lts_floor: bool
-    dry_run_control_edit: bool
 
     # Paths
     paths: dict[str, Path]
+    ai_enabled: bool = True
     cfg: dict[str, Any] | None = None
     workspace: Path | None = None
     pkg_repo: Path | None = None
@@ -621,6 +618,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         update_control_min_versions=inputs.update_control_min_versions,
         normalize_to_prev_lts_floor=inputs.normalize_to_prev_lts_floor,
         dry_run_control_edit=inputs.dry_run_control_edit,
+        ai_enabled=inputs.ai_enabled,
         paths=paths,
         cfg=cfg,
         local_repo=local_repo,
@@ -2100,7 +2098,38 @@ def import_and_patch(
         activity("patches", f"Potentially upstreamed patches: {len(upstreamed)}")
         for report in upstreamed:
             activity("patches", f"  {report.patch_name}: {report.suggested_action}")
-        if not ctx.force:
+
+        # Attempt AI-powered auto-drop of upstreamed patches
+        auto_dropped = False
+        if ctx.ai_enabled and ctx.cfg:
+            from packastack.ai.client import is_ai_available
+
+            if is_ai_available(ctx.cfg):
+                from packastack.ai.patch_diagnosis import auto_drop_upstreamed_patches
+
+                drop_result = auto_drop_upstreamed_patches(
+                    pkg_repo=pkg_repo,
+                    upstreamed_reports=upstreamed,
+                    pkg_name=ctx.pkg_name,
+                    version=ctx.upstream.version if ctx.upstream else "",
+                    ubuntu_series=ctx.resolved_ubuntu,
+                    cfg=ctx.cfg,
+                )
+                for name in drop_result.dropped:
+                    activity("patches", f"  Auto-dropped upstreamed patch: {name}")
+                for name in drop_result.skipped:
+                    activity("patches", f"  AI says keep patch: {name}")
+                for err in drop_result.errors:
+                    activity("patches", f"  Auto-drop error: {err}")
+
+                auto_dropped = drop_result.all_dropped
+                run.log_event({
+                    "event": "patches.auto_drop",
+                    "dropped": drop_result.dropped,
+                    "skipped": drop_result.skipped,
+                })
+
+        if not auto_dropped and not ctx.force:
             activity("patches", "Use --force to continue with potentially upstreamed patches")
             run.write_summary(
                 status="failed",
@@ -2447,6 +2476,8 @@ def build_packages(
                     }
                 )
 
+                result.sbuild_result = sbuild_result
+
                 if sbuild_result.success:
                     deb_count = sum(
                         1
@@ -2614,6 +2645,178 @@ class SingleBuildOutcome:
     signature_verified: bool = False
 
 
+# =============================================================================
+# AI Diagnosis Helpers
+# =============================================================================
+
+
+def _ai_diagnose_patch_failure(
+    ctx: SingleBuildContext,
+    phase_result: PhaseResult,
+) -> None:
+    """Run AI diagnosis on a patch application failure (informational only).
+
+    Args:
+        ctx: Build context.
+        phase_result: Failed PhaseResult from import_and_patch.
+    """
+    from packastack.ai.patch_diagnosis import diagnose_patch_failure
+
+    activity("ai", "Diagnosing patch failure...")
+
+    # Extract patch name from error message (PhaseResult has no .data attr)
+    patch_name = "unknown"
+    pq_output = phase_result.error or ""
+
+    # Try to read the patch content
+    patch_content = ""
+    patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
+    if patch_path and patch_path.exists():
+        try:
+            patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+
+    version = ""
+    if ctx.upstream:
+        version = ctx.upstream.version
+
+    diagnosis = diagnose_patch_failure(
+        patch_name=patch_name,
+        patch_content=patch_content,
+        pq_output=pq_output,
+        pkg_name=ctx.pkg_name,
+        version=version,
+        ubuntu_series=ctx.resolved_ubuntu,
+        cfg=ctx.cfg,
+    )
+
+    if diagnosis.diagnosed:
+        activity("ai", f"Diagnosis: {diagnosis.explanation}")
+        if diagnosis.can_drop:
+            activity(
+                "ai",
+                f"Patch '{diagnosis.patch_name}' appears upstreamed and safe to drop",
+            )
+    elif diagnosis.error:
+        activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
+
+
+def _ai_diagnose_and_retry_build(
+    ctx: SingleBuildContext,
+    build_data: BuildResult,
+    new_version: str,
+) -> tuple[PhaseResult | None, BuildResult]:
+    """Run AI diagnosis on a build failure, apply patch and retry if proposed.
+
+    Loads any previous AI memory for this package so the model can
+    learn from earlier attempts.  On failure the memory is saved; on
+    success it is deleted.
+
+    Args:
+        ctx: Build context.
+        build_data: Failed BuildResult containing sbuild_result.
+        new_version: Version string for the build.
+
+    Returns:
+        Tuple of (retry_phase_result, retry_build_data) if retry succeeded,
+        or (None, build_data) if no retry was attempted or retry failed.
+    """
+    from packastack.ai.build_diagnosis import (
+        apply_ai_patch,
+        diagnose_build_failure,
+    )
+    from packastack.ai.memory import (
+        AIMemory,
+        delete_memory,
+        find_latest_memory,
+        save_memory,
+    )
+
+    activity("ai", "Diagnosing build failure...")
+
+    if not build_data.sbuild_result:
+        activity("ai", "No sbuild result available for diagnosis")
+        return None, build_data
+
+    # Load previous AI memory for this package
+    previous_memory = find_latest_memory(ctx.run.runs_root, ctx.pkg_name)
+    memory_context = previous_memory.format_for_prompt() if previous_memory else ""
+    if memory_context:
+        activity("ai", f"Loaded {len(previous_memory.attempts)} previous AI attempt(s)")
+
+    from packastack.target.arch import get_host_arch
+
+    diagnosis = diagnose_build_failure(
+        sbuild_result=build_data.sbuild_result,
+        pkg_repo=ctx.pkg_repo,
+        pkg_name=ctx.pkg_name,
+        version=new_version,
+        ubuntu_series=ctx.resolved_ubuntu,
+        arch=get_host_arch(),
+        cfg=ctx.cfg,
+        ai_memory_context=memory_context,
+    )
+
+    if not diagnosis.diagnosed:
+        if diagnosis.error:
+            activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
+        return None, build_data
+
+    if diagnosis.needs_patch:
+        activity("ai", f"AI proposes patch: {diagnosis.patch_filename}")
+        activity("ai", diagnosis.explanation)
+
+        if apply_ai_patch(ctx.pkg_repo, diagnosis, cfg=ctx.cfg):
+            activity("ai", "Retrying build with AI-proposed patch...")
+            retry_phase, retry_data = build_packages(ctx, new_version)
+            if retry_phase.success:
+                activity(
+                    "ai",
+                    f"Build passed with AI patch: {diagnosis.patch_filename}",
+                )
+                activity("ai", "Patch is ready in debian/patches/")
+                # Clean up memory on success
+                delete_memory(ctx.run.run_path)
+                return retry_phase, retry_data
+
+            # Build failed after AI patch -- save memory for next run
+            activity("ai", "Build still failed after AI patch. Saving memory for next run.")
+            memory = previous_memory or AIMemory(
+                package=ctx.pkg_name, version=new_version
+            )
+            sbuild_error = ""
+            if retry_data.sbuild_result:
+                sbuild_error = getattr(retry_data.sbuild_result, "validation_message", "")
+            memory.add_attempt(
+                patch_filename=diagnosis.patch_filename,
+                patch_content=diagnosis.patch_content,
+                build_error=sbuild_error,
+                diagnosis=diagnosis.explanation,
+                outcome="build_failed",
+            )
+            save_memory(memory, ctx.run.run_path)
+        else:
+            activity("ai", "Failed to apply AI-proposed patch")
+            # Save memory about invalid patch
+            memory = previous_memory or AIMemory(
+                package=ctx.pkg_name, version=new_version
+            )
+            memory.add_attempt(
+                patch_filename=diagnosis.patch_filename,
+                patch_content=diagnosis.patch_content,
+                build_error="Patch failed validation (git apply --check)",
+                diagnosis=diagnosis.explanation,
+                outcome="patch_invalid",
+            )
+            save_memory(memory, ctx.run.run_path)
+    else:
+        activity("ai", "Build Failure Diagnosis:")
+        activity("ai", diagnosis.explanation)
+
+    return None, build_data
+
+
 def build_single_package(
     ctx: SingleBuildContext,
     workspace_ref: Any = None,
@@ -2692,6 +2895,12 @@ def build_single_package(
         new_version=prepare_data.new_version,
     )
     if not import_result_phase.success:
+        # AI patch diagnosis (informational)
+        if ctx.ai_enabled and ctx.cfg:
+            from packastack.ai.client import is_ai_available
+
+            if is_ai_available(ctx.cfg):
+                _ai_diagnose_patch_failure(ctx, import_result_phase)
         outcome.exit_code = import_result_phase.exit_code
         outcome.error = import_result_phase.error
         return outcome
@@ -2701,9 +2910,26 @@ def build_single_package(
     # -------------------------------------------------------------------------
     build_result_phase, build_data = build_packages(ctx, prepare_data.new_version)
     if not build_result_phase.success:
-        outcome.exit_code = build_result_phase.exit_code
-        outcome.error = build_result_phase.error
-        return outcome
+        # AI build failure diagnosis with optional retry
+        if ctx.ai_enabled and ctx.cfg:
+            from packastack.ai.client import is_ai_available
+
+            if is_ai_available(ctx.cfg):
+                retry_phase, retry_data = _ai_diagnose_and_retry_build(
+                    ctx, build_data, prepare_data.new_version
+                )
+                if retry_phase is not None and retry_phase.success:
+                    outcome.success = True
+                    outcome.exit_code = EXIT_SUCCESS
+                    outcome.artifacts = retry_data.artifacts
+                    # Continue to Phase 6 with retry data
+                    build_result_phase = retry_phase
+                    build_data = retry_data
+
+        if not build_result_phase.success:
+            outcome.exit_code = build_result_phase.exit_code
+            outcome.error = build_result_phase.error
+            return outcome
 
     outcome.artifacts = build_data.artifacts
 
