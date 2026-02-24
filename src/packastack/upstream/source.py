@@ -111,6 +111,10 @@ class SnapshotRequest:
         branch: Git branch to checkout (e.g., "stable/2024.2"), or None for default.
         git_ref: Git ref for the snapshot (default: HEAD).
         package_name: Package name for tarball (defaults to project name if empty).
+        upstream_url: Explicit git clone URL.  When non-empty this is
+            used instead of constructing a default OpenDev URL from the
+            project name.  Needed for projects outside the
+            ``openstack/`` namespace (e.g. ``x/networking-l2gw``).
     """
 
     project: str
@@ -118,6 +122,7 @@ class SnapshotRequest:
     branch: str | None = None
     git_ref: str = "HEAD"
     package_name: str = ""
+    upstream_url: str = ""
 
 
 # OpenDev base URL for upstream OpenStack projects
@@ -619,19 +624,23 @@ def clone_upstream_repo(
     dest_dir: Path,
     branch: str | None = None,
     shallow: bool = True,
+    url: str = "",
 ) -> tuple[Path | None, bool, str]:
-    """Clone an upstream OpenStack repository from OpenDev.
+    """Clone an upstream repository.
 
     Args:
         project: Project name (e.g., "nova").
         dest_dir: Directory to clone into (repo will be at dest_dir/project).
         branch: Optional branch to checkout (e.g., "stable/2024.2").
         shallow: If True, do a shallow clone (--depth 1).
+        url: Explicit git clone URL.  When empty, a default OpenDev URL
+            is constructed from the project name.
 
     Returns:
         Tuple of (repo_path, cloned, error_message).
     """
-    url = build_opendev_url(project)
+    if not url:
+        url = build_opendev_url(project)
     repo_path = dest_dir / project
 
     try:
@@ -709,6 +718,7 @@ def acquire_upstream_snapshot(
         dest_dir=work_dir,
         branch=request.branch,
         shallow=False,  # Need full history for git describe
+        url=request.upstream_url,
     )
 
     if repo_path is None:

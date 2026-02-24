@@ -298,6 +298,7 @@ class SetupInputs:
 
     # Resume support
     resume_workspace_path: Path | None = None
+    ai_enabled: bool = True
 
 
 def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildContext | None]:
@@ -476,25 +477,40 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     activity("policy", "Checking snapshot eligibility")
 
     if build_type == BuildType.SNAPSHOT:
-        # Determine the correct project name for checking releases
-        # Priority: deliverable if exists in releases, otherwise pkg_name
-        from packastack.upstream.releases import load_project_releases
+        from packastack.upstream.registry import ReleaseSourceType
 
-        deliverable_name = upstream_config.release_source.deliverable
-        project_name = deliverable_name
-
-        # Check if deliverable exists in releases
-        if deliverable_name:
-            test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
-            if not test_releases:
-                # Deliverable doesn't exist, try pkg_name
-                test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
-                if test_releases:
-                    project_name = pkg_name
+        # Projects that don't use openstack/releases for version discovery
+        # (e.g. git_tags, pypi, pinned) are always eligible for snapshots
+        # since the openstack/releases eligibility check is irrelevant.
+        if upstream_config.release_source.type != ReleaseSourceType.OPENSTACK_RELEASES:
+            eligible = True
+            reason = (
+                f"Snapshots allowed (release source: "
+                f"{upstream_config.release_source.type.value})"
+            )
+            preferred = None
+            activity("policy", f"Note: {reason}")
         else:
-            project_name = pkg_name
+            # Determine the correct project name for checking releases
+            # Priority: deliverable if exists in releases, otherwise pkg_name
+            from packastack.upstream.releases import load_project_releases
 
-        eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, project_name)
+            deliverable_name = upstream_config.release_source.deliverable
+            project_name = deliverable_name
+
+            # Check if deliverable exists in releases
+            if deliverable_name:
+                test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
+                if not test_releases:
+                    # Deliverable doesn't exist, try pkg_name
+                    test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
+                    if test_releases:
+                        project_name = pkg_name
+            else:
+                project_name = pkg_name
+
+            eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, project_name)
+
         if not eligible:
             activity("policy", f"Blocked: {reason}")
             if preferred:
@@ -1123,6 +1139,7 @@ def prepare_upstream_source(
                 branch=upstream_branch,
                 git_ref="HEAD",
                 package_name=ctx.pkg_name,
+                upstream_url=ctx.upstream_config.upstream.url,
             )
             snapshot_result = acquire_upstream_snapshot(
                 request=snapshot_request,

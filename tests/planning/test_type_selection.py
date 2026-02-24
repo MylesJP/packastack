@@ -51,12 +51,12 @@ from packastack.planning.type_selection import (
     select_build_type,
     select_build_types_for_packages,
 )
+from packastack.upstream.releases import load_project_releases
 from packastack.upstream.retirement import (
     MappingConfidence,
     RetirementInfo,
     RetirementStatus,
 )
-from packastack.upstream.releases import load_project_releases
 
 
 class TestGetDefaultParallelWorkers:

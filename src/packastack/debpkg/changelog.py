@@ -472,7 +472,7 @@ def _update_changelog_python_debian(
             top = cl[0]
             top_dist = str(getattr(top, "distributions", "")).strip()
             if top_dist.upper() == "UNRELEASED":
-                for change in top.changes:
+                for change in top.changes():
                     normalized = change.strip()
                     if normalized.startswith("* "):
                         normalized = normalized[2:]
@@ -480,7 +480,7 @@ def _update_changelog_python_debian(
                         normalized = normalized[4:]
                     if normalized:
                         merged_changes.append(normalized)
-                del cl[0]
+                del cl._blocks[0]
 
         # Create new block
         cl.new_block(

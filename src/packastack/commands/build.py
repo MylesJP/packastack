@@ -567,6 +567,7 @@ def build(
             include_retired=include_retired,
             skip_repo_regen=skip_repo_regen,
             ppa_upload=ppa_upload,
+            ai=ai,
             resume_workspace=resume,
             resume_run_id=resume_run_id,
         )
@@ -599,6 +600,7 @@ def _build_single_mode(
     include_retired: bool,
     skip_repo_regen: bool = False,
     ppa_upload: bool = False,
+    ai: bool = True,
     resume_workspace: bool = False,
     resume_run_id: str = "",
 ) -> None:
@@ -1068,6 +1070,7 @@ def _run_build(
             update_control_min_versions=request.update_control_min_versions,
             normalize_to_prev_lts_floor=request.normalize_to_prev_lts_floor,
             dry_run_control_edit=request.dry_run_control_edit,
+            ai_enabled=request.ai_enabled,
             include_retired=request.include_retired,
             # Preserve 'auto' when the CLI requested auto so per-package
             # selection can occur during setup. Otherwise pass the resolved

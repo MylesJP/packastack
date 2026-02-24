@@ -635,7 +635,7 @@ class TestUpdateChangelogPythonDebian:
         """Test creating new changelog entry."""
         changelog_path = tmp_path / "changelog"
 
-        result = changelog.update_changelog(
+        updated, _error = changelog.update_changelog(
             changelog_path=changelog_path,
             package="nova",
             version="29.0.0-0ubuntu1",
@@ -644,7 +644,7 @@ class TestUpdateChangelogPythonDebian:
             maintainer="Test <test@example.com>",
         )
 
-        assert result is True
+        assert updated is True
         assert changelog_path.exists()
 
     def test_update_existing_changelog(self, tmp_path: Path) -> None:
@@ -656,7 +656,7 @@ class TestUpdateChangelogPythonDebian:
             " -- Test <test@test.com>  Mon, 01 Jan 2024 00:00:00 +0000\n"
         )
 
-        result = changelog.update_changelog(
+        updated, _error = changelog.update_changelog(
             changelog_path=changelog_path,
             package="nova",
             version="29.0.0-0ubuntu1",
@@ -665,7 +665,7 @@ class TestUpdateChangelogPythonDebian:
             maintainer="Test <test@example.com>",
         )
 
-        assert result is True
+        assert updated is True
         content = changelog_path.read_text()
         assert "29.0.0" in content
         assert "28.0.0" in content  # Old entry still present

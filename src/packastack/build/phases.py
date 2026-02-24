@@ -333,12 +333,17 @@ def check_policy(
     openstack_target: str,
     force: bool,
     run: RunContextType,
+    release_source_type: str = "openstack_releases",
 ) -> tuple[PhaseResult, PolicyCheckResult]:
     """Check build policy constraints.
 
     This phase validates that the build type is allowed by policy.
     For snapshot builds, checks if there's a released version available
     that should be used instead.
+
+    Projects whose release source is not ``openstack_releases`` (e.g.
+    ``git_tags``, ``pypi``, ``pinned``) bypass the openstack/releases
+    eligibility check because it is not relevant to them.
 
     Args:
         build_type: The requested build type (release, snapshot, etc.)
@@ -347,6 +352,8 @@ def check_policy(
         openstack_target: Target OpenStack series
         force: If True, allow policy overrides
         run: RunContext for logging
+        release_source_type: The project's release source type string
+            (default ``"openstack_releases"``).
 
     Returns:
         Tuple of (PhaseResult, PolicyCheckResult).
@@ -365,9 +372,18 @@ def check_policy(
     activity("policy", "Checking snapshot eligibility")
 
     if build_type == BuildType.SNAPSHOT:
-        eligible, reason, preferred = is_snapshot_eligible(
-            releases_repo, openstack_target, package
-        )
+        if release_source_type != "openstack_releases":
+            # Projects not governed by openstack/releases are always
+            # eligible for snapshots.
+            eligible = True
+            reason = f"Snapshots allowed (release source: {release_source_type})"
+            preferred = None
+            activity("policy", f"Note: {reason}")
+        else:
+            eligible, reason, preferred = is_snapshot_eligible(
+                releases_repo, openstack_target, package
+            )
+
         result.snapshot_eligible = eligible
         result.snapshot_reason = reason
         result.preferred_version = preferred or ""

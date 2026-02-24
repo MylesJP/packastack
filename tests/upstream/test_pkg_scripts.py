@@ -11,8 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from packastack.upstream.pkg_scripts import (
     MANAGED_PACKAGES_FILENAME,
     PKG_SCRIPTS_BASE_URL,

@@ -25,8 +25,8 @@ repository, and optionally primes minimal Ubuntu archive metadata.
 from __future__ import annotations
 
 import json
-import sys
 import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 

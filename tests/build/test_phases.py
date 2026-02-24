@@ -428,3 +428,166 @@ class TestResolveUpstreamRegistry:
         loaded_events = [e for e in events if e.get("event") == "registry.loaded"]
         assert len(loaded_events) == 1
         assert loaded_events[0]["override_applied"] is True
+
+
+class TestCheckPolicy:
+    """Tests for check_policy function."""
+
+    def test_snapshot_allowed_for_git_tags_release_source(self, tmp_path):
+        """Test that git_tags projects skip openstack/releases check."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+
+        phase_result, policy_result = check_policy(
+            build_type=BuildType.SNAPSHOT,
+            package="networking-l2gw",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+            release_source_type="git_tags",
+        )
+
+        assert phase_result.success is True
+        assert policy_result.snapshot_eligible is True
+        assert "git_tags" in policy_result.snapshot_reason
+
+    def test_snapshot_allowed_for_pypi_release_source(self, tmp_path):
+        """Test that pypi release source projects skip openstack/releases check."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+
+        phase_result, policy_result = check_policy(
+            build_type=BuildType.SNAPSHOT,
+            package="some-pypi-project",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+            release_source_type="pypi",
+        )
+
+        assert phase_result.success is True
+        assert policy_result.snapshot_eligible is True
+        assert "pypi" in policy_result.snapshot_reason
+
+    def test_snapshot_allowed_for_pinned_release_source(self, tmp_path):
+        """Test that pinned release source projects skip openstack/releases check."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+
+        phase_result, policy_result = check_policy(
+            build_type=BuildType.SNAPSHOT,
+            package="pinned-project",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+            release_source_type="pinned",
+        )
+
+        assert phase_result.success is True
+        assert policy_result.snapshot_eligible is True
+
+    @patch("packastack.upstream.releases.is_snapshot_eligible")
+    def test_openstack_releases_still_checked_for_default(
+        self, mock_eligible, tmp_path
+    ):
+        """Test that openstack_releases projects still use eligibility check."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+        mock_eligible.return_value = (True, "No releases yet", None)
+
+        _phase_result, _policy_result = check_policy(
+            build_type=BuildType.SNAPSHOT,
+            package="nova",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+            release_source_type="openstack_releases",
+        )
+
+        mock_eligible.assert_called_once()
+
+    @patch("packastack.upstream.releases.is_snapshot_eligible")
+    def test_openstack_releases_blocked_when_release_exists(
+        self, mock_eligible, tmp_path
+    ):
+        """Test that openstack_releases projects are blocked when release exists."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+        mock_eligible.return_value = (
+            False,
+            "Release 30.0.0 available",
+            "30.0.0",
+        )
+
+        phase_result, policy_result = check_policy(
+            build_type=BuildType.SNAPSHOT,
+            package="nova",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+            release_source_type="openstack_releases",
+        )
+
+        assert phase_result.success is False
+        assert policy_result.snapshot_eligible is False
+        assert policy_result.preferred_version == "30.0.0"
+
+    def test_release_build_type_skips_snapshot_check(self, tmp_path):
+        """Test that release builds skip the snapshot eligibility check."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+
+        phase_result, policy_result = check_policy(
+            build_type=BuildType.RELEASE,
+            package="nova",
+            releases_repo=tmp_path / "releases",
+            openstack_target="gazpacho",
+            force=False,
+            run=run,
+        )
+
+        assert phase_result.success is True
+        # No snapshot-specific fields should be set
+        assert policy_result.snapshot_eligible is True  # default
+        assert policy_result.snapshot_reason == ""  # default
+
+    def test_default_release_source_type_is_openstack_releases(self, tmp_path):
+        """Test that the default release_source_type parameter is openstack_releases."""
+        from packastack.build.phases import check_policy
+        from packastack.planning.type_selection import BuildType
+
+        run = MagicMock()
+
+        # Without specifying release_source_type, it defaults to openstack_releases
+        # which would try to check the releases repo (and fail for a nonexistent project)
+        with patch("packastack.upstream.releases.is_snapshot_eligible") as mock_eligible:
+            mock_eligible.return_value = (True, "No releases yet", None)
+
+            check_policy(
+                build_type=BuildType.SNAPSHOT,
+                package="nova",
+                releases_repo=tmp_path / "releases",
+                openstack_target="gazpacho",
+                force=False,
+                run=run,
+            )
+
+        # Should have called is_snapshot_eligible (openstack_releases path)
+        mock_eligible.assert_called_once()

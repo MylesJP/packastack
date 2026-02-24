@@ -172,3 +172,36 @@ projects:
       expect:
         mode: pypi
         package_name: rally
+
+  # =========================================================================
+  # networking-l2gw
+  # =========================================================================
+  # networking-l2gw is a Neutron L2 Gateway service plugin. It lives under
+  # the OpenDev "x" namespace (independent projects) and is NOT governed
+  # by openstack/releases. It does not publish tarballs to opendev.org.
+  #
+  # - Upstream: Git (OpenDev, x/ namespace)
+  # - Releases: git tags (not openstack/releases)
+  # - Tarballs: PyPI or git archive (not official OpenStack tarballs)
+  # - Signatures: signed git tags where available; none for snapshots
+  #
+  networking-l2gw:
+    canonical: x/networking-l2gw
+    common_names: [networking-l2gw]
+    upstream:
+      type: git
+      host: opendev
+      url: https://opendev.org/x/networking-l2gw.git
+      default_branch: master
+    release_source:
+      type: git_tags
+      tag_regex: "^(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+      strict: false
+    tarball:
+      prefer: [pypi, git_archive]
+    signatures:
+      mode: git_tag
+    watch:
+      expect:
+        mode: pypi
+        package_name: networking-l2gw
