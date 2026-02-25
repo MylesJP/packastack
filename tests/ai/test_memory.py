@@ -216,9 +216,9 @@ class TestFindLatestMemory:
 
     def test_finds_most_recent_for_package(self, tmp_path: Path) -> None:
         """Test finds the newest memory for the requested package."""
-        # Create two run directories with memory for the same package
-        run1 = tmp_path / "20260101T000000Z-build-aaaa0001"
-        run2 = tmp_path / "20260102T000000Z-build-bbbb0002"
+        # Create two build directories with memory for the same package
+        run1 = tmp_path / "20260101-000000"
+        run2 = tmp_path / "20260102-000000"
         run1.mkdir()
         run2.mkdir()
 
@@ -237,7 +237,7 @@ class TestFindLatestMemory:
 
     def test_returns_none_when_no_match(self, tmp_path: Path) -> None:
         """Test returns None when no memory for the package."""
-        run = tmp_path / "20260101T000000Z-build-aaaa0001"
+        run = tmp_path / "20260101-000000"
         run.mkdir()
         save_memory(AIMemory(package="nova", version="1.0"), run)
 

@@ -717,9 +717,9 @@ def fetch_packaging_repo(
         # Skip the rest of fetch - we're using existing state
         return PhaseResult.ok(), result
 
-    # Create workspace
+    # Create workspace under build/{pkg}/{build_id}/
     build_root = ctx.paths.get("build_root", ctx.paths["cache_root"] / "build")
-    workspace = build_root / run.run_id / ctx.pkg_name
+    workspace = build_root / ctx.pkg_name / run.build_id
     workspace.mkdir(parents=True, exist_ok=True)
     if workspace_ref:
         workspace_ref(workspace)
@@ -727,9 +727,9 @@ def fetch_packaging_repo(
     result.workspace = workspace
     ctx.workspace = workspace
 
-    # Mirror RunContext logs into the build workspace
+    # Relocate RunContext logs into the package build directory
     with contextlib.suppress(Exception):
-        run.add_log_mirror(workspace / "logs")
+        run.relocate_to_package_dir(ctx.pkg_name)
 
     # Clone packaging repo
     launchpad_username = ctx.cfg.get("git", {}).get("launchpad_username")
@@ -2757,7 +2757,8 @@ def _ai_diagnose_and_retry_build(
         return None, build_data
 
     # Load previous AI memory for this package
-    previous_memory = find_latest_memory(ctx.run.runs_root, ctx.pkg_name)
+    build_root = ctx.paths.get("build_root", ctx.paths["cache_root"] / "build")
+    previous_memory = find_latest_memory(build_root / ctx.pkg_name, ctx.pkg_name)
     memory_context = previous_memory.format_for_prompt() if previous_memory else ""
     if memory_context:
         activity("ai", f"Loaded {len(previous_memory.attempts)} previous AI attempt(s)")

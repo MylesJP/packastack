@@ -56,7 +56,6 @@ paths:
   ubuntu_archive_cache: "~/.cache/packastack/ubuntu-archive"
   local_apt_repo: "~/.cache/packastack/apt-repo"
   build_root: "~/.cache/packastack/build"
-  runs_root: "~/.cache/packastack/runs"
 
 defaults:
   upstream_target: "devel"
@@ -88,7 +87,6 @@ def mock_cache_dirs(temp_home: Path) -> dict[str, Path]:
         "ubuntu_archive_cache": cache_root / "ubuntu-archive",
         "local_apt_repo": cache_root / "apt-repo",
         "build_root": cache_root / "build",
-        "runs_root": cache_root / "runs",
     }
     for p in dirs.values():
         p.mkdir(parents=True, exist_ok=True)

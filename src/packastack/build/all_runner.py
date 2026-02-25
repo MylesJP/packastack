@@ -117,12 +117,11 @@ def _run_build_all(
 
     cfg = load_config()
     paths = resolve_paths(cfg)
-    runs_root = paths.get("runs_root", paths["cache_root"] / "runs")
+    build_root = paths.get("build_root", paths["cache_root"] / "build")
 
     # Resolve parallel workers (0 = auto)
     if parallel == 0:
         parallel = get_default_parallel_workers()
-
 
     # Resolve series
     resolved_ubuntu = resolve_series(ubuntu_series)
@@ -137,8 +136,9 @@ def _run_build_all(
     activity("all", f"Target: OpenStack {openstack_target} on Ubuntu {resolved_ubuntu}")
     activity("all", f"Build type: {build_type}")
 
-    # Determine state directory
-    run_dir = runs_root / run.run_id
+    # Relocate RunContext to build/.build-all/{build_id}/
+    run.relocate_to_build_all_dir()
+    run_dir = run.run_path
     state_dir = run_dir / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -148,7 +148,7 @@ def _run_build_all(
     cycles: list[list[str]] = []
 
     if resume:
-        resume_state_dir = runs_root / resume_run_id / "state" if resume_run_id else state_dir
+        resume_state_dir = build_root / ".build-all" / resume_run_id / "state" if resume_run_id else state_dir
 
         state = load_state(resume_state_dir)
         if state is None:

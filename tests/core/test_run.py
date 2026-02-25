@@ -38,9 +38,18 @@ class TestRunContext:
 
     def test_run_id_format(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("mycommand") as ctx:
-            # Format: YYYYMMDDTHHMMSSZ-<command>-<shortid>
-            pattern = r"^\d{8}T\d{6}Z-mycommand-[a-f0-9]{8}$"
+            # Format: YYYYMMDD-HHMMSS
+            pattern = r"^\d{8}-\d{6}$"
             assert re.match(pattern, ctx.run_id), f"Run ID {ctx.run_id} doesn't match pattern"
+
+    def test_build_id_equals_run_id(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("test") as ctx:
+            assert ctx.build_id == ctx.run_id
+
+    def test_staging_directory_under_build_root(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("test") as ctx:
+            assert ".runs" in str(ctx.run_path)
+            assert ctx.build_root in ctx.run_path.parents
 
     def test_creates_stdout_log(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
@@ -123,6 +132,68 @@ class TestRunContext:
 
         assert logs_dir.exists()
         assert logs_dir.is_dir()
+
+
+class TestRelocateToPackageDir:
+    """Tests for RunContext.relocate_to_package_dir()."""
+
+    def test_moves_logs_to_package_dir(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("build") as ctx:
+            old_path = ctx.run_path
+            print("before relocate")
+            new_path = ctx.relocate_to_package_dir("aodh")
+            print("after relocate")
+
+        # Old staging dir should be gone (or empty and cleaned up)
+        assert not old_path.exists() or old_path == new_path
+        # New path should be under build/aodh/{build_id}
+        assert "aodh" in str(new_path)
+        assert ctx.build_id in str(new_path)
+        assert ctx.run_path == new_path
+        assert ctx.logs_path == new_path / "logs"
+        # Logs should contain content from both before and after relocate
+        stdout = (new_path / "logs" / "stdout.log").read_text()
+        assert "before relocate" in stdout
+        assert "after relocate" in stdout
+
+    def test_updates_run_path(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("build") as ctx:
+            ctx.relocate_to_package_dir("cinder")
+            assert ctx.run_path == ctx.build_root / "cinder" / ctx.build_id
+
+    def test_noop_when_same_path(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("build") as ctx:
+            # Manually set run_path to what relocate would produce
+            target = ctx.build_root / "nova" / ctx.build_id
+            target.mkdir(parents=True, exist_ok=True)
+            # relocate to same path is a no-op when paths match
+            ctx.run_path = target
+            result = ctx._relocate(target)
+            assert result == target
+
+
+class TestRelocateToBuildAllDir:
+    """Tests for RunContext.relocate_to_build_all_dir()."""
+
+    def test_moves_logs_to_build_all_dir(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("build-all") as ctx:
+            old_path = ctx.run_path
+            print("build-all output")
+            new_path = ctx.relocate_to_build_all_dir()
+            print("after relocate")
+
+        assert not old_path.exists() or old_path == new_path
+        assert ".build-all" in str(new_path)
+        assert ctx.build_id in str(new_path)
+        assert ctx.run_path == new_path
+        stdout = (new_path / "logs" / "stdout.log").read_text()
+        assert "build-all output" in stdout
+        assert "after relocate" in stdout
+
+    def test_updates_run_path(self, temp_home: Path, mock_config: Path) -> None:
+        with run.RunContext("build-all") as ctx:
+            ctx.relocate_to_build_all_dir()
+            assert ctx.run_path == ctx.build_root / ".build-all" / ctx.build_id
 
 
 class TestActivity:

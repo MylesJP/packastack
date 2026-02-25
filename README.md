@@ -11,7 +11,8 @@ Commands implemented in this phase:
 Resume an interrupted build by reusing a previous workspace:
 
 ```bash
-uv run packastack build cinder --resume-run-id 20260120T215453Z-build-59cd38a6
+uv run packastack build cinder --resume                          # latest build
+uv run packastack build cinder --resume-build 20260210-143022    # specific build
 ```
 
 See `pyproject.toml` for development dependencies and test configuration.

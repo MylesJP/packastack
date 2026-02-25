@@ -112,30 +112,33 @@ _EXPORTED_CONSTANTS = (
 def _find_most_recent_workspace(build_root: Path, package: str) -> Path | None:
     """Find the most recent workspace directory for a package.
 
-    Searches for workspace directories matching pattern:
-        {build_root}/*/package/
+    Searches for workspace directories matching the new layout::
 
-    Returns the most recent one based on directory modification time.
+        {build_root}/{package}/{build_id}/
+
+    where *build_id* is a timestamp string (``YYYYMMDD-HHMMSS``) so that
+    lexicographic sorting equals chronological sorting.
 
     Args:
-        build_root: Root directory containing build workspaces
-        package: Package name to search for
+        build_root: Root directory containing build workspaces.
+        package: Package name to search for.
 
     Returns:
-        Path to most recent workspace, or None if not found
+        Path to most recent workspace, or None if not found.
     """
-    matching = build_root.glob(f"*/{package}")
-
-    if not matching:
+    pkg_dir = build_root / package
+    if not pkg_dir.exists():
         return None
 
-    # Filter to directories only and sort by modification time (most recent first)
-    dirs = [p for p in matching if p.is_dir()]
+    dirs = [
+        p for p in pkg_dir.iterdir()
+        if p.is_dir() and not p.name.startswith(".")
+    ]
     if not dirs:
         return None
 
-    # Sort by modification time, most recent first
-    dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Timestamp-based names sort chronologically
+    dirs.sort(key=lambda p: p.name, reverse=True)
     return dirs[0]
 
 
@@ -447,10 +450,15 @@ def build(
     keep_going: bool = typer.Option(True, "--keep-going/--fail-fast", help="Continue on failure (default: keep-going) [--all only]"),
     max_failures: int = typer.Option(0, "--max-failures", help="Stop after N failures (0=unlimited) [--all only]"),
     resume: bool = typer.Option(False, "--resume", help="Resume a previous run (all mode) or workspace (single mode)"),
+    resume_build: str = typer.Option(
+        "",
+        "--resume-build",
+        help="Timestamp of specific build to resume (e.g., 20260210-143022)",
+    ),
     resume_run_id: str = typer.Option(
         "",
         "--resume-run-id",
-        help="Specific run ID to resume (single: reuse workspace; all: resume state)",
+        help="(deprecated, use --resume-build) Specific run ID to resume",
     ),
     retry_failed: bool = typer.Option(False, "--retry-failed", help="Retry failed packages on resume [--all only]"),
     skip_failed: bool = typer.Option(True, "--skip-failed/--no-skip-failed", help="Skip previously failed on resume [--all only]"),
@@ -570,6 +578,7 @@ def build(
             ai=ai,
             resume_workspace=resume,
             resume_run_id=resume_run_id,
+            resume_build_id=resume_build,
         )
 
 
@@ -603,6 +612,7 @@ def _build_single_mode(
     ai: bool = True,
     resume_workspace: bool = False,
     resume_run_id: str = "",
+    resume_build_id: str = "",
 ) -> None:
     """Build a single package."""
     with RunContext("build") as run:
@@ -611,7 +621,7 @@ def _build_single_mode(
         cleanup_on_exit = not no_cleanup
 
         try:
-            if resume_workspace or resume_run_id:
+            if resume_workspace or resume_run_id or resume_build_id:
                 # When resuming, focus on the target package only.
                 build_deps = False
             policy_value = (min_version_policy or "").lower()
@@ -619,7 +629,7 @@ def _build_single_mode(
                 activity("error", "--min-version-policy must be one of: enforce, report, ignore")
                 sys.exit(EXIT_CONFIG_ERROR)
 
-            resume_flag = resume_workspace or bool(resume_run_id)
+            resume_flag = resume_workspace or bool(resume_run_id) or bool(resume_build_id)
             request = BuildRequest(
                 package=package,
                 target=target,
@@ -650,6 +660,7 @@ def _build_single_mode(
                 ai_enabled=ai,
                 resume_workspace=resume_flag,
                 resume_run_id=resume_run_id,
+                resume_build_id=resume_build_id,
                 workspace_ref=lambda w: _set_workspace(w, locals()),
             )
             exit_code = _run_build(run=run, request=request)
@@ -1009,12 +1020,34 @@ def _run_build(
 
         # Handle --resume: find and use existing workspace
         resume_workspace_path: Path | None = None
-        if (request.resume_workspace or request.resume_run_id) and (
-            resume_target_pkg is None or pkg_name == resume_target_pkg
-        ):
+        has_resume = request.resume_workspace or request.resume_run_id or request.resume_build_id
+        if has_resume and (resume_target_pkg is None or pkg_name == resume_target_pkg):
             build_root = paths.get("build_root", paths["cache_root"] / "build")
-            if request.resume_run_id:
-                candidate = build_root / request.resume_run_id / pkg_name
+            if request.resume_build_id:
+                # New layout: build/{pkg}/{build_id}
+                candidate = build_root / pkg_name / request.resume_build_id
+                if candidate.exists():
+                    resume_workspace_path = candidate
+                    activity("resume", f"Resuming build {request.resume_build_id}: {candidate}")
+                    run.log_event({
+                        "event": "resume.workspace_found",
+                        "workspace": str(candidate),
+                        "package": pkg_name,
+                        "build_id": request.resume_build_id,
+                    })
+                else:
+                    error = (
+                        f"No workspace for {pkg_name} at build {request.resume_build_id} "
+                        f"({candidate})"
+                    )
+                    activity("resume", f"ERROR: {error}")
+                    run.write_summary(status="failed", error=error, exit_code=EXIT_RESUME_ERROR)
+                    return EXIT_RESUME_ERROR
+            elif request.resume_run_id:
+                # Backward compat: try new layout first, then old
+                candidate = build_root / pkg_name / request.resume_run_id
+                if not candidate.exists():
+                    candidate = build_root / request.resume_run_id / pkg_name
                 if candidate.exists():
                     resume_workspace_path = candidate
                     activity("resume", f"Resuming from run {request.resume_run_id}: {candidate}")

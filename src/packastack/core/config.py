@@ -81,7 +81,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "local_apt_repo": "~/.cache/packastack/apt-repo",
         "upstream_tarballs": "~/.cache/packastack/upstream-tarballs",
         "build_root": "~/.cache/packastack/build",
-        "runs_root": "~/.cache/packastack/runs",
     },
     "defaults": {
         "upstream_target": "devel",

@@ -46,6 +46,19 @@ from packastack.planning.graph import DependencyGraph
 from packastack.planning.package_discovery import DiscoveryResult
 
 
+def _make_mock_run(tmp_path: Path, run_id: str = "run-1") -> SimpleNamespace:
+    """Create a mock run object with relocate_to_build_all_dir support."""
+    run_path = tmp_path / ".build-all" / run_id
+    run_path.mkdir(parents=True, exist_ok=True)
+    return SimpleNamespace(
+        run_id=run_id,
+        run_path=run_path,
+        log_event=lambda *_args, **_kwargs: None,
+        write_summary=lambda **_kwargs: None,
+        relocate_to_build_all_dir=lambda: None,
+    )
+
+
 def _call_run_build_all(
     run,
     target: str = "devel",
@@ -592,7 +605,7 @@ class TestRunBuildAllIndexLoading:
         }
         paths = {
             "cache_root": tmp_path / "cache",
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -659,7 +672,7 @@ class TestRunBuildAllIndexLoading:
         import packastack.commands.plan as plan_module
         monkeypatch.setattr(plan_module, "_build_dependency_graph", fake_build_dependency_graph)
 
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1062,11 +1075,11 @@ class TestRunBuildAllResume:
         monkeypatch.setattr(
             all_runner,
             "resolve_paths",
-            lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
+            lambda _cfg: {"cache_root": tmp_path, "build_root": tmp_path / "build"},
         )
         monkeypatch.setattr(all_runner, "load_state", lambda _path: None)
         monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1111,11 +1124,11 @@ class TestRunBuildAllResume:
         monkeypatch.setattr(
             all_runner,
             "resolve_paths",
-            lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
+            lambda _cfg: {"cache_root": tmp_path, "build_root": tmp_path / "build"},
         )
         monkeypatch.setattr(all_runner, "load_state", lambda _path: state)
         monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1163,13 +1176,13 @@ class TestRunBuildAllDiscovery:
         monkeypatch.setattr(
             all_runner,
             "resolve_paths",
-            lambda _cfg: {"cache_root": tmp_path, "runs_root": tmp_path / "runs"},
+            lambda _cfg: {"cache_root": tmp_path, "build_root": tmp_path / "build"},
         )
         monkeypatch.setattr(all_runner, "resolve_series", lambda series: series)
         monkeypatch.setattr(all_runner, "discover_packages", lambda **_kwargs: discovery)
         monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
 
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1207,7 +1220,7 @@ class TestRunBuildAllCycles:
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1237,11 +1250,8 @@ class TestRunBuildAllCycles:
         ]
 
         events: list[dict[str, object]] = []
-        run = SimpleNamespace(
-            run_id="run-1",
-            log_event=lambda event: events.append(event),
-            write_summary=lambda **_kwargs: None,
-        )
+        run = _make_mock_run(tmp_path)
+        run.log_event = lambda event: events.append(event)
 
         monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
         monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
@@ -1301,7 +1311,7 @@ class TestRunBuildAllMissingDeps:
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1341,7 +1351,7 @@ class TestRunBuildAllMissingDeps:
         monkeypatch.setattr(build_all_module, "save_state", capture_state)
         monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
 
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,
@@ -1382,7 +1392,7 @@ class TestRunBuildAllExecution:
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1415,11 +1425,8 @@ class TestRunBuildAllExecution:
             return json_path, md_path
 
         summary: dict[str, object] = {}
-        run = SimpleNamespace(
-            run_id="run-1",
-            log_event=lambda *_args, **_kwargs: None,
-            write_summary=lambda **kwargs: summary.update(kwargs),
-        )
+        run = _make_mock_run(tmp_path)
+        run.write_summary = lambda **kwargs: summary.update(kwargs)
 
         monkeypatch.setattr(all_runner, "load_config", lambda: cfg)
         monkeypatch.setattr(all_runner, "resolve_paths", lambda _cfg: paths)
@@ -1474,7 +1481,7 @@ class TestRunBuildAllRetired:
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1484,7 +1491,8 @@ class TestRunBuildAllRetired:
             return DiscoveryResult(packages=["a", "b", "c"], total_repos=3, source="explicit")
 
         events: list[dict[str, object]] = []
-        run = SimpleNamespace(run_id="run-1", log_event=lambda event: events.append(event), write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
+        run.log_event = lambda event: events.append(event)
 
         monkeypatch.setattr(build_all_module, "load_config", lambda: cfg)
         monkeypatch.setattr(build_all_module, "resolve_paths", lambda _cfg: paths)
@@ -1543,7 +1551,7 @@ class TestRunBuildAllDevelTarget:
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-            "runs_root": tmp_path / "runs",
+
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1573,7 +1581,7 @@ class TestRunBuildAllDevelTarget:
         monkeypatch.setattr(all_runner, "merge_package_indexes", lambda *_args: PackageIndex())
         monkeypatch.setattr(all_runner, "activity", lambda _scope, msg: messages.append(msg))
 
-        run = SimpleNamespace(run_id="run-1", log_event=lambda *_args, **_kwargs: None, write_summary=lambda **_kwargs: None)
+        run = _make_mock_run(tmp_path)
 
         exit_code = _call_run_build_all(
             run=run,

@@ -30,11 +30,8 @@ The ``paths`` section defines all on-disk locations used by PackaStack:
      - Cached upstream tarballs and extractions
      - ``~/.cache/packastack/upstream-tarballs``
    * - ``build_root``
-     - Build workspaces and exported sources
+     - Build workspaces, logs, and reports (per-package layout)
      - ``~/.cache/packastack/build``
-   * - ``runs_root``
-     - Run logs and summaries
-     - ``~/.cache/packastack/runs``
    * - ``upload_ppa``
      - PPA to automatically upload to when ``--ppa-upload`` is used.
      - ``None``

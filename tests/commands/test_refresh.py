@@ -321,8 +321,8 @@ class TestRefreshCommand:
                         offline=False,
                     )
 
-        runs_dir = mock_cache_dirs["runs_root"]
-        run_dirs = list(runs_dir.iterdir())
+        runs_dir = mock_cache_dirs["build_root"] / ".runs"
+        run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()] if runs_dir.exists() else []
         assert len(run_dirs) == 1
 
         summary = json.loads((run_dirs[0] / "summary.json").read_text())

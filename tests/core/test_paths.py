@@ -76,7 +76,6 @@ class TestEnsureDirectories:
         assert result["ubuntu_archive_cache"].exists()
         assert result["local_apt_repo"].exists()
         assert result["build_root"].exists()
-        assert result["runs_root"].exists()
 
         # Check subdirectories
         assert (result["ubuntu_archive_cache"] / "indexes").exists()
@@ -98,7 +97,6 @@ class TestEnsureDirectories:
             "ubuntu_archive_cache": str(temp_home / "custom-cache" / "ubuntu"),
             "local_apt_repo": str(temp_home / "custom-cache" / "apt"),
             "build_root": str(temp_home / "custom-cache" / "build"),
-            "runs_root": str(temp_home / "custom-cache" / "runs"),
         }
 
         result = paths.ensure_directories(custom_paths)

@@ -22,6 +22,12 @@ This module implements the run directory creation, stdout/stderr capture to
 files, JSONL event logging, and summary.json generation. The spinner output
 must never go into the log files; therefore spinner/console output writes to
 sys.__stdout__ when available.
+
+Build outputs are organized under ``build/{package}/{build_id}/`` where
+*build_id* is a timestamp string (``YYYYMMDD-HHMMSS``).  Because the
+package name is not known at context-manager entry, RunContext initially
+writes to a staging directory ``build/.runs/{build_id}/`` and relocates
+when :meth:`relocate_to_package_dir` is called.
 """
 
 from __future__ import annotations
@@ -29,8 +35,8 @@ from __future__ import annotations
 import contextlib
 import datetime
 import json
+import shutil
 import sys
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -50,10 +56,11 @@ class RunContext:
         self.command = command
         self.cfg = load_config()
         self.paths = {k: Path(v).expanduser().resolve() for k, v in self.cfg.get("paths", {}).items()}
-        self.runs_root = self.paths.get("runs_root", Path.home() / ".cache" / "packastack" / "runs")
+        self.build_root = self.paths.get("build_root", Path.home() / ".cache" / "packastack" / "build")
         now_utc = datetime.datetime.now(datetime.UTC)
-        self.run_id = now_utc.strftime("%Y%m%dT%H%M%SZ") + f"-{command}-" + uuid.uuid4().hex[:8]
-        self.run_path = self.runs_root / self.run_id
+        self.build_id = now_utc.strftime("%Y%m%d-%H%M%S")
+        self.run_id = self.build_id  # backward-compat alias
+        self.run_path = self.build_root / ".runs" / self.build_id
         self.logs_path = self.run_path / "logs"
         self.stdout_file: Any | None = None
         self.stderr_file: Any | None = None
@@ -96,6 +103,80 @@ class RunContext:
 
         sys.stdout = _TeeTextIO([self.stdout_file, mirror_stdout])
         sys.stderr = _TeeTextIO([self.stderr_file, mirror_stderr])
+
+    # ------------------------------------------------------------------
+    # Relocation helpers
+    # ------------------------------------------------------------------
+
+    def _relocate(self, new_run_path: Path) -> Path:
+        """Move the staging run directory to *new_run_path*.
+
+        Closes log file handles, moves the directory tree, re-opens
+        files at the new location, and re-wires ``sys.stdout`` /
+        ``sys.stderr``.
+
+        Returns:
+            The new *run_path*.
+
+        Raises:
+            OSError: If the move fails.
+        """
+        if new_run_path == self.run_path:
+            return self.run_path
+
+        # Close current handles
+        for f in (self.stdout_file, self.stderr_file):
+            if f is not None:
+                with contextlib.suppress(Exception):
+                    f.flush()
+                    f.close()
+        for f in self._event_files:
+            with contextlib.suppress(Exception):
+                f.flush()
+                f.close()
+
+        # Move the directory
+        new_run_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(self.run_path), str(new_run_path))
+
+        # Update paths
+        self.run_path = new_run_path
+        self.logs_path = new_run_path / "logs"
+
+        # Re-open log files in append mode
+        self.stdout_file = (self.logs_path / "stdout.log").open("a", encoding="utf-8")
+        self.stderr_file = (self.logs_path / "stderr.log").open("a", encoding="utf-8")
+        self.events_file = (self.logs_path / "events.jsonl").open("a", encoding="utf-8")
+        self._event_files = [self.events_file]
+
+        # Re-wire stdout/stderr
+        sys.stdout = self.stdout_file
+        sys.stderr = self.stderr_file
+
+        return new_run_path
+
+    def relocate_to_package_dir(self, pkg_name: str) -> Path:
+        """Move logs from the staging area to ``build/{pkg}/{build_id}/``.
+
+        Args:
+            pkg_name: Package name (e.g. ``aodh``, ``cinder``).
+
+        Returns:
+            New run_path.
+        """
+        new_path = self.build_root / pkg_name / self.build_id
+        return self._relocate(new_path)
+
+    def relocate_to_build_all_dir(self) -> Path:
+        """Move logs from the staging area to ``build/.build-all/{build_id}/``.
+
+        Returns:
+            New run_path.
+        """
+        new_path = self.build_root / ".build-all" / self.build_id
+        return self._relocate(new_path)
+
+    # ------------------------------------------------------------------
 
     def __enter__(self) -> RunContext:
         # ensure directories
@@ -189,6 +270,12 @@ class RunContext:
         if status != "success":
             with contextlib.suppress(Exception):
                 print(f"[report] Logs: {self.run_path}", file=sys.__stdout__)
+
+        # Clean up empty staging directory if it was relocated
+        staging_dir = self.build_root / ".runs" / self.build_id
+        if staging_dir.exists() and staging_dir != self.run_path:
+            with contextlib.suppress(Exception):
+                staging_dir.rmdir()  # Only removes if empty
 
         # Do not suppress exceptions
         return None

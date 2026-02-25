@@ -55,7 +55,6 @@ def ensure_directories(paths_cfg: Mapping[str, Any] | None = None) -> dict[str, 
             "local_apt_repo": cache_root / "apt-repo",
             "upstream_tarballs": cache_root / "upstream-tarballs",
             "build_root": cache_root / "build",
-            "runs_root": cache_root / "runs",
         }
         for key, default_path in derived_defaults.items():
             if key in provided_keys:
@@ -72,7 +71,6 @@ def ensure_directories(paths_cfg: Mapping[str, Any] | None = None) -> dict[str, 
         paths["local_apt_repo"],
         paths["upstream_tarballs"],
         paths["build_root"],
-        paths["runs_root"],
     ]
 
     for p in required:

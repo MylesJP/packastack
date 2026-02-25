@@ -12,8 +12,8 @@ Packastack is a Python CLI tool which handles generating and importing new tarba
 - **Debian Layer**: `packastack/debian/*.py` - Handles functions and logic for using debian packaging tools and version conversion.
 
 ## Key File Locations
-All build artifacts, temporary files, and local clones are stored in the user's cache directory: `~/.cache/packastack/build/`
-All run logs and summaries are stored in the user's cache directory: `~/.cache/packastack/runs/`
+All build artifacts, temporary files, logs, and reports are stored per-package under: `~/.cache/packastack/build/{package}/{build_id}/`
+Build-all orchestration state is stored under: `~/.cache/packastack/build/.build-all/{build_id}/`
 
 ## Code Conventions
 All code should be pep8 compliant and pass formatting checks using the black linter and formatter.

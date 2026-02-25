@@ -124,7 +124,7 @@ class TestInitCommand:
         assert cache_root.exists()
         assert (cache_root / "ubuntu-archive" / "indexes").exists()
         assert (cache_root / "ubuntu-archive" / "snapshots").exists()
-        assert (cache_root / "runs").exists()
+        assert (cache_root / "build").exists()
 
     def test_creates_summary_json(
         self, temp_home: Path, non_tty_stdout: None
@@ -135,8 +135,8 @@ class TestInitCommand:
                 with pytest.raises(SystemExit):
                     init_cmd.init(prime=False)
 
-        runs_dir = temp_home / ".cache" / "packastack" / "runs"
-        run_dirs = list(runs_dir.iterdir())
+        staging_dir = temp_home / ".cache" / "packastack" / "build" / ".runs"
+        run_dirs = list(staging_dir.iterdir())
         assert len(run_dirs) == 1
 
         summary_file = run_dirs[0] / "summary.json"
@@ -182,7 +182,7 @@ class TestInitCommand:
                     init_cmd.init(prime=False)
 
         # Check that series was resolved in summary
-        runs_dir = temp_home / ".cache" / "packastack" / "runs"
-        run_dirs = list(runs_dir.iterdir())
+        staging_dir = temp_home / ".cache" / "packastack" / "build" / ".runs"
+        run_dirs = list(staging_dir.iterdir())
         summary = json.loads((run_dirs[0] / "summary.json").read_text())
         assert summary["devel_series"] == "resolute"
