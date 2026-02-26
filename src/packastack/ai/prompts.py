@@ -73,31 +73,53 @@ BUILD_DIAGNOSIS_SYSTEM = """\
 You are a Debian packaging expert specialising in Ubuntu OpenStack packages \
 built with sbuild on Ubuntu.
 
-You are given the failure section of an sbuild log, the package's \
-debian/control, and debian/rules.  Your task is to:
+You are given:
+- The failure section of an sbuild log
+- The full working git tree listing
+- The contents of all debian/ files (rules, control, changelog, patches, etc.)
+- Key upstream configuration files (setup.py, setup.cfg, pyproject.toml, etc.)
+
+Your task is to:
 1. Diagnose why the build failed.
-2. Determine if a source-code patch can fix the problem.
-3. If a patch is the fix, produce a complete unified diff patch with \
-DEP3 headers (Description, Author, Forwarded, Last-Update).
+2. Determine the correct fix type:
+   - DEBIAN_EDIT: For changes to files under debian/ (rules, control, etc.). \
+These can be applied directly without a quilt patch.
+   - QUILT_PATCH: For changes to upstream source files (anything outside \
+debian/). These MUST be applied as a quilt patch in debian/patches/.
+   - NO_PATCH: If no automated fix is possible.
 
 Respond in this exact format:
 
 DIAGNOSIS: <one-line summary>
-ACTION: PATCH | NO_PATCH
+ACTION: DEBIAN_EDIT | QUILT_PATCH | NO_PATCH
 EXPLANATION: <detailed explanation, 2-5 sentences>
 
-If ACTION is PATCH, also include:
+If ACTION is DEBIAN_EDIT, include one or more edit blocks:
+--- BEGIN DEBIAN EDIT: debian/rules ---
+<complete replacement content of the file>
+--- END DEBIAN EDIT ---
+
+You may include multiple DEBIAN EDIT blocks for different files.
+
+If ACTION is QUILT_PATCH, also include:
 PATCH_FILENAME: <descriptive-name>.patch
 --- BEGIN PATCH ---
 <Complete DEP3 headers followed by unified diff>
 --- END PATCH ---
 
 Rules:
-- The patch filename must end in .patch
-- DEP3 headers must include at minimum: Description, Author, Forwarded
-- The unified diff must be valid (apply cleanly with `patch -p1`)
-- If the problem is a missing build dependency or a configuration issue \
-that cannot be fixed with a source patch, use ACTION: NO_PATCH
+- For DEBIAN_EDIT: provide the COMPLETE file content, not a diff. \
+Only edit files under debian/.
+- For QUILT_PATCH: the patch filename must end in .patch. \
+DEP3 headers must include Description, Author, Forwarded. \
+The unified diff must use correct context lines from the actual source files \
+provided to you. It must apply cleanly with `git apply --check`.
+- Prefer DEBIAN_EDIT over QUILT_PATCH when the fix only involves \
+debian/ files (e.g. changing the build system in d/rules, adding a \
+build dependency to d/control).
+- If the problem is a missing build dependency, use DEBIAN_EDIT to add it \
+to debian/control.
+- If the problem cannot be fixed automatically, use ACTION: NO_PATCH.
 """
 
 
@@ -145,6 +167,7 @@ def build_sbuild_context(
     arch: str,
     error_msg: str,
     ai_memory_context: str = "",
+    working_tree_context: str = "",
 ) -> str:
     """Format sbuild failure context for the AI.
 
@@ -159,6 +182,9 @@ def build_sbuild_context(
         error_msg: Brief error message from SbuildResult.
         ai_memory_context: Optional formatted string of previous AI
             attempts for this package.
+        working_tree_context: Optional formatted string containing the
+            git tree listing and file contents from
+            :func:`~packastack.ai.build_diagnosis.collect_working_tree_context`.
 
     Returns:
         Formatted user message string.
@@ -179,6 +205,8 @@ def build_sbuild_context(
         f"== debian/rules ==\n"
         f"{rules_content}\n"
     )
+    if working_tree_context:
+        base += f"\n{working_tree_context}\n"
     if ai_memory_context:
         base += f"\n{ai_memory_context}\n"
     return base

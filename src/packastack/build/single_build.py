@@ -727,9 +727,10 @@ def fetch_packaging_repo(
     result.workspace = workspace
     ctx.workspace = workspace
 
-    # Relocate RunContext logs into the package build directory
-    with contextlib.suppress(Exception):
-        run.relocate_to_package_dir(ctx.pkg_name)
+    # Relocate RunContext logs into the package build directory.
+    # _relocate() handles failures gracefully — if the move fails, file
+    # handles are re-opened at the original staging location.
+    run.relocate_to_package_dir(ctx.pkg_name)
 
     # Clone packaging repo
     launchpad_username = ctx.cfg.get("git", {}).get("launchpad_username")
@@ -2740,7 +2741,7 @@ def _ai_diagnose_and_retry_build(
         or (None, build_data) if no retry was attempted or retry failed.
     """
     from packastack.ai.build_diagnosis import (
-        apply_ai_patch,
+        apply_ai_fix,
         diagnose_build_failure,
     )
     from packastack.ai.memory import (
@@ -2781,49 +2782,58 @@ def _ai_diagnose_and_retry_build(
             activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
         return None, build_data
 
-    if diagnosis.needs_patch:
-        activity("ai", f"AI proposes patch: {diagnosis.patch_filename}")
+    if diagnosis.needs_debian_edit:
+        edited_files = ", ".join(diagnosis.debian_edits.keys())
+        activity("ai", f"AI proposes debian edit: {edited_files}")
+        activity("ai", diagnosis.explanation)
+    elif diagnosis.needs_patch:
+        activity("ai", f"AI proposes quilt patch: {diagnosis.patch_filename}")
         activity("ai", diagnosis.explanation)
 
-        if apply_ai_patch(ctx.pkg_repo, diagnosis, cfg=ctx.cfg):
-            activity("ai", "Retrying build with AI-proposed patch...")
+    if diagnosis.needs_debian_edit or diagnosis.needs_patch:
+        if apply_ai_fix(ctx.pkg_repo, diagnosis, cfg=ctx.cfg):
+            activity("ai", "Retrying build with AI-proposed fix...")
             retry_phase, retry_data = build_packages(ctx, new_version)
             if retry_phase.success:
-                activity(
-                    "ai",
-                    f"Build passed with AI patch: {diagnosis.patch_filename}",
-                )
-                activity("ai", "Patch is ready in debian/patches/")
+                if diagnosis.needs_debian_edit:
+                    activity("ai", f"Build passed with AI edit: {edited_files}")
+                else:
+                    activity(
+                        "ai",
+                        f"Build passed with AI patch: {diagnosis.patch_filename}",
+                    )
                 # Clean up memory on success
                 delete_memory(ctx.run.run_path)
                 return retry_phase, retry_data
 
-            # Build failed after AI patch -- save memory for next run
-            activity("ai", "Build still failed after AI patch. Saving memory for next run.")
+            # Build failed after AI fix -- save memory for next run
+            activity("ai", "Build still failed after AI fix. Saving memory for next run.")
             memory = previous_memory or AIMemory(
                 package=ctx.pkg_name, version=new_version
             )
             sbuild_error = ""
             if retry_data.sbuild_result:
                 sbuild_error = getattr(retry_data.sbuild_result, "validation_message", "")
+            fix_desc = edited_files if diagnosis.needs_debian_edit else diagnosis.patch_filename
             memory.add_attempt(
-                patch_filename=diagnosis.patch_filename,
-                patch_content=diagnosis.patch_content,
+                patch_filename=fix_desc,
+                patch_content=diagnosis.patch_content or str(diagnosis.debian_edits),
                 build_error=sbuild_error,
                 diagnosis=diagnosis.explanation,
                 outcome="build_failed",
             )
             save_memory(memory, ctx.run.run_path)
         else:
-            activity("ai", "Failed to apply AI-proposed patch")
-            # Save memory about invalid patch
+            activity("ai", "Failed to apply AI-proposed fix")
+            # Save memory about invalid fix
             memory = previous_memory or AIMemory(
                 package=ctx.pkg_name, version=new_version
             )
+            fix_desc = edited_files if diagnosis.needs_debian_edit else diagnosis.patch_filename
             memory.add_attempt(
-                patch_filename=diagnosis.patch_filename,
-                patch_content=diagnosis.patch_content,
-                build_error="Patch failed validation (git apply --check)",
+                patch_filename=fix_desc,
+                patch_content=diagnosis.patch_content or str(diagnosis.debian_edits),
+                build_error="Fix failed to apply",
                 diagnosis=diagnosis.explanation,
                 outcome="patch_invalid",
             )

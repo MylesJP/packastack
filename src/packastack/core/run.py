@@ -115,45 +115,76 @@ class RunContext:
         files at the new location, and re-wires ``sys.stdout`` /
         ``sys.stderr``.
 
-        Returns:
-            The new *run_path*.
+        If the move or re-open fails, file handles are re-opened at the
+        original location so that logging can continue uninterrupted.
 
-        Raises:
-            OSError: If the move fails.
+        Returns:
+            The new *run_path* (unchanged on failure).
         """
         if new_run_path == self.run_path:
             return self.run_path
+
+        old_run_path = self.run_path
+        old_logs_path = self.logs_path
+
+        # Flush current handles before closing
+        for f in (self.stdout_file, self.stderr_file):
+            if f is not None:
+                with contextlib.suppress(Exception):
+                    f.flush()
+        for f in self._event_files:
+            with contextlib.suppress(Exception):
+                f.flush()
 
         # Close current handles
         for f in (self.stdout_file, self.stderr_file):
             if f is not None:
                 with contextlib.suppress(Exception):
-                    f.flush()
                     f.close()
         for f in self._event_files:
             with contextlib.suppress(Exception):
-                f.flush()
                 f.close()
 
-        # Move the directory
-        new_run_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(self.run_path), str(new_run_path))
+        try:
+            # Move the directory
+            new_run_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old_run_path), str(new_run_path))
 
-        # Update paths
-        self.run_path = new_run_path
-        self.logs_path = new_run_path / "logs"
+            # Update paths
+            self.run_path = new_run_path
+            self.logs_path = new_run_path / "logs"
 
-        # Re-open log files in append mode
-        self.stdout_file = (self.logs_path / "stdout.log").open("a", encoding="utf-8")
-        self.stderr_file = (self.logs_path / "stderr.log").open("a", encoding="utf-8")
-        self.events_file = (self.logs_path / "events.jsonl").open("a", encoding="utf-8")
-        self._event_files = [self.events_file]
+            # Ensure logs directory exists at the new location
+            self.logs_path.mkdir(parents=True, exist_ok=True)
 
-        # Re-wire stdout/stderr
-        sys.stdout = self.stdout_file
-        sys.stderr = self.stderr_file
+            # Re-open log files in append mode
+            self.stdout_file = (self.logs_path / "stdout.log").open("a", encoding="utf-8")
+            self.stderr_file = (self.logs_path / "stderr.log").open("a", encoding="utf-8")
+            self.events_file = (self.logs_path / "events.jsonl").open("a", encoding="utf-8")
+            self._event_files = [self.events_file]
 
-        return new_run_path
+            # Re-wire stdout/stderr
+            sys.stdout = self.stdout_file
+            sys.stderr = self.stderr_file
+
+            return new_run_path
+
+        except Exception:
+            # Move or re-open failed — restore handles at the original location
+            # so that logging can continue.
+            self.run_path = old_run_path
+            self.logs_path = old_logs_path
+            self.logs_path.mkdir(parents=True, exist_ok=True)
+
+            self.stdout_file = (self.logs_path / "stdout.log").open("a", encoding="utf-8")
+            self.stderr_file = (self.logs_path / "stderr.log").open("a", encoding="utf-8")
+            self.events_file = (self.logs_path / "events.jsonl").open("a", encoding="utf-8")
+            self._event_files = [self.events_file]
+
+            sys.stdout = self.stdout_file
+            sys.stderr = self.stderr_file
+
+            return old_run_path
 
     def relocate_to_package_dir(self, pkg_name: str) -> Path:
         """Move logs from the staging area to ``build/{pkg}/{build_id}/``.

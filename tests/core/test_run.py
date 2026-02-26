@@ -172,6 +172,91 @@ class TestRelocateToPackageDir:
             assert result == target
 
 
+class TestRelocateFailureRecovery:
+    """Tests that _relocate() recovers gracefully when the move fails."""
+
+    def test_returns_original_path_on_move_failure(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        with run.RunContext("build") as ctx:
+            old_path = ctx.run_path
+            print("before failed relocate")
+
+            # Make shutil.move fail by patching it
+            with mock.patch("shutil.move", side_effect=OSError("disk full")):
+                result = ctx.relocate_to_package_dir("aodh")
+
+            # Should return the original path, not the target
+            assert result == old_path
+            assert ctx.run_path == old_path
+
+            # File handles should still work — logging must not be broken
+            print("after failed relocate")
+            ctx.log_event({"event": "test", "data": "still works"})
+
+        # Verify both messages made it to the log
+        stdout = (old_path / "logs" / "stdout.log").read_text()
+        assert "before failed relocate" in stdout
+        assert "after failed relocate" in stdout
+
+        events = (old_path / "logs" / "events.jsonl").read_text()
+        assert "still works" in events
+
+    def test_returns_original_path_on_reopen_failure(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        with run.RunContext("build") as ctx:
+            old_path = ctx.run_path
+            print("before reopen failure")
+
+            # Move succeeds but opening files at new location raises an
+            # exception.  We patch Path.open so it fails only for files
+            # under the target directory.
+            original_move = __import__("shutil").move
+            target_dir = ctx.build_root / "aodh"
+            real_open = Path.open
+
+            def failing_open(self_path: Path, *args: object, **kwargs: object) -> object:
+                if str(self_path).startswith(str(target_dir)):
+                    raise PermissionError("simulated permission denied")
+                return real_open(self_path, *args, **kwargs)
+
+            with mock.patch("shutil.move", side_effect=original_move):
+                with mock.patch.object(Path, "open", failing_open):
+                    result = ctx.relocate_to_package_dir("aodh")
+
+            # Should have fallen back to original (re-created) path
+            assert result == old_path
+            assert ctx.run_path == old_path
+
+            # File handles should still work
+            print("after reopen failure")
+            ctx.log_event({"event": "recovery", "ok": True})
+
+        stdout = (old_path / "logs" / "stdout.log").read_text()
+        assert "after reopen failure" in stdout
+
+    def test_successful_relocate_then_log_event(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        """Verify the normal happy path: relocate then log_event works."""
+        with run.RunContext("build") as ctx:
+            ctx.relocate_to_package_dir("neutron-fwaas-dashboard")
+            # This is exactly the call that was failing in the bug report
+            ctx.log_event(
+                {
+                    "event": "fetch.complete",
+                    "path": "/some/path",
+                    "branches": ["main"],
+                    "cloned": True,
+                    "updated": False,
+                }
+            )
+
+        events_text = (ctx.run_path / "logs" / "events.jsonl").read_text()
+        assert "fetch.complete" in events_text
+
+
 class TestRelocateToBuildAllDir:
     """Tests for RunContext.relocate_to_build_all_dir()."""
 

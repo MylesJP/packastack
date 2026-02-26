@@ -29,10 +29,15 @@ from unittest.mock import patch
 from packastack.ai.build_diagnosis import (
     BuildDiagnosisResult,
     PatchValidationResult,
+    _extract_debian_edits,
+    _is_binary_path,
     _parse_build_response,
     _read_file_safe,
     _request_patch_correction,
+    apply_ai_fix,
     apply_ai_patch,
+    apply_debian_edits,
+    collect_working_tree_context,
     diagnose_build_failure,
     validate_patch,
 )
@@ -568,7 +573,475 @@ class TestBuildDiagnosisResult:
         result = BuildDiagnosisResult(diagnosed=False)
         assert result.diagnosed is False
         assert result.needs_patch is False
+        assert result.needs_debian_edit is False
         assert result.patch_filename == ""
         assert result.patch_content == ""
+        assert result.debian_edits == {}
         assert result.explanation == ""
         assert result.error == ""
+
+
+class TestParseDebianEditResponse:
+    """Tests for _parse_build_response handling DEBIAN_EDIT action."""
+
+    def test_parses_debian_edit_response(self) -> None:
+        """Test parsing response with a debian edit proposal."""
+        response = AIResponse(
+            success=True,
+            content=(
+                "DIAGNOSIS: Need to switch build system\n"
+                "ACTION: DEBIAN_EDIT\n"
+                "EXPLANATION: Switch from python_distutils to pybuild\n"
+                "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
+                "#!/usr/bin/make -f\n"
+                "\n"
+                "export PYBUILD_NAME=neutron-fwaas-dashboard\n"
+                "\n"
+                "%:\n"
+                "\tdh $@ --buildsystem=pybuild\n"
+                "--- END DEBIAN EDIT ---\n"
+            ),
+        )
+        result = _parse_build_response(response)
+        assert result.diagnosed is True
+        assert result.needs_debian_edit is True
+        assert result.needs_patch is False
+        assert "debian/rules" in result.debian_edits
+        assert "pybuild" in result.debian_edits["debian/rules"]
+
+    def test_parses_multiple_debian_edits(self) -> None:
+        """Test parsing response with multiple debian file edits."""
+        response = AIResponse(
+            success=True,
+            content=(
+                "DIAGNOSIS: Fix build system and add dependency\n"
+                "ACTION: DEBIAN_EDIT\n"
+                "EXPLANATION: Multiple changes needed\n"
+                "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
+                "#!/usr/bin/make -f\n"
+                "%:\n"
+                "\tdh $@ --buildsystem=pybuild\n"
+                "--- END DEBIAN EDIT ---\n"
+                "--- BEGIN DEBIAN EDIT: debian/control ---\n"
+                "Source: nova\n"
+                "Build-Depends: python3-all, python3-setuptools\n"
+                "--- END DEBIAN EDIT ---\n"
+            ),
+        )
+        result = _parse_build_response(response)
+        assert result.needs_debian_edit is True
+        assert len(result.debian_edits) == 2
+        assert "debian/rules" in result.debian_edits
+        assert "debian/control" in result.debian_edits
+
+    def test_incomplete_debian_edit_falls_back(self) -> None:
+        """Test that debian edit without content falls back."""
+        response = AIResponse(
+            success=True,
+            content=(
+                "DIAGNOSIS: Need fix\n"
+                "ACTION: DEBIAN_EDIT\n"
+                # Missing BEGIN/END markers
+            ),
+        )
+        result = _parse_build_response(response)
+        assert result.needs_debian_edit is False
+
+    def test_parses_quilt_patch_action(self) -> None:
+        """Test parsing QUILT_PATCH action (new name for PATCH)."""
+        response = AIResponse(
+            success=True,
+            content=(
+                "DIAGNOSIS: Fix source code\n"
+                "ACTION: QUILT_PATCH\n"
+                "EXPLANATION: Source fix needed\n"
+                "PATCH_FILENAME: fix-source.patch\n"
+                "--- BEGIN PATCH ---\n"
+                "--- a/module.py\n+++ b/module.py\n@@ -1 +1 @@\n-old\n+new\n"
+                "--- END PATCH ---\n"
+            ),
+        )
+        result = _parse_build_response(response)
+        assert result.needs_patch is True
+        assert result.needs_debian_edit is False
+        assert result.patch_filename == "fix-source.patch"
+
+
+class TestExtractDebianEdits:
+    """Tests for _extract_debian_edits function."""
+
+    def test_extracts_single_edit(self) -> None:
+        """Test extracting a single debian edit block."""
+        content = (
+            "some preamble\n"
+            "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
+            "#!/usr/bin/make -f\n"
+            "%:\n"
+            "\tdh $@\n"
+            "--- END DEBIAN EDIT ---\n"
+            "some postamble\n"
+        )
+        edits = _extract_debian_edits(content)
+        assert len(edits) == 1
+        assert "debian/rules" in edits
+        assert "dh $@" in edits["debian/rules"]
+
+    def test_extracts_multiple_edits(self) -> None:
+        """Test extracting multiple debian edit blocks."""
+        content = (
+            "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
+            "rules content\n"
+            "--- END DEBIAN EDIT ---\n"
+            "--- BEGIN DEBIAN EDIT: debian/control ---\n"
+            "control content\n"
+            "--- END DEBIAN EDIT ---\n"
+        )
+        edits = _extract_debian_edits(content)
+        assert len(edits) == 2
+        assert "rules content" in edits["debian/rules"]
+        assert "control content" in edits["debian/control"]
+
+    def test_skips_non_debian_paths(self) -> None:
+        """Test that paths not under debian/ are skipped."""
+        content = (
+            "--- BEGIN DEBIAN EDIT: setup.py ---\n"
+            "evil content\n"
+            "--- END DEBIAN EDIT ---\n"
+        )
+        edits = _extract_debian_edits(content)
+        assert len(edits) == 0
+
+    def test_empty_content_returns_empty(self) -> None:
+        """Test that content without markers returns empty dict."""
+        edits = _extract_debian_edits("no markers here")
+        assert edits == {}
+
+    def test_unterminated_block_returns_empty(self) -> None:
+        """Test that unterminated block returns empty dict."""
+        content = "--- BEGIN DEBIAN EDIT: debian/rules ---\ncontent without end\n"
+        edits = _extract_debian_edits(content)
+        assert edits == {}
+
+
+class TestIsBinaryPath:
+    """Tests for _is_binary_path function."""
+
+    def test_binary_extensions(self) -> None:
+        """Test common binary extensions are detected."""
+        assert _is_binary_path(Path("file.gz")) is True
+        assert _is_binary_path(Path("file.xz")) is True
+        assert _is_binary_path(Path("file.png")) is True
+        assert _is_binary_path(Path("key.gpg")) is True
+
+    def test_text_extensions(self) -> None:
+        """Test text extensions are not binary."""
+        assert _is_binary_path(Path("file.py")) is False
+        assert _is_binary_path(Path("file.txt")) is False
+        assert _is_binary_path(Path("Makefile")) is False
+
+    def test_case_insensitive(self) -> None:
+        """Test case-insensitive extension check."""
+        assert _is_binary_path(Path("file.GZ")) is True
+        assert _is_binary_path(Path("file.PNG")) is True
+
+
+class TestCollectWorkingTreeContext:
+    """Tests for collect_working_tree_context function."""
+
+    def test_includes_debian_files(self, tmp_path: Path) -> None:
+        """Test that debian/ files are included in context."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "rules").write_text("#!/usr/bin/make -f\n%:\n\tdh $@\n")
+        (debian / "control").write_text("Source: pkg\nBuild-Depends: debhelper\n")
+
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "debian/rules" in result
+        assert "dh $@" in result
+        assert "debian/control" in result
+        assert "debhelper" in result
+
+    def test_includes_upstream_config(self, tmp_path: Path) -> None:
+        """Test that upstream config files are included when present."""
+        (tmp_path / "setup.py").write_text("from setuptools import setup\n")
+        (tmp_path / "pyproject.toml").write_text("[build-system]\n")
+
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "setup.py" in result
+        assert "setuptools" in result
+        assert "pyproject.toml" in result
+        assert "build-system" in result
+
+    def test_skips_missing_upstream_config(self, tmp_path: Path) -> None:
+        """Test that missing upstream config files are silently skipped."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "rules").write_text("rules")
+
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "setup.py" not in result
+        assert "pyproject.toml" not in result
+
+    def test_skips_binary_files(self, tmp_path: Path) -> None:
+        """Test that binary files are marked as omitted."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "upstream").mkdir()
+        (debian / "upstream" / "signing-key.asc").write_bytes(b"\x00\x01\x02")
+
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "binary file, omitted" in result
+
+    def test_includes_git_tree_listing(self, tmp_path: Path) -> None:
+        """Test that git ls-tree output is included."""
+        tree = "debian/rules\ndebian/control\nsetup.py"
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=tree):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "== File tree ==" in result
+        assert "debian/rules" in result
+
+    def test_includes_patches_subdir(self, tmp_path: Path) -> None:
+        """Test that debian/patches/ files are included."""
+        patches = tmp_path / "debian" / "patches"
+        patches.mkdir(parents=True)
+        (patches / "series").write_text("fix.patch\n")
+        (patches / "fix.patch").write_text("--- a/x.py\n+++ b/x.py\n")
+
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert "debian/patches/series" in result
+        assert "fix.patch" in result
+
+    def test_empty_repo_returns_empty(self, tmp_path: Path) -> None:
+        """Test context for repo with no debian/ dir."""
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = collect_working_tree_context(tmp_path)
+
+        assert result == ""
+
+
+class TestApplyDebianEdits:
+    """Tests for apply_debian_edits function."""
+
+    def test_writes_single_file(self, tmp_path: Path) -> None:
+        """Test writing a single debian file."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "rules").write_text("old content")
+
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={"debian/rules": "#!/usr/bin/make -f\n%:\n\tdh $@"},
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_debian_edits(tmp_path, diagnosis)
+
+        assert result is True
+        assert "dh $@" in (debian / "rules").read_text()
+
+    def test_writes_multiple_files(self, tmp_path: Path) -> None:
+        """Test writing multiple debian files."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "rules").write_text("old rules")
+        (debian / "control").write_text("old control")
+
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={
+                "debian/rules": "new rules",
+                "debian/control": "new control",
+            },
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_debian_edits(tmp_path, diagnosis)
+
+        assert result is True
+        assert "new rules" in (debian / "rules").read_text()
+        assert "new control" in (debian / "control").read_text()
+
+    def test_skips_non_debian_paths(self, tmp_path: Path) -> None:
+        """Test that non-debian paths are skipped."""
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={"setup.py": "malicious content"},
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_debian_edits(tmp_path, diagnosis)
+
+        assert result is False
+        assert not (tmp_path / "setup.py").exists()
+
+    def test_returns_false_with_empty_edits(self, tmp_path: Path) -> None:
+        """Test returns False when no edits provided."""
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True, needs_debian_edit=True, debian_edits={}
+        )
+        result = apply_debian_edits(tmp_path, diagnosis)
+        assert result is False
+
+    def test_creates_parent_dirs(self, tmp_path: Path) -> None:
+        """Test that parent directories are created for new files."""
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={"debian/source/format": "3.0 (quilt)"},
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_debian_edits(tmp_path, diagnosis)
+
+        assert result is True
+        assert (tmp_path / "debian" / "source" / "format").exists()
+
+    def test_ensures_trailing_newline(self, tmp_path: Path) -> None:
+        """Test that files always end with a newline."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={"debian/rules": "no trailing newline"},
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            apply_debian_edits(tmp_path, diagnosis)
+
+        assert (debian / "rules").read_text().endswith("\n")
+
+
+class TestApplyAiFix:
+    """Tests for apply_ai_fix function."""
+
+    def test_routes_debian_edit(self, tmp_path: Path) -> None:
+        """Test that debian edits are routed to apply_debian_edits."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            debian_edits={"debian/rules": "new content"},
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_ai_fix(tmp_path, diagnosis)
+
+        assert result is True
+        assert "new content" in (debian / "rules").read_text()
+
+    def test_routes_quilt_patch(self, tmp_path: Path) -> None:
+        """Test that quilt patches are routed to apply_ai_patch."""
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_patch=True,
+            patch_filename="fix.patch",
+            patch_content="diff content",
+        )
+
+        with (
+            patch("packastack.ai.build_diagnosis.validate_patch") as mock_validate,
+            patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")),
+        ):
+            mock_validate.return_value = PatchValidationResult(valid=True)
+            result = apply_ai_fix(tmp_path, diagnosis)
+
+        assert result is True
+
+    def test_returns_false_when_no_fix(self, tmp_path: Path) -> None:
+        """Test returns False when neither edit nor patch is proposed."""
+        diagnosis = BuildDiagnosisResult(diagnosed=True)
+        result = apply_ai_fix(tmp_path, diagnosis)
+        assert result is False
+
+    def test_prefers_debian_edit_over_patch(self, tmp_path: Path) -> None:
+        """Test that debian edit takes priority when both are set."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_debian_edit=True,
+            needs_patch=True,
+            debian_edits={"debian/rules": "edited content"},
+            patch_filename="fix.patch",
+            patch_content="diff",
+        )
+
+        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+            result = apply_ai_fix(tmp_path, diagnosis)
+
+        assert result is True
+        # Verify debian edit was applied, not the patch
+        assert "edited content" in (debian / "rules").read_text()
+        assert not (tmp_path / "debian" / "patches" / "fix.patch").exists()
+
+
+class TestDiagnoseBuildFailureWithTreeContext:
+    """Tests for diagnose_build_failure including tree context."""
+
+    def _cfg_with_key(self) -> dict:
+        return {"ai": {"api_key": "test-key", "model": "test", "max_tokens": 100, "timeout": 10}}
+
+    @patch("packastack.ai.build_diagnosis.call_ai")
+    def test_passes_tree_context_to_ai(self, mock_call: Any, tmp_path: Path) -> None:
+        """Test that working tree context is included in the AI call."""
+        log = tmp_path / "build.log"
+        log.write_text("error: python_distutils removed\n")
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "control").write_text("Source: neutron-fwaas-dashboard\n")
+        (debian / "rules").write_text("#!/usr/bin/make -f\n%:\n\tdh $@ --with python_distutils\n")
+
+        mock_call.return_value = AIResponse(
+            success=True,
+            content=(
+                "DIAGNOSIS: Switch build system\n"
+                "ACTION: DEBIAN_EDIT\n"
+                "EXPLANATION: Replace python_distutils with pybuild\n"
+                "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
+                "#!/usr/bin/make -f\n%:\n\tdh $@ --buildsystem=pybuild\n"
+                "--- END DEBIAN EDIT ---\n"
+            ),
+        )
+
+        sbuild = MockSbuildResult(
+            primary_log_path=log, validation_message="Build failed"
+        )
+        with patch("packastack.ai.build_diagnosis._git_ls_tree", return_value=""):
+            result = diagnose_build_failure(
+                sbuild_result=sbuild,
+                pkg_repo=tmp_path,
+                pkg_name="neutron-fwaas-dashboard",
+                version="23.0.0",
+                ubuntu_series="plucky",
+                arch="amd64",
+                cfg=self._cfg_with_key(),
+            )
+
+        assert result.diagnosed is True
+        assert result.needs_debian_edit is True
+        assert "debian/rules" in result.debian_edits
+
+        # Verify the AI was called with tree context
+        call_args = mock_call.call_args
+        user_message = call_args[0][1]  # second positional arg
+        assert "debian/rules" in user_message
+        assert "python_distutils" in user_message

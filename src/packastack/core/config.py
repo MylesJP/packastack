@@ -46,15 +46,16 @@ _CONFIG_HEADER = """\
 #
 # The base_url can be any OpenAI-compatible endpoint.  Examples:
 #
-#   OpenAI (default):
-#     export OPENAI_API_KEY="sk-..."
-#     # base_url: https://api.openai.com/v1  (default, no change needed)
-#     # model: gpt-4o
-#
-#   Anthropic (via OpenRouter):
+#   Anthropic via OpenRouter (default):
 #     export PACKASTACK_AI_API_KEY="sk-or-..."
-#     # base_url: https://openrouter.ai/api/v1
-#     # model: anthropic/claude-sonnet-4
+#     # base_url: https://openrouter.ai/api/v1  (default, no change needed)
+#     # model: anthropic/claude-sonnet-4-5-20250929
+#     # Browse models at: https://openrouter.ai/models
+#
+#   OpenAI (direct):
+#     export OPENAI_API_KEY="sk-..."
+#     # base_url: https://api.openai.com/v1
+#     # model: gpt-4o
 #
 #   Local model (Ollama):
 #     # No API key needed for local models - set any non-empty value:
@@ -115,8 +116,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "behavior": {"offline": False, "snapshot_archive_on_build": True},
     "ai": {
         "api_key": None,  # Fallback; env vars take precedence (see client.py)
-        "base_url": "https://api.openai.com/v1",  # Any OpenAI-compatible endpoint
-        "model": "gpt-4o",
+        "base_url": "https://openrouter.ai/api/v1",  # Any OpenAI-compatible endpoint
+        "model": "anthropic/claude-sonnet-4-5-20250929",  # Get from openrouter.ai/models
         "max_tokens": 8192,
         "timeout": 120,
     },

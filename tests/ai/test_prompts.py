@@ -112,6 +112,37 @@ class TestBuildSbuildContext:
         )
         assert "Previous" not in result
 
+    def test_includes_working_tree_context(self) -> None:
+        """Test that working_tree_context is appended when provided."""
+        result = prompts.build_sbuild_context(
+            log_excerpt="error output",
+            control_content="ctrl",
+            rules_content="rules",
+            pkg_name="nova",
+            version="30.0.0",
+            ubuntu_series="plucky",
+            arch="amd64",
+            error_msg="Build failed",
+            working_tree_context="== File tree ==\ndebian/rules\nsetup.py",
+        )
+        assert "File tree" in result
+        assert "setup.py" in result
+
+    def test_omits_tree_context_when_empty(self) -> None:
+        """Test that empty working_tree_context adds nothing."""
+        result = prompts.build_sbuild_context(
+            log_excerpt="error",
+            control_content="ctrl",
+            rules_content="rules",
+            pkg_name="nova",
+            version="1.0",
+            ubuntu_series="noble",
+            arch="amd64",
+            error_msg="err",
+            working_tree_context="",
+        )
+        assert "File tree" not in result
+
 
 class TestExtractSbuildFailureSection:
     """Tests for extract_sbuild_failure_section function."""
@@ -209,7 +240,8 @@ class TestPromptConstants:
     def test_build_system_prompt_is_nonempty(self) -> None:
         """Test BUILD_DIAGNOSIS_SYSTEM is defined."""
         assert len(prompts.BUILD_DIAGNOSIS_SYSTEM) > 50
-        assert "PATCH" in prompts.BUILD_DIAGNOSIS_SYSTEM
+        assert "DEBIAN_EDIT" in prompts.BUILD_DIAGNOSIS_SYSTEM
+        assert "QUILT_PATCH" in prompts.BUILD_DIAGNOSIS_SYSTEM
         assert "DEP3" in prompts.BUILD_DIAGNOSIS_SYSTEM
 
     def test_patch_correction_prompt_is_nonempty(self) -> None:

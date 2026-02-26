@@ -133,10 +133,10 @@ The ``ai`` section controls which model endpoint PackaStack uses:
      - ``None``
    * - ``base_url``
      - OpenAI-compatible API base URL
-     - ``https://api.openai.com/v1``
+     - ``https://openrouter.ai/api/v1``
    * - ``model``
-     - Model identifier
-     - ``gpt-4o``
+     - Model identifier (browse at https://openrouter.ai/models)
+     - ``anthropic/claude-sonnet-4-5-20250929``
    * - ``max_tokens``
      - Maximum response tokens
      - ``8192``
@@ -149,23 +149,23 @@ The ``base_url`` can also be set via the ``PACKASTACK_AI_BASE_URL`` environment 
 Provider examples
 ^^^^^^^^^^^^^^^^^
 
-**OpenAI** (default — no config changes needed):
-
-.. code-block:: bash
-
-   export OPENAI_API_KEY="sk-..."
-
-**Anthropic Claude via OpenRouter:**
+**Anthropic Claude via OpenRouter** (default — no config changes needed):
 
 .. code-block:: bash
 
    export PACKASTACK_AI_API_KEY="sk-or-..."
 
+**OpenAI (direct):**
+
+.. code-block:: bash
+
+   export OPENAI_API_KEY="sk-..."
+
 .. code-block:: yaml
 
    ai:
-     base_url: "https://openrouter.ai/api/v1"
-     model: "anthropic/claude-sonnet-4"
+     base_url: "https://api.openai.com/v1"
+     model: "gpt-4o"
 
 **Local model via Ollama:**
 

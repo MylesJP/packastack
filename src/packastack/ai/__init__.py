@@ -8,6 +8,9 @@ are analyzed and optionally fixed with AI-generated patches.
 from packastack.ai.build_diagnosis import (
     BuildDiagnosisResult,
     PatchValidationResult,
+    apply_ai_fix,
+    apply_debian_edits,
+    collect_working_tree_context,
     diagnose_build_failure,
     validate_patch,
 )
@@ -32,7 +35,10 @@ __all__ = [
     "BuildDiagnosisResult",
     "PatchDiagnosisResult",
     "PatchValidationResult",
+    "apply_ai_fix",
+    "apply_debian_edits",
     "auto_drop_upstreamed_patches",
+    "collect_working_tree_context",
     "delete_memory",
     "diagnose_build_failure",
     "diagnose_patch_failure",
