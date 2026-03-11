@@ -63,7 +63,7 @@ class GitFetcher:
     on the same package.
 
     When a launchpad_username is provided, clones use SSH URLs directly
-    (git+ssh://<username>@git.launchpad.net/...) instead of HTTPS. This
+    (ssh://<username>@git.launchpad.net/...) instead of HTTPS. This
     requires SSH keys to be configured for Launchpad access.
     """
 
@@ -98,7 +98,7 @@ class GitFetcher:
             use_ssh = self.launchpad_username is not None
 
         if use_ssh and self.launchpad_username:
-            return f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
+            return f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
         return f"{self.base_url}/{package}/+git/{package}"
 
     def _acquire_lock(self, lock_path: Path) -> int | None:
@@ -278,12 +278,12 @@ class GitFetcher:
         current_url = next(iter(origin.urls))
 
         # Check if already using SSH
-        if current_url.startswith("git+ssh://") or current_url.startswith("ssh://"):
+        if current_url.startswith("ssh://"):
             return
 
         # Convert HTTPS to SSH
         if "git.launchpad.net/~ubuntu-openstack-dev" in current_url:
-            ssh_url = f"git+ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
+            ssh_url = f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
             origin.set_url(ssh_url)
 
     def _list_branches(self, repo_path: Path) -> list[str]:

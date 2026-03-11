@@ -82,7 +82,7 @@ class TestGitFetcher:
         """Test SSH URL building when launchpad_username is set."""
         fetcher = GitFetcher(launchpad_username="myuser")
         url = fetcher.build_url("nova")
-        assert url == "git+ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
+        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
 
     def test_build_url_https_without_username(self) -> None:
         """Test HTTPS URL is used when no launchpad_username."""
@@ -102,7 +102,7 @@ class TestGitFetcher:
         """Test explicit SSH request with username."""
         fetcher = GitFetcher(launchpad_username="myuser")
         url = fetcher.build_url("nova", use_ssh=True)
-        assert url == "git+ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
+        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
 
     def test_build_url_explicit_ssh_without_username(self) -> None:
         """Test explicit SSH request without username falls back to HTTPS."""
