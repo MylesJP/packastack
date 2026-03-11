@@ -582,6 +582,99 @@ class TestRunSubsetBuild:
         assert build_all_calls[0]["parallel"] == 2
 
 
+    def test_passes_ppa_upload_to_run_build_all(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should pass ppa_upload flag to run_build_all."""
+        import packastack.commands.build_subset as build_subset_module
+
+        paths = {
+            "cache_root": tmp_path / "cache",
+            "openstack_releases_repo": tmp_path / "releases",
+            "local_apt_repo": tmp_path / "apt-repo",
+        }
+        paths["openstack_releases_repo"].mkdir(parents=True)
+
+        build_all_calls: list[dict] = []
+
+        def fake_run_build_all(**kwargs: object) -> int:
+            build_all_calls.append(kwargs)
+            return 0
+
+        class DummyRun:
+            def __init__(self, name: str) -> None:
+                pass
+
+            def __enter__(self) -> DummyRun:
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                pass
+
+            def log_event(self, event: dict) -> None:
+                pass
+
+            def write_summary(self, **kwargs: object) -> None:
+                pass
+
+        monkeypatch.setattr(build_subset_module, "load_config", lambda: {})
+        monkeypatch.setattr(build_subset_module, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(
+            build_subset_module,
+            "_update_openstack_repos",
+            lambda *args, **kwargs: True,
+        )
+        monkeypatch.setattr(
+            build_subset_module,
+            "get_current_development_series",
+            lambda _path: "dalmatian",
+        )
+
+        from packastack.planning.package_discovery import DiscoveryResult
+
+        monkeypatch.setattr(
+            build_subset_module,
+            "discover_packages",
+            lambda **kwargs: DiscoveryResult(
+                packages=["python-oslo.config"],
+                total_repos=1,
+                source="explicit",
+            ),
+        )
+        monkeypatch.setattr(
+            build_subset_module,
+            "_filter_packages_by_subset",
+            lambda **kwargs: ["python-oslo.config"],
+        )
+        monkeypatch.setattr(build_subset_module, "RunContext", DummyRun)
+        monkeypatch.setattr(build_subset_module, "activity", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            "packastack.commands.build.run_build_all", fake_run_build_all
+        )
+
+        from packastack.build import EXIT_SUCCESS
+
+        exit_code = run_subset_build(
+            subset_type=SubsetType.LIBRARIES,
+            target="devel",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            keep_going=True,
+            max_failures=0,
+            parallel=2,
+            force=False,
+            offline=False,
+            dry_run=False,
+            ppa_upload=True,
+        )
+
+        assert exit_code == EXIT_SUCCESS
+        assert len(build_all_calls) == 1
+        assert build_all_calls[0]["ppa_upload"] is True
+
+
 class TestBuildCommandSubsetRouting:
     """Tests for subset routing in the build command."""
 
@@ -692,6 +785,36 @@ class TestBuildLibrariesFunction:
         assert exits == [0]
 
 
+    def test_passes_ppa_upload_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should pass ppa_upload flag to run_subset_build."""
+        from packastack.commands import build_subset as build_subset_module
+
+        calls: list[dict] = []
+
+        def fake_run_subset_build(**kwargs: object) -> int:
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            build_subset_module, "run_subset_build", fake_run_subset_build
+        )
+
+        exits: list[int] = []
+        monkeypatch.setattr("sys.exit", lambda code: exits.append(code))
+
+        build_subset_module.build_libraries(
+            target="dalmatian",
+            ubuntu_series="noble",
+            dry_run=True,
+            ppa_upload=True,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["ppa_upload"] is True
+
+
 class TestBuildClientsFunction:
     """Tests for build_clients function."""
 
@@ -726,3 +849,32 @@ class TestBuildClientsFunction:
         assert calls[0]["target"] == "dalmatian"
         assert calls[0]["ubuntu_series"] == "noble"
         assert exits == [0]
+
+    def test_passes_ppa_upload_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should pass ppa_upload flag to run_subset_build."""
+        from packastack.commands import build_subset as build_subset_module
+
+        calls: list[dict] = []
+
+        def fake_run_subset_build(**kwargs: object) -> int:
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            build_subset_module, "run_subset_build", fake_run_subset_build
+        )
+
+        exits: list[int] = []
+        monkeypatch.setattr("sys.exit", lambda code: exits.append(code))
+
+        build_subset_module.build_clients(
+            target="dalmatian",
+            ubuntu_series="noble",
+            dry_run=True,
+            ppa_upload=True,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["ppa_upload"] is True

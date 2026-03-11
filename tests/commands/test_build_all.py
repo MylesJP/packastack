@@ -939,6 +939,95 @@ class TestRunSingleBuild:
         assert message == "boom"
 
 
+    def test_repo_not_found_on_config_error_with_matching_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return REPO_NOT_FOUND when exit code 1 and log contains 'No packages found matching'."""
+        log_content = (
+            "[resolve] Searching for packages...\n"
+            "[resolve] No packages found matching: python-dracclient\n"
+        )
+
+        def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
+            # Write the log content to the log file
+            stdout = kwargs.get("stdout")
+            if stdout and hasattr(stdout, "write"):
+                stdout.write(log_content)
+            return SimpleNamespace(returncode=1)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        success, failure_type, message, _log_path = _run_single_build(
+            package="python-dracclient",
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            run_dir=tmp_path,
+        )
+
+        assert success is False
+        assert failure_type == FailureType.REPO_NOT_FOUND
+        assert "Configuration error" in message
+
+    def test_config_error_without_repo_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should return UNKNOWN for exit code 1 without 'No packages found matching' in log."""
+        log_content = "[config] Invalid config file\n"
+
+        def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
+            stdout = kwargs.get("stdout")
+            if stdout and hasattr(stdout, "write"):
+                stdout.write(log_content)
+            return SimpleNamespace(returncode=1)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        success, failure_type, message, _log_path = _run_single_build(
+            package="nova",
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            run_dir=tmp_path,
+        )
+
+        assert success is False
+        assert failure_type == FailureType.UNKNOWN
+        assert "Configuration error" in message
+
+    def test_ppa_upload_flag_included_in_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should include --ppa-upload in command when ppa_upload=True."""
+        captured: dict[str, object] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
+            captured["cmd"] = cmd
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        _run_single_build(
+            package="nova",
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            run_dir=tmp_path,
+            ppa_upload=True,
+        )
+
+        assert "--ppa-upload" in captured["cmd"]
+
+
 class TestParallelBatchesEdgeCases:
     """Tests for parallel batch computation edge cases."""
 
@@ -959,6 +1048,34 @@ class TestParallelBatchesEdgeCases:
         batches = _get_parallel_batches(graph, state)
 
         assert batches == []
+
+    def test_external_deps_treated_as_satisfied(self) -> None:
+        """Packages in graph but not in state should be treated as already satisfied.
+
+        This happens in subset builds (e.g., build clients) where the dependency
+        graph includes library packages that aren't being built in this run.
+        """
+        graph = DependencyGraph()
+        # "lib" is a dependency but won't be built in this run
+        graph.add_node("lib")
+        graph.add_node("client-a")
+        graph.add_edge("client-a", "lib")  # client-a depends on lib
+
+        # Only client-a is in the state — lib is an external dependency
+        state = create_initial_state(
+            run_id="test",
+            target="dalmatian",
+            ubuntu_series="noble",
+            build_type="release",
+            packages=["client-a"],
+            build_order=["client-a"],
+        )
+
+        batches = _get_parallel_batches(graph, state)
+
+        # client-a should be ready immediately since lib is external
+        assert len(batches) == 1
+        assert "client-a" in batches[0]
 
 
 class TestRunSequentialBuilds:
@@ -1007,6 +1124,52 @@ class TestRunSequentialBuilds:
         assert exit_code == EXIT_ALL_BUILD_FAILED
         assert state.packages["b"].status == PackageStatus.SUCCESS
         assert state.packages["c"].status == PackageStatus.FAILED
+
+
+    def test_repo_not_found_skips_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should skip packages with REPO_NOT_FOUND instead of marking failed."""
+        import packastack.build.all_runner as all_runner
+
+        state = create_initial_state(
+            run_id="run-1",
+            target="dalmatian",
+            ubuntu_series="noble",
+            build_type="release",
+            packages=["a", "b", "c"],
+            build_order=["a", "b", "c"],
+            keep_going=True,
+        )
+
+        def fake_run_single_build(package: str, **_kwargs: object) -> tuple[bool, FailureType | None, str, str]:
+            if package == "b":
+                return False, FailureType.REPO_NOT_FOUND, "No packages found matching: b", "/tmp/b.log"
+            return True, None, "", f"/tmp/{package}.log"
+
+        monkeypatch.setattr(all_runner, "run_single_build", fake_run_single_build)
+        monkeypatch.setattr(all_runner, "save_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
+
+        exit_code = _run_sequential_builds(
+            state=state,
+            run_dir=tmp_path,
+            state_dir=tmp_path,
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            local_repo=tmp_path / "repo",
+            run=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        )
+
+        # Skipped packages don't count as failures
+        assert exit_code == EXIT_SUCCESS
+        assert state.packages["a"].status == PackageStatus.SUCCESS
+        assert state.packages["b"].status == PackageStatus.SKIPPED
+        assert state.packages["c"].status == PackageStatus.SUCCESS
 
 
 class TestRunParallelBuilds:
@@ -1060,6 +1223,57 @@ class TestRunParallelBuilds:
         assert exit_code == EXIT_ALL_BUILD_FAILED
         assert state.packages["a"].status == PackageStatus.SUCCESS
         assert state.packages["b"].status == PackageStatus.FAILED
+
+
+    def test_parallel_repo_not_found_skips_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should skip packages with REPO_NOT_FOUND in parallel mode."""
+        import packastack.build.all_runner as all_runner
+
+        state = create_initial_state(
+            run_id="run-1",
+            target="dalmatian",
+            ubuntu_series="noble",
+            build_type="release",
+            packages=["a", "b"],
+            build_order=["a", "b"],
+            keep_going=True,
+            parallel=2,
+        )
+        graph = DependencyGraph()
+        graph.add_node("a")
+        graph.add_node("b")
+
+        def fake_run_single_build(package: str, **_kwargs: object) -> tuple[bool, FailureType | None, str, str]:
+            if package == "b":
+                return False, FailureType.REPO_NOT_FOUND, "No packages found matching: b", "/tmp/b.log"
+            return True, None, "", f"/tmp/{package}.log"
+
+        monkeypatch.setattr(all_runner, "run_single_build", fake_run_single_build)
+        monkeypatch.setattr(all_runner, "save_state", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner, "activity", lambda *_args, **_kwargs: None)
+
+        exit_code = _run_parallel_builds(
+            state=state,
+            graph=graph,
+            run_dir=tmp_path,
+            state_dir=tmp_path,
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            parallel=2,
+            local_repo=tmp_path / "repo",
+            run=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+        )
+
+        # Skipped packages don't count as failures
+        assert exit_code == EXIT_SUCCESS
+        assert state.packages["a"].status == PackageStatus.SUCCESS
+        assert state.packages["b"].status == PackageStatus.SKIPPED
 
 
 class TestRunBuildAllResume:

@@ -114,6 +114,7 @@ def _run_build_all(
     force = request.force
     offline = request.offline
     dry_run = request.dry_run
+    ppa_upload = request.ppa_upload
 
     cfg = load_config()
     paths = resolve_paths(cfg)
@@ -442,6 +443,7 @@ def _run_build_all(
             parallel=parallel,
             local_repo=local_repo,
             run=run,
+            ppa_upload=ppa_upload,
         )
     else:
         _run_sequential_builds(
@@ -456,6 +458,7 @@ def _run_build_all(
             force=force,
             local_repo=local_repo,
             run=run,
+            ppa_upload=ppa_upload,
         )
 
     # Mark completion
@@ -472,10 +475,14 @@ def _run_build_all(
     succeeded = len(state.get_success_packages())
     failed = len(state.get_failed_packages())
     blocked = len(state.get_blocked_packages())
+    skipped = len(state.get_skipped_packages())
 
     activity("all", "")
     activity("all", "=" * 60)
-    activity("all", f"BUILD-ALL COMPLETE: {succeeded} succeeded, {failed} failed, {blocked} blocked")
+    summary_parts = [f"{succeeded} succeeded", f"{failed} failed", f"{blocked} blocked"]
+    if skipped:
+        summary_parts.append(f"{skipped} skipped")
+    activity("all", f"BUILD-ALL COMPLETE: {', '.join(summary_parts)}")
     activity("all", "=" * 60)
 
     run.write_summary(
@@ -483,6 +490,7 @@ def _run_build_all(
         succeeded=succeeded,
         failed=failed,
         blocked=blocked,
+        skipped=skipped,
         reports={
             "json": str(json_report),
             "markdown": str(md_report),
@@ -504,6 +512,7 @@ def _run_sequential_builds(
     force: bool,
     local_repo: Path,
     run: RunContext,
+    ppa_upload: bool = False,
 ) -> int:
     """Run builds sequentially in topological order.
 
@@ -519,6 +528,7 @@ def _run_sequential_builds(
         force: Force build despite warnings.
         local_repo: Path to local APT repository.
         run: RunContext for logging.
+        ppa_upload: Whether to upload to PPA after build.
 
     Returns:
         Exit code.
@@ -587,6 +597,7 @@ def _run_sequential_builds(
                 binary=binary,
                 force=force,
                 run_dir=run_dir,
+                ppa_upload=ppa_upload,
             )
 
             if success:
@@ -595,6 +606,9 @@ def _run_sequential_builds(
                 activity("all", f"[ok]    {pkg} ({pkg_state.duration_seconds:.0f}s)")
                 # Regenerate local repo indexes after each successful build
                 refresh_local_repo_indexes(local_repo, host_arch, run, phase="all")
+            elif failure_type == FailureType.REPO_NOT_FOUND:
+                state.mark_skipped(pkg, f"Repo not found: {message}")
+                activity("all", f"[skip]  {pkg}: packaging repo not found")
             else:
                 state.mark_failed(pkg, failure_type or FailureType.UNKNOWN, message, log_path)
                 failed_set.add(pkg)
@@ -691,6 +705,9 @@ def _run_parallel_builds(
                         activity("all", f"[ppa]   {pkg}: upload failed (see log)")
                     else:
                         activity("all", f"[ppa]   {pkg}: no upload detected (see log)")
+            elif failure_type == FailureType.REPO_NOT_FOUND:
+                state.mark_skipped(pkg, f"Repo not found: {message}")
+                activity("all", f"[skip]  {pkg}: packaging repo not found")
             else:
                 state.mark_failed(pkg, failure_type or FailureType.UNKNOWN, message, log_path)
                 failed_set.add(pkg)
@@ -719,14 +736,16 @@ def _run_parallel_builds(
             )
             task = progress.add_task("Building packages", total=total, completed=completed)
 
-        # Get batches for parallel execution
-        batches = get_parallel_batches(graph, state)
-
+        # Execute batches - recompute after each batch to pick up skipped packages
         batch_num = 0
-        for batch in batches:
-            batch_num += 1
+        while True:
+            batches = get_parallel_batches(graph, state)
+            if not batches:
+                break
+            batch = batches[0]  # Take only the first (next ready) batch
             if not batch:
-                continue
+                break
+            batch_num += 1
 
             activity("all", f"Batch {batch_num}: {len(batch)} packages (parallel={min(parallel, len(batch))})")
 

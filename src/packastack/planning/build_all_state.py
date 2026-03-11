@@ -57,6 +57,7 @@ class FailureType(str, Enum):
     CYCLE = "cycle"
     UPSTREAM_FETCH = "upstream_fetch"
     POLICY_BLOCKED = "policy_blocked"
+    REPO_NOT_FOUND = "repo_not_found"
     UNKNOWN = "unknown"
 
 
@@ -222,6 +223,13 @@ class BuildAllState:
         return [
             name for name, state in self.packages.items()
             if state.status == PackageStatus.BLOCKED
+        ]
+
+    def get_skipped_packages(self) -> list[str]:
+        """Get packages that were skipped (e.g., repo not found)."""
+        return [
+            name for name, state in self.packages.items()
+            if state.status == PackageStatus.SKIPPED
         ]
 
     def get_failure_count(self) -> int:

@@ -176,11 +176,17 @@ def get_parallel_batches(
         if pkg_state.status == PackageStatus.PENDING
     }
 
-    # Get already processed packages (success, failed, or blocked)
+    # Get already processed packages (success, failed, blocked, or skipped)
     processed = {
         name for name, pkg_state in state.packages.items()
         if pkg_state.status in (PackageStatus.SUCCESS, PackageStatus.FAILED, PackageStatus.BLOCKED, PackageStatus.SKIPPED)
     }
+
+    # Packages in the graph but not in state are external dependencies
+    # (not being built in this run) — treat them as already satisfied
+    graph_nodes = set(graph.nodes.keys())
+    external_deps = graph_nodes - set(state.packages.keys())
+    processed |= external_deps
 
     while remaining:
         # Find packages whose dependencies are all processed
@@ -305,6 +311,16 @@ def run_single_build(
             9: "Registry error",
             10: "Retired project",
         }
+
+        # Check for repo-not-found on config error (exit code 1)
+        if result.returncode == 1:
+            try:
+                log_text = log_file.read_text(encoding="utf-8", errors="ignore")
+                if "No packages found matching" in log_text:
+                    failure_type = FailureType.REPO_NOT_FOUND
+            except Exception:
+                pass
+
         if result.returncode == 3:
             failure_type = FailureType.FETCH_FAILED
         elif result.returncode == 4:

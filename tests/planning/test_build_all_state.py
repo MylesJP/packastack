@@ -48,6 +48,7 @@ class TestFailureType:
         assert FailureType.CYCLE.value == "cycle"
         assert FailureType.UPSTREAM_FETCH.value == "upstream_fetch"
         assert FailureType.POLICY_BLOCKED.value == "policy_blocked"
+        assert FailureType.REPO_NOT_FOUND.value == "repo_not_found"
         assert FailureType.UNKNOWN.value == "unknown"
 
 
@@ -228,6 +229,20 @@ class TestBuildAllState:
 
         blocked = state.get_blocked_packages()
         assert blocked == ["nova"]
+
+    def test_get_skipped_packages(self) -> None:
+        """Test getting skipped packages."""
+        state = BuildAllState(
+            run_id="test",
+            target="dalmatian",
+            ubuntu_series="noble",
+            build_type="release",
+        )
+        state.packages["nova"] = PackageState(name="nova", status=PackageStatus.SKIPPED)
+        state.packages["glance"] = PackageState(name="glance", status=PackageStatus.SUCCESS)
+
+        skipped = state.get_skipped_packages()
+        assert skipped == ["nova"]
 
     def test_is_complete(self) -> None:
         """Test completion check."""

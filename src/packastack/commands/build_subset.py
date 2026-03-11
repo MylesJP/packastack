@@ -187,6 +187,7 @@ def run_subset_build(
     force: bool,
     offline: bool,
     dry_run: bool,
+    ppa_upload: bool = False,
 ) -> int:
     """Run a subset build (libraries or clients) and return exit code.
 
@@ -206,6 +207,7 @@ def run_subset_build(
         force: Proceed despite warnings.
         offline: Run in offline mode.
         dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
 
     Returns:
         Exit code.
@@ -365,6 +367,7 @@ def run_subset_build(
                     force=force,
                     offline=offline,
                     dry_run=dry_run,
+                    ppa_upload=ppa_upload,
                 )
             finally:
                 # Clean up temp file
@@ -398,6 +401,7 @@ def build_libraries(
     force: bool = False,
     offline: bool = False,
     dry_run: bool = False,
+    ppa_upload: bool = False,
 ) -> None:
     """Build all Oslo and other OpenStack library packages.
 
@@ -420,6 +424,7 @@ def build_libraries(
         force: Proceed despite warnings.
         offline: Run in offline mode (skip repo updates).
         dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
     """
     exit_code = run_subset_build(
         subset_type=SubsetType.LIBRARIES,
@@ -434,6 +439,7 @@ def build_libraries(
         force=force,
         offline=offline,
         dry_run=dry_run,
+        ppa_upload=ppa_upload,
     )
     sys.exit(exit_code)
 
@@ -450,6 +456,7 @@ def build_clients(
     force: bool = False,
     offline: bool = False,
     dry_run: bool = False,
+    ppa_upload: bool = False,
 ) -> None:
     """Build all Python client packages.
 
@@ -472,6 +479,7 @@ def build_clients(
         force: Proceed despite warnings.
         offline: Run in offline mode (skip repo updates).
         dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
     """
     exit_code = run_subset_build(
         subset_type=SubsetType.CLIENTS,
@@ -486,5 +494,6 @@ def build_clients(
         force=force,
         offline=offline,
         dry_run=dry_run,
+        ppa_upload=ppa_upload,
     )
     sys.exit(exit_code)

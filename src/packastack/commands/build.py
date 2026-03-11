@@ -324,6 +324,7 @@ def run_build_all(
     force: bool,
     offline: bool,
     dry_run: bool,
+    ppa_upload: bool = False,
 ) -> int:
     """Run build-all and return exit code (without sys.exit).
 
@@ -346,6 +347,7 @@ def run_build_all(
         force: Proceed despite warnings.
         offline: Run in offline mode.
         dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
 
     Returns:
         Exit code.
@@ -371,6 +373,7 @@ def run_build_all(
                 force=force,
                 offline=offline,
                 dry_run=dry_run,
+                ppa_upload=ppa_upload,
             )
             exit_code = _run_build_all(run=run, request=request)
         except Exception as e:
@@ -511,6 +514,7 @@ def build(
             force=force,
             offline=offline,
             dry_run=dry_run,
+            ppa_upload=ppa_upload,
         )
         sys.exit(exit_code)
 
@@ -542,6 +546,7 @@ def build(
             parallel=parallel,
             packages_file=packages_file,
             dry_run=dry_run,
+            ppa_upload=ppa_upload,
         )
     else:
         # Treat top-level --dry-run as validate-plan for single-package mode
@@ -702,6 +707,7 @@ def _build_all_mode(
     parallel: int,
     packages_file: str,
     dry_run: bool,
+    ppa_upload: bool = False,
 ) -> None:
     """Build all packages in dependency order."""
     exit_code = run_build_all(
@@ -721,6 +727,7 @@ def _build_all_mode(
         force=force,
         offline=offline,
         dry_run=dry_run,
+        ppa_upload=ppa_upload,
     )
     sys.exit(exit_code)
 

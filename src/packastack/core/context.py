@@ -177,6 +177,7 @@ class BuildAllRequest:
         force: Proceed despite warnings.
         offline: Offline mode.
         dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
     """
 
     target: str = "devel"
@@ -195,6 +196,7 @@ class BuildAllRequest:
     force: bool = False
     offline: bool = False
     dry_run: bool = False
+    ppa_upload: bool = False
 
 
 @dataclass(frozen=True)
