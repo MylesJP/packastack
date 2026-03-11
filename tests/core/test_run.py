@@ -54,7 +54,7 @@ class TestRunContext:
     def test_creates_stdout_log(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
             print("test output")
-            stdout_log = ctx.run_path / "stdout.log"
+            stdout_log = ctx.logs_path / "stdout.log"
 
         assert stdout_log.exists()
         assert "test output" in stdout_log.read_text()
@@ -64,7 +64,7 @@ class TestRunContext:
 
         with run.RunContext("test") as ctx:
             print("error output", file=sys.stderr)
-            stderr_log = ctx.run_path / "stderr.log"
+            stderr_log = ctx.logs_path / "stderr.log"
 
         assert stderr_log.exists()
         assert "error output" in stderr_log.read_text()
@@ -72,7 +72,7 @@ class TestRunContext:
     def test_creates_events_jsonl(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
             ctx.log_event({"event": "custom", "data": "value"})
-            events_file = ctx.run_path / "events.jsonl"
+            events_file = ctx.logs_path / "events.jsonl"
 
         assert events_file.exists()
         lines = events_file.read_text().strip().split("\n")
@@ -88,7 +88,7 @@ class TestRunContext:
     def test_creates_summary_json(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
             ctx.write_summary(custom_key="custom_value")
-            summary_file = ctx.run_path / "summary.json"
+            summary_file = ctx.logs_path / "summary.json"
 
         assert summary_file.exists()
         summary = json.loads(summary_file.read_text())
@@ -107,7 +107,7 @@ class TestRunContext:
         except ValueError:
             pass
 
-        summary_file = ctx.run_path / "summary.json"
+        summary_file = ctx.logs_path / "summary.json"
         summary = json.loads(summary_file.read_text())
         assert summary["status"] == "failed"
         assert "test error" in summary["error"]
@@ -253,7 +253,7 @@ class TestRelocateFailureRecovery:
                 }
             )
 
-        events_text = (ctx.run_path / "logs" / "events.jsonl").read_text()
+        events_text = (ctx.logs_path / "events.jsonl").read_text()
         assert "fetch.complete" in events_text
 
 

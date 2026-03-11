@@ -43,6 +43,23 @@ from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
 from packastack.core.spinner import activity_spinner
 from packastack.debpkg.control import ParsedDependency
+from packastack.logs.explain import write_plan_dependency_summary
+from packastack.logs.plan_graph import (
+    PlanGraph,
+    render_ascii,
+    render_build_order_list,
+    render_dot,
+    render_waves,
+    write_plan_graph_reports,
+)
+from packastack.logs.type_selection import (
+    render_compact_summary,
+    render_console_table,
+    write_type_selection_reports,
+)
+from packastack.logs.watch_resolution import (
+    write_watch_resolution_reports,
+)
 from packastack.planning.cycle_suggestions import suggest_cycle_edge_exclusions
 from packastack.planning.dependency_satisfaction import evaluate_dependencies
 from packastack.planning.graph import DependencyGraph, PlanResult
@@ -55,23 +72,6 @@ from packastack.planning.type_selection import (
     WatchConfig,
     get_default_parallel_workers,
     select_build_types_for_packages,
-)
-from packastack.reports.explain import write_plan_dependency_summary
-from packastack.reports.plan_graph import (
-    PlanGraph,
-    render_ascii,
-    render_build_order_list,
-    render_dot,
-    render_waves,
-    write_plan_graph_reports,
-)
-from packastack.reports.type_selection import (
-    render_compact_summary,
-    render_console_table,
-    write_type_selection_reports,
-)
-from packastack.reports.watch_resolution import (
-    write_watch_resolution_reports,
 )
 from packastack.target.distro_info import get_current_lts
 from packastack.target.resolution import TargetResolver, parse_target_expr
@@ -1318,7 +1318,7 @@ def _plan_all_packages(
             activity("plan", f"Excluded {len(excluded_retired)} retired packages from graph")
 
     # Phase: reports
-    reports_dir = run.run_path / "reports"
+    reports_dir = run.logs_path
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     with activity_spinner("report", "Generating type selection reports"):
@@ -1883,7 +1883,7 @@ def plan(
             run.log_event({"event": "verify.missing", "missing": missing})
 
         # Phase: graph reports (always generated)
-        reports_dir = run.run_path / "reports"
+        reports_dir = run.logs_path
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         with activity_spinner("report", "Generating plan graph reports"):

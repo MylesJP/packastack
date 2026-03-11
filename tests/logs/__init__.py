@@ -4,4 +4,4 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Reports test package."""
+"""Logs test package."""

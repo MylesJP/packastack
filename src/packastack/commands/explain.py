@@ -18,8 +18,8 @@ from packastack.core.config import load_config
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
 from packastack.debpkg.control import parse_control
+from packastack.logs.explain import write_explain_reports
 from packastack.planning.dependency_satisfaction import evaluate_dependencies
-from packastack.reports.explain import write_explain_reports
 from packastack.target.distro_info import get_current_lts
 from packastack.target.resolution import TargetResolver, parse_target_expr
 from packastack.target.series import resolve_series
@@ -200,7 +200,7 @@ def explain(
         except Exception:
             pass
 
-        reports_dir = run.run_path / "reports"
+        reports_dir = run.logs_path
 
         # Fetch packaging repo
         packaging_cache = paths.get("build_root", paths["cache_root"] / "build") / "packaging-cache"

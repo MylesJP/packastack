@@ -74,12 +74,12 @@ from packastack.core.config import load_config
 from packastack.core.context import BuildAllRequest, BuildRequest
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
+from packastack.logs.plan_graph import render_waves
 from packastack.planning.build_all_state import (
     BuildAllState,
     PackageState,
 )
 from packastack.planning.graph_builder import OPTIONAL_BUILD_DEPS
-from packastack.reports.plan_graph import render_waves
 from packastack.target.series import resolve_series
 from packastack.upstream.releases import (
     get_current_development_series,
@@ -254,7 +254,7 @@ def _generate_reports(
     run_dir: Path,
 ) -> tuple[Path, Path]:
     """Generate build-all summary reports."""
-    from packastack.build.all_reports import generate_build_all_reports
+    from packastack.logs.all_reports import generate_build_all_reports
     return generate_build_all_reports(state, run_dir)
 
 

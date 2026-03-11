@@ -4,4 +4,4 @@
 #
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""Report generation utilities."""
+"""Logging and report generation utilities."""

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from packastack.reports.deps_satisfaction import (
+from packastack.logs.deps_satisfaction import (
     render_dependency_satisfaction_html,
     write_dependency_satisfaction_reports,
 )

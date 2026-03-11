@@ -220,17 +220,6 @@ class RunContext:
         self.events_file = (self.logs_path / "events.jsonl").open("a", encoding="utf-8")
         self._event_files = [self.events_file]
 
-        # Backwards-compatible links at run root
-        def _link(src: Path, dst: Path) -> None:
-            with contextlib.suppress(FileNotFoundError):
-                dst.unlink()
-            with contextlib.suppress(Exception):
-                dst.symlink_to(src)
-
-        _link(self.logs_path / "stdout.log", self.run_path / "stdout.log")
-        _link(self.logs_path / "stderr.log", self.run_path / "stderr.log")
-        _link(self.logs_path / "events.jsonl", self.run_path / "events.jsonl")
-
         sys.stdout = self.stdout_file
         sys.stderr = self.stderr_file
 
@@ -251,8 +240,6 @@ class RunContext:
     def write_summary(self, **kwargs: Any) -> None:
         self.summary.update(kwargs)
         blob = json.dumps(self.summary, indent=2)
-        (self.run_path / "summary.json").write_text(blob)
-        # Convenience copy alongside logs
         (self.logs_path / "summary.json").write_text(blob)
         for f in self._mirror_files:
             # mirror_files are file handles; derive their directory to place summary

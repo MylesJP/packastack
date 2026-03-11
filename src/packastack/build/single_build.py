@@ -61,7 +61,7 @@ from packastack.build.tarball import _fetch_release_tarball
 from packastack.core.run import activity
 from packastack.core.spinner import activity_spinner
 from packastack.debpkg.gbp import run_command
-from packastack.reports.deps_satisfaction import write_dependency_satisfaction_reports
+from packastack.logs.deps_satisfaction import write_dependency_satisfaction_reports
 from packastack.upstream.gitfetch import GitFetcher
 
 if TYPE_CHECKING:
@@ -1305,6 +1305,10 @@ def validate_and_build_deps(
     from packaging.specifiers import SpecifierSet
     from packaging.version import Version
 
+    from packastack.logs.dep_sync import (
+        DependencySatisfactionSummary,
+        save_satisfaction_report,
+    )
     from packastack.planning.type_selection import BuildType
     from packastack.planning.validated_plan import (
         check_version_satisfies,
@@ -1312,10 +1316,6 @@ def validate_and_build_deps(
         map_python_to_debian,
         project_to_source_package,
         resolve_dependency_with_spec,
-    )
-    from packastack.reports.dep_sync import (
-        DependencySatisfactionSummary,
-        save_satisfaction_report,
     )
     from packastack.upstream.tarball_cache import extract_tarball
 
@@ -1502,8 +1502,8 @@ def validate_and_build_deps(
             f"Summary (policy={policy}): {satisfied_count}/{total} satisfied, {outdated_count} need newer version, {missing_count} missing",
         )
 
-        if ctx.dep_report and ctx.run and getattr(ctx.run, "run_path", None):
-            report_dir = Path(ctx.run.run_path) / "reports"
+        if ctx.dep_report and ctx.run and getattr(ctx.run, "logs_path", None):
+            report_dir = Path(ctx.run.logs_path)
             summary = DependencySatisfactionSummary(
                 package=ctx.pkg_name,
                 policy=policy,
@@ -1621,7 +1621,7 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
         "summary": summary,
     }
 
-    reports_dir = Path(ctx.run.run_path) / "reports"
+    reports_dir = Path(ctx.run.logs_path)
     saved = write_dependency_satisfaction_reports(report, reports_dir)
     ctx.dependency_reports = saved
 
@@ -2803,7 +2803,7 @@ def _ai_diagnose_and_retry_build(
                         f"Build passed with AI patch: {diagnosis.patch_filename}",
                     )
                 # Clean up memory on success
-                delete_memory(ctx.run.run_path)
+                delete_memory(ctx.run.logs_path)
                 return retry_phase, retry_data
 
             # Build failed after AI fix -- save memory for next run
@@ -2822,7 +2822,7 @@ def _ai_diagnose_and_retry_build(
                 diagnosis=diagnosis.explanation,
                 outcome="build_failed",
             )
-            save_memory(memory, ctx.run.run_path)
+            save_memory(memory, ctx.run.logs_path)
         else:
             activity("ai", "Failed to apply AI-proposed fix")
             # Save memory about invalid fix
@@ -2837,7 +2837,7 @@ def _ai_diagnose_and_retry_build(
                 diagnosis=diagnosis.explanation,
                 outcome="patch_invalid",
             )
-            save_memory(memory, ctx.run.run_path)
+            save_memory(memory, ctx.run.logs_path)
     else:
         activity("ai", "Build Failure Diagnosis:")
         activity("ai", diagnosis.explanation)
@@ -2985,7 +2985,7 @@ def build_single_package(
 
         # Write provenance file
         try:
-            provenance_path = write_provenance(ctx.provenance, run.run_path)
+            provenance_path = write_provenance(ctx.provenance, run.logs_path)
             activity("provenance", f"Written to: {provenance_path}")
             run.log_event({
                 "event": "provenance.written",

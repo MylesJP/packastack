@@ -1,6 +1,8 @@
 .coverage
 .git/
 logs/
+!src/packastack/logs/
+!tests/logs/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/

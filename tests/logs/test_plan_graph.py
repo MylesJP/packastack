@@ -24,8 +24,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from packastack.planning.graph import DependencyGraph
-from packastack.reports.plan_graph import (
+from packastack.logs.plan_graph import (
     GraphEdge,
     GraphNode,
     PlanGraph,
@@ -37,6 +36,7 @@ from packastack.reports.plan_graph import (
     render_waves,
     write_plan_graph_reports,
 )
+from packastack.planning.graph import DependencyGraph
 
 
 class TestGraphNode:

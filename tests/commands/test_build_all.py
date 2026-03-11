@@ -50,9 +50,12 @@ def _make_mock_run(tmp_path: Path, run_id: str = "run-1") -> SimpleNamespace:
     """Create a mock run object with relocate_to_build_all_dir support."""
     run_path = tmp_path / ".build-all" / run_id
     run_path.mkdir(parents=True, exist_ok=True)
+    logs_path = run_path / "logs"
+    logs_path.mkdir(parents=True, exist_ok=True)
     return SimpleNamespace(
         run_id=run_id,
         run_path=run_path,
+        logs_path=logs_path,
         log_event=lambda *_args, **_kwargs: None,
         write_summary=lambda **_kwargs: None,
         relocate_to_build_all_dir=lambda: None,
@@ -1630,7 +1633,7 @@ class TestRunBuildAllExecution:
             return EXIT_ALL_BUILD_FAILED
 
         def fake_generate_reports(state: BuildAllState, run_dir: Path) -> tuple[Path, Path]:
-            reports_dir = run_dir / "reports"
+            reports_dir = run_dir
             reports_dir.mkdir(parents=True, exist_ok=True)
             json_path = reports_dir / "build-all-summary.json"
             md_path = reports_dir / "build-all-summary.md"
@@ -1690,12 +1693,12 @@ class TestRunBuildAllRetired:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Should log retired and possibly retired exclusions."""
-        import packastack.commands.build as build_all_module
+        import packastack.build.all_runner as all_runner_module
+        import packastack.commands.plan as plan_module
 
         cfg = {"defaults": {"ubuntu_pockets": ["release"], "ubuntu_components": ["main"]}}
         paths = {
             "cache_root": tmp_path,
-
             "build_root": tmp_path / "build",
             "local_apt_repo": tmp_path / "apt-repo",
             "ubuntu_archive_cache": tmp_path / "ubuntu-archive",
@@ -1708,24 +1711,26 @@ class TestRunBuildAllRetired:
         run = _make_mock_run(tmp_path)
         run.log_event = lambda event: events.append(event)
 
-        monkeypatch.setattr(build_all_module, "load_config", lambda: cfg)
-        monkeypatch.setattr(build_all_module, "resolve_paths", lambda _cfg: paths)
-        monkeypatch.setattr(build_all_module, "resolve_series", lambda series: series)
-        monkeypatch.setattr(build_all_module, "discover_packages", fake_discover_packages)
+        # Patch on all_runner where these functions are actually imported/used
+        monkeypatch.setattr(all_runner_module, "load_config", lambda: cfg)
+        monkeypatch.setattr(all_runner_module, "resolve_paths", lambda _cfg: paths)
+        monkeypatch.setattr(all_runner_module, "resolve_series", lambda series: series)
+        monkeypatch.setattr(all_runner_module, "discover_packages", fake_discover_packages)
         monkeypatch.setattr(
-            build_all_module,
+            all_runner_module,
             "_filter_retired_packages",
             lambda **_kwargs: (["c"], ["a"], ["b"]),
         )
-        monkeypatch.setattr(build_all_module, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
-        monkeypatch.setattr(build_all_module, "merge_package_indexes", lambda *_args: PackageIndex())
+        monkeypatch.setattr(all_runner_module, "load_package_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner_module, "load_local_repo_index", lambda *_args, **_kwargs: PackageIndex())
+        monkeypatch.setattr(all_runner_module, "merge_package_indexes", lambda *_args: PackageIndex())
+        # _build_dependency_graph is imported locally from plan module
         monkeypatch.setattr(
-            build_all_module,
+            plan_module,
             "_build_dependency_graph",
             lambda **_kwargs: (DependencyGraph(), {}),
         )
-        monkeypatch.setattr(build_all_module, "activity", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(all_runner_module, "activity", lambda *_args, **_kwargs: None)
 
         exit_code = _call_run_build_all(
             run=run,

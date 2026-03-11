@@ -23,9 +23,7 @@ from pathlib import Path
 
 from packastack.debpkg.control import ParsedDependency
 from packastack.debpkg.dep_sync import SyncResult, VersionBump
-from packastack.planning.build_manifest import BuildManifest
-from packastack.planning.type_selection import BuildType, CycleStage
-from packastack.reports.dep_sync import (
+from packastack.logs.dep_sync import (
     DependencySyncReport,
     ManifestReport,
     create_manifest_report,
@@ -37,6 +35,8 @@ from packastack.reports.dep_sync import (
     save_manifest_report,
     save_sync_report,
 )
+from packastack.planning.build_manifest import BuildManifest
+from packastack.planning.type_selection import BuildType, CycleStage
 
 
 class TestDependencySyncReport:

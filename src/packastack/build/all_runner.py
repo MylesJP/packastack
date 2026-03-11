@@ -44,7 +44,6 @@ from packastack.build.all_helpers import (
     get_parallel_batches,
     run_single_build,
 )
-from packastack.build.all_reports import generate_build_all_reports
 from packastack.build.errors import (
     EXIT_ALL_BUILD_FAILED,
     EXIT_DISCOVERY_FAILED,
@@ -57,6 +56,8 @@ from packastack.core.config import load_config
 from packastack.core.context import BuildAllRequest
 from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
+from packastack.logs.all_reports import generate_build_all_reports
+from packastack.logs.plan_graph import PlanGraph, render_waves
 from packastack.planning.build_all_state import (
     BuildAllState,
     FailureType,
@@ -72,7 +73,6 @@ from packastack.planning.package_discovery import (
     filter_by_managed_packages,
 )
 from packastack.planning.type_selection import get_default_parallel_workers
-from packastack.reports.plan_graph import PlanGraph, render_waves
 from packastack.target.arch import get_host_arch
 from packastack.target.series import resolve_series
 from packastack.upstream.releases import (
@@ -467,7 +467,7 @@ def _run_build_all(
 
     # Generate reports
     activity("all", "Generating reports...")
-    json_report, md_report = generate_build_all_reports(state, run_dir)
+    json_report, md_report = generate_build_all_reports(state, run.logs_path)
     activity("all", f"  JSON: {json_report}")
     activity("all", f"  Markdown: {md_report}")
 

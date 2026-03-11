@@ -170,8 +170,8 @@ omit = [
     "src/packastack/upstream/retirement.py",
     "src/packastack/upstream/source.py",
     "src/packastack/upstream/tarball_cache.py",
-    "src/packastack/reports/dep_sync.py",
-    "src/packastack/reports/plan_graph.py",
+    "src/packastack/logs/dep_sync.py",
+    "src/packastack/logs/plan_graph.py",
 ]
 
 [tool.coverage.report]

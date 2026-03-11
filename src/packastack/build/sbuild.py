@@ -322,7 +322,7 @@ def run_sbuild(config: SbuildConfig, timeout: int = 3600) -> SbuildResult:
         end_timestamp = datetime.now(UTC).isoformat()
 
         # Generate artifact report
-        report_dir = log_dir.parent / "reports" if log_dir.name == "logs" else log_dir / "reports"
+        report_dir = log_dir
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / "sbuild-artifacts.json"
 

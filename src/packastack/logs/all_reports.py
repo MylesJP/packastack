@@ -56,7 +56,7 @@ def generate_build_all_reports(
     """
     from packastack.planning.build_all_state import PackageStatus
 
-    reports_dir = run_dir / "reports"
+    reports_dir = run_dir
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     # Compute statistics

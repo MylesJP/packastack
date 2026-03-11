@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from packastack.reports.explain import write_explain_reports, write_plan_dependency_summary
+from packastack.logs.explain import write_explain_reports, write_plan_dependency_summary
 
 
 def test_write_explain_reports(tmp_path: Path) -> None:

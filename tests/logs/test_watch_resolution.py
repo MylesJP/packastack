@@ -10,6 +10,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from packastack.logs.watch_resolution import (
+    build_watch_resolution_report,
+    render_html,
+    render_json,
+    write_watch_resolution_reports,
+)
 from packastack.planning.type_selection import (
     BuildType,
     CycleStage,
@@ -22,12 +28,6 @@ from packastack.planning.type_selection import (
     UpstreamAuthority,
     UpstreamResolution,
     WatchInfo,
-)
-from packastack.reports.watch_resolution import (
-    build_watch_resolution_report,
-    render_html,
-    render_json,
-    write_watch_resolution_reports,
 )
 
 

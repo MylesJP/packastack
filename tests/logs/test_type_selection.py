@@ -25,6 +25,13 @@ from pathlib import Path
 
 import pytest
 
+from packastack.logs.type_selection import (
+    render_compact_summary,
+    render_console_table,
+    render_html,
+    render_json,
+    write_type_selection_reports,
+)
 from packastack.planning.type_selection import (
     BuildType,
     CycleStage,
@@ -37,13 +44,6 @@ from packastack.planning.type_selection import (
     UpstreamAuthority,
     UpstreamResolution,
     WatchInfo,
-)
-from packastack.reports.type_selection import (
-    render_compact_summary,
-    render_console_table,
-    render_html,
-    render_json,
-    write_type_selection_reports,
 )
 
 

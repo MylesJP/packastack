@@ -11,12 +11,14 @@ runner = CliRunner()
 class FakeRun:
     def __init__(self, path):
         self.run_path = path
+        self.logs_path = path / "logs"
         self.run_id = "run-1"
         self.events = []
         self.summary = None
 
     def __enter__(self):
         self.run_path.mkdir(parents=True, exist_ok=True)
+        self.logs_path.mkdir(parents=True, exist_ok=True)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -117,7 +119,7 @@ def test_explain_command_renders_text(monkeypatch, tmp_path):
     result = runner.invoke(app, ["explain", "foo"])
 
     assert result.exit_code == 0
-    reports_dir = tmp_path / "run" / "reports"
+    reports_dir = tmp_path / "run" / "logs"
     assert (reports_dir / "explain.json").exists()
     assert (reports_dir / "explain.html").exists()
     # Verify the saved report uses the LTS series (not codename) for current_lts
@@ -305,7 +307,7 @@ def test_explain_html_filters_universe(monkeypatch, tmp_path):
     ])
 
     assert result.exit_code == 0
-    reports_dir = tmp_path / "run_html" / "reports"
+    reports_dir = tmp_path / "run_html" / "logs"
     html_path = reports_dir / "explain.html"
     assert html_path.exists()
     html_content = html_path.read_text()
