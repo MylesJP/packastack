@@ -68,6 +68,7 @@ def _update_openstack_repos(
     paths: dict[str, Path],
     run: RunContextType,
     offline: bool = False,
+    phase: str = "subset",
 ) -> bool:
     """Update OpenStack metadata repositories with git pull.
 
@@ -78,30 +79,31 @@ def _update_openstack_repos(
         paths: Resolved path configuration.
         run: RunContext for logging.
         offline: If True, skip network operations.
+        phase: Log phase prefix (e.g. "subset", "build").
 
     Returns:
         True if update succeeded or skipped (offline), False on error.
     """
     if offline:
-        activity("subset", "Skipping repo updates (offline mode)")
-        run.log_event({"event": "subset.repos_skipped", "reason": "offline"})
+        activity(phase, "Skipping repo updates (offline mode)")
+        run.log_event({"event": f"{phase}.repos_skipped", "reason": "offline"})
         return True
 
-    activity("subset", "Updating OpenStack metadata repositories...")
+    activity(phase, "Updating OpenStack metadata repositories...")
 
     # Update openstack/releases
     releases_path = paths.get("openstack_releases_repo")
     if releases_path:
         try:
-            _clone_or_update_releases(releases_path, run, phase="subset")
+            _clone_or_update_releases(releases_path, run, phase=phase)
             run.log_event({
-                "event": "subset.releases_updated",
+                "event": f"{phase}.releases_updated",
                 "path": str(releases_path),
             })
         except Exception as e:
-            activity("subset", f"Warning: Could not update openstack-releases: {e}")
+            activity(phase, f"Warning: Could not update openstack-releases: {e}")
             run.log_event({
-                "event": "subset.releases_update_failed",
+                "event": f"{phase}.releases_update_failed",
                 "error": str(e),
             })
             # Continue even if update fails - we may have cached data
@@ -110,20 +112,20 @@ def _update_openstack_repos(
     project_config_path = paths.get("openstack_project_config")
     if project_config_path:
         try:
-            _clone_or_update_project_config(project_config_path, run, phase="subset")
+            _clone_or_update_project_config(project_config_path, run, phase=phase)
             run.log_event({
-                "event": "subset.project_config_updated",
+                "event": f"{phase}.project_config_updated",
                 "path": str(project_config_path),
             })
         except Exception as e:
-            activity("subset", f"Warning: Could not update openstack-project-config: {e}")
+            activity(phase, f"Warning: Could not update openstack-project-config: {e}")
             run.log_event({
-                "event": "subset.project_config_update_failed",
+                "event": f"{phase}.project_config_update_failed",
                 "error": str(e),
             })
             # Continue even if update fails - we may have cached data
 
-    activity("subset", "Repository updates complete")
+    activity(phase, "Repository updates complete")
     return True
 
 

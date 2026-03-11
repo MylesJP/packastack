@@ -130,6 +130,43 @@ class TestUpdateOpenstackRepos:
 
         assert result is True
 
+    def test_custom_phase_prefix(self, tmp_path: Path) -> None:
+        """Should use the provided phase prefix in log events."""
+        paths = {
+            "openstack_releases_repo": tmp_path / "releases",
+            "openstack_project_config": tmp_path / "project-config",
+        }
+        events: list[dict] = []
+        run = SimpleNamespace(log_event=lambda e: events.append(e))
+
+        with patch(
+            "packastack.commands.build_subset._clone_or_update_releases"
+        ) as mock_releases, patch(
+            "packastack.commands.build_subset._clone_or_update_project_config"
+        ) as mock_project_config:
+            result = _update_openstack_repos(paths, run, offline=False, phase="build")
+
+        assert result is True
+        mock_releases.assert_called_once_with(
+            paths["openstack_releases_repo"], run, phase="build"
+        )
+        mock_project_config.assert_called_once_with(
+            paths["openstack_project_config"], run, phase="build"
+        )
+        assert any(e.get("event") == "build.releases_updated" for e in events)
+        assert any(e.get("event") == "build.project_config_updated" for e in events)
+
+    def test_offline_uses_custom_phase(self, tmp_path: Path) -> None:
+        """Should use custom phase prefix even in offline mode."""
+        paths: dict[str, Path] = {}
+        events: list[dict] = []
+        run = SimpleNamespace(log_event=lambda e: events.append(e))
+
+        result = _update_openstack_repos(paths, run, offline=True, phase="all")
+
+        assert result is True
+        assert any(e.get("event") == "all.repos_skipped" for e in events)
+
 
 class TestFilterPackagesBySubset:
     """Tests for _filter_packages_by_subset function."""

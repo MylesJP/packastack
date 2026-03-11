@@ -1840,6 +1840,9 @@ class TestBuildAllCli:
 
         monkeypatch.setattr(build_module, "RunContext", lambda *_args, **_kwargs: DummyRun())
         monkeypatch.setattr(build_module, "_run_build_all", lambda run, request: EXIT_SUCCESS)
+        monkeypatch.setattr(build_module, "load_config", lambda: {})
+        monkeypatch.setattr(build_module, "resolve_paths", lambda cfg: {})
+        monkeypatch.setattr(build_module, "_update_openstack_repos", lambda *_a, **_kw: True)
 
         exit_code = run_build_all(
             target="devel",
@@ -1861,3 +1864,51 @@ class TestBuildAllCli:
         )
 
         assert exit_code == EXIT_SUCCESS
+
+    def test_run_build_all_updates_repos(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Should call _update_openstack_repos with phase='all' before building."""
+        import packastack.commands.build as build_module
+
+        class DummyRun:
+            run_id = "run-1"
+
+            def __enter__(self) -> DummyRun:
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb) -> None:
+                return None
+
+        captured: dict[str, object] = {}
+
+        def fake_update(*args: object, **kwargs: object) -> bool:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return True
+
+        monkeypatch.setattr(build_module, "RunContext", lambda *_args, **_kwargs: DummyRun())
+        monkeypatch.setattr(build_module, "_run_build_all", lambda run, request: EXIT_SUCCESS)
+        monkeypatch.setattr(build_module, "load_config", lambda: {})
+        monkeypatch.setattr(build_module, "resolve_paths", lambda cfg: {"some": "paths"})
+        monkeypatch.setattr(build_module, "_update_openstack_repos", fake_update)
+
+        run_build_all(
+            target="devel",
+            ubuntu_series="devel",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            keep_going=True,
+            max_failures=0,
+            resume=False,
+            resume_run_id="",
+            retry_failed=False,
+            skip_failed=True,
+            parallel=0,
+            packages_file="",
+            force=False,
+            offline=False,
+            dry_run=False,
+        )
+
+        assert captured["kwargs"]["phase"] == "all"
+        assert captured["kwargs"]["offline"] is False

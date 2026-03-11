@@ -68,6 +68,7 @@ from packastack.build.type_resolution import (
     resolve_build_type_auto,
     resolve_build_type_from_cli,
 )
+from packastack.commands.build_subset import _update_openstack_repos
 from packastack.commands.init import _clone_or_update_project_config
 from packastack.core.config import load_config
 from packastack.core.context import BuildAllRequest, BuildRequest
@@ -356,6 +357,11 @@ def run_build_all(
         exit_code = EXIT_SUCCESS
 
         try:
+            # Update OpenStack metadata repositories before build
+            cfg = load_config()
+            paths = resolve_paths(cfg)
+            _update_openstack_repos(paths, run, offline=offline, phase="all")
+
             request = BuildAllRequest(
                 target=target,
                 ubuntu_series=ubuntu_series,
@@ -815,6 +821,11 @@ def _run_build(
     tarball_cache_base = paths.get("upstream_tarballs")
     if tarball_cache_base is None:
         tarball_cache_base = paths["cache_root"] / "upstream-tarballs"
+
+    # =========================================================================
+    # PHASE: Update OpenStack metadata repositories
+    # =========================================================================
+    _update_openstack_repos(paths, run, offline=request.offline, phase="build")
 
     # =========================================================================
     # PHASE: Resolve build type (before planning to avoid policy blocks)
