@@ -126,7 +126,7 @@ class TestDeliverableNameHandling:
             mock_registry.return_value = (MagicMock(success=True), mock_registry_info)
 
             # Make auto-resolve return quickly to stop execution
-            mock_auto_resolve.return_value = (BuildType.SNAPSHOT, "", "NOT_IN_RELEASES")
+            mock_auto_resolve.return_value = (BuildType.SNAPSHOT, "NOT_IN_RELEASES")
 
             # Stop after auto-resolve by making next phase fail
             with patch("packastack.upstream.releases.get_previous_series") as mock_prev:
@@ -174,7 +174,7 @@ class TestDeliverableNameHandling:
             mock_registry_info.registry.override_applied = False
             mock_registry.return_value = (MagicMock(success=True), mock_registry_info)
 
-            mock_auto_resolve.return_value = (BuildType.SNAPSHOT, "", "NOT_IN_RELEASES")
+            mock_auto_resolve.return_value = (BuildType.SNAPSHOT, "NOT_IN_RELEASES")
 
             with patch("packastack.upstream.releases.get_previous_series") as mock_prev:
                 mock_prev.return_value = None
@@ -196,6 +196,7 @@ class TestDeliverableNameHandling:
         # Create upstream_config with None deliverable
         mock_upstream_config = MagicMock()
         mock_upstream_config.release_source.deliverable = None
+        mock_upstream_config.release_source.type = ReleaseSourceType.OPENSTACK_RELEASES
         mock_upstream_config.upstream.url = "https://opendev.org/openstack/python-barbicanclient.git"
 
         with patch("packastack.build.phases.check_retirement_status") as mock_retirement, \
@@ -221,7 +222,7 @@ class TestDeliverableNameHandling:
             mock_registry.return_value = (MagicMock(success=True), mock_registry_info)
 
             # Return SNAPSHOT so policy check is executed
-            mock_auto.return_value = (BuildType.SNAPSHOT, "", "NOT_IN_RELEASES")
+            mock_auto.return_value = (BuildType.SNAPSHOT, "NOT_IN_RELEASES")
             mock_prev.return_value = "flamingo"
 
             # Policy check blocks to stop execution
@@ -279,7 +280,7 @@ class TestDeliverableNameHandling:
             with patch("packastack.build.type_resolution.resolve_build_type_auto") as mock_auto, \
                  patch("packastack.upstream.releases.load_project_releases") as mock_load_releases:
                 # Return SNAPSHOT so policy check is executed
-                mock_auto.return_value = (BuildType.SNAPSHOT, "", "NOT_IN_RELEASES")
+                mock_auto.return_value = (BuildType.SNAPSHOT, "NOT_IN_RELEASES")
 
                 # Mock load_project_releases to return None for stripped deliverable "barbicanclient"
                 # but return releases for full package name "python-barbicanclient"
@@ -356,7 +357,7 @@ class TestDeliverableNameHandling:
             with patch("packastack.build.type_resolution.resolve_build_type_auto") as mock_auto, \
                  patch("packastack.upstream.releases.load_project_releases") as mock_load_releases:
                 # Return SNAPSHOT so policy check is executed
-                mock_auto.return_value = (BuildType.SNAPSHOT, "", "NOT_IN_RELEASES")
+                mock_auto.return_value = (BuildType.SNAPSHOT, "NOT_IN_RELEASES")
 
                 # Mock load_project_releases to return releases for "cinder"
                 def load_side_effect(repo, target, project_name):

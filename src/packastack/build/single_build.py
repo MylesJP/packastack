@@ -2671,53 +2671,110 @@ class SingleBuildOutcome:
 def _ai_diagnose_patch_failure(
     ctx: SingleBuildContext,
     phase_result: PhaseResult,
-) -> None:
-    """Run AI diagnosis on a patch application failure (informational only).
+) -> bool:
+    """Run AI diagnosis on a patch failure, drop confirmed patches if safe.
+
+    Extracts failing patch names from the error output, asks AI whether
+    each can be safely dropped, and removes confirmed patches so the
+    caller can retry ``import_and_patch``.
 
     Args:
         ctx: Build context.
         phase_result: Failed PhaseResult from import_and_patch.
+
+    Returns:
+        True if one or more patches were dropped (caller should retry).
     """
     from packastack.ai.patch_diagnosis import diagnose_patch_failure
+    from packastack.debpkg.gbp import (
+        _extract_patch_name_from_line,
+        drop_patch,
+    )
 
     activity("ai", "Diagnosing patch failure...")
 
-    # Extract patch name from error message (PhaseResult has no .data attr)
-    patch_name = "unknown"
     pq_output = phase_result.error or ""
+    version = ctx.upstream.version if ctx.upstream else ""
 
-    # Try to read the patch content
-    patch_content = ""
-    patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
-    if patch_path and patch_path.exists():
-        try:
-            patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            pass
+    # Extract failing patch names from the gbp error output
+    failing_patches: list[str] = []
+    for line in pq_output.splitlines():
+        name = _extract_patch_name_from_line(line)
+        if name and name not in failing_patches:
+            failing_patches.append(name)
 
-    version = ""
-    if ctx.upstream:
-        version = ctx.upstream.version
+    # If we couldn't parse any names, try all patches from the series file
+    if not failing_patches:
+        series_file = ctx.pkg_repo / "debian" / "patches" / "series"
+        if series_file.exists():
+            with contextlib.suppress(OSError):
+                failing_patches = [
+                    line.strip()
+                    for line in series_file.read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                ]
 
-    diagnosis = diagnose_patch_failure(
-        patch_name=patch_name,
-        patch_content=patch_content,
-        pq_output=pq_output,
-        pkg_name=ctx.pkg_name,
-        version=version,
-        ubuntu_series=ctx.resolved_ubuntu,
-        cfg=ctx.cfg,
-    )
+    if not failing_patches:
+        activity("ai", "Could not identify failing patches from error output")
+        return False
 
-    if diagnosis.diagnosed:
+    dropped_any = False
+    for patch_name in failing_patches:
+        # Read patch content for AI context
+        patch_content = ""
+        patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
+        if patch_path.exists():
+            with contextlib.suppress(OSError):
+                patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
+
+        diagnosis = diagnose_patch_failure(
+            patch_name=patch_name,
+            patch_content=patch_content,
+            pq_output=pq_output,
+            pkg_name=ctx.pkg_name,
+            version=version,
+            ubuntu_series=ctx.resolved_ubuntu,
+            cfg=ctx.cfg,
+        )
+
+        if not diagnosis.diagnosed:
+            if diagnosis.error:
+                activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
+            continue
+
         activity("ai", f"Diagnosis: {diagnosis.explanation}")
-        if diagnosis.can_drop:
-            activity(
-                "ai",
-                f"Patch '{diagnosis.patch_name}' appears upstreamed and safe to drop",
-            )
-    elif diagnosis.error:
-        activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
+
+        if not diagnosis.can_drop:
+            activity("ai", f"Patch '{patch_name}' should be kept — cannot auto-fix")
+            continue
+
+        activity("ai", f"Patch '{patch_name}' appears upstreamed and safe to drop")
+
+        # Drop the patch
+        drop_result = drop_patch(ctx.pkg_repo, patch_name)
+        if not drop_result.success:
+            activity("ai", f"Failed to drop patch: {drop_result.error}")
+            continue
+
+        # Commit the removal
+        commit_result = git_commit(
+            ctx.pkg_repo,
+            f"d/patches: drop upstreamed {patch_name}",
+            files=["debian/patches"],
+        )
+        if commit_result.returncode != 0:
+            activity("ai", f"Failed to commit patch drop: {commit_result.stderr}")
+            continue
+
+        activity("ai", f"Dropped patch: {patch_name}")
+        ctx.run.log_event({
+            "event": "ai.patch_dropped",
+            "patch_name": patch_name,
+            "explanation": diagnosis.explanation,
+        })
+        dropped_any = True
+
+    return dropped_any
 
 
 def _ai_diagnose_and_retry_build(
@@ -2923,15 +2980,27 @@ def build_single_package(
         new_version=prepare_data.new_version,
     )
     if not import_result_phase.success:
-        # AI patch diagnosis (informational)
+        # AI patch diagnosis — drop confirmed patches and retry
+        patches_dropped = False
         if ctx.ai_enabled and ctx.cfg:
             from packastack.ai.client import is_ai_available
 
             if is_ai_available(ctx.cfg):
-                _ai_diagnose_patch_failure(ctx, import_result_phase)
-        outcome.exit_code = import_result_phase.exit_code
-        outcome.error = import_result_phase.error
-        return outcome
+                patches_dropped = _ai_diagnose_patch_failure(ctx, import_result_phase)
+
+        if patches_dropped:
+            activity("ai", "Retrying patch import after dropping patches...")
+            import_result_phase = import_and_patch(
+                ctx,
+                upstream_tarball=prepare_data.upstream_tarball,
+                snapshot_result=prepare_data.snapshot_result,
+                new_version=prepare_data.new_version,
+            )
+
+        if not import_result_phase.success:
+            outcome.exit_code = import_result_phase.exit_code
+            outcome.error = import_result_phase.error
+            return outcome
 
     # -------------------------------------------------------------------------
     # Phase 5: Build packages

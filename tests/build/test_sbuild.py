@@ -177,7 +177,19 @@ class TestBuildSbuildCommand:
         assert "arm64" in cmd
 
     def test_with_chroot_name(self, tmp_path: Path) -> None:
-        """Test command with chroot name."""
+        """Test command with chroot name when no distribution is set."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="",
+            chroot_name="noble-amd64-sbuild",
+        )
+        cmd = build_sbuild_command(config)
+        assert "-c" in cmd
+        assert "noble-amd64-sbuild" in cmd
+
+    def test_chroot_name_skipped_when_distribution_set(self, tmp_path: Path) -> None:
+        """Test that -c is omitted when distribution is also set."""
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path,
@@ -185,8 +197,8 @@ class TestBuildSbuildCommand:
             chroot_name="noble-amd64-sbuild",
         )
         cmd = build_sbuild_command(config)
-        assert "-c" in cmd
-        assert "noble-amd64-sbuild" in cmd
+        assert "-c" not in cmd
+        assert "-d" in cmd
 
     def test_with_local_repo(self, tmp_path: Path) -> None:
         """Test command with local repo setup."""
@@ -232,20 +244,10 @@ class TestBuildSbuildCommand:
             distribution="noble",
         )
         cmd = build_sbuild_command(config)
-        # Check that --fail-on error is passed to lintian
-        # This ensures warnings don't fail the build
+        # --fail-on=error is passed as a single combined arg to --lintian-opts
         assert "--lintian-opts" in cmd
-        lintian_opts_indices = [i for i, x in enumerate(cmd) if x == "--lintian-opts"]
-        # There should be at least 2 --lintian-opts: one for --fail-on, one for error
-        assert len(lintian_opts_indices) >= 2
-        # Verify --fail-on is followed by error
-        for i, idx in enumerate(lintian_opts_indices[:-1]):
-            if cmd[idx + 1] == "--fail-on":
-                assert cmd[lintian_opts_indices[i + 1] + 1] == "error"
-                break
-        else:
-            # If we didn't find it in the loop, fail
-            assert "--fail-on" in cmd, "Expected --fail-on in lintian options"
+        idx = cmd.index("--lintian-opts")
+        assert cmd[idx + 1] == "--fail-on=error"
 
 
 class TestGetDefaultChrootName:

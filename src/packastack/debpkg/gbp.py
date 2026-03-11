@@ -427,6 +427,35 @@ def import_orig(
     )
 
 
+def _extract_patch_name_from_line(line: str) -> str:
+    """Extract a patch filename from a gbp error/warning line.
+
+    Handles patterns like:
+    - ``Patch fix-foo.patch failed to apply``
+    - ``Failed to apply '.../debian/patches/fix-foo.patch'``
+
+    Args:
+        line: A single line from gbp pq output.
+
+    Returns:
+        Extracted patch filename, or empty string if none found.
+    """
+    import re
+
+    # "Patch <name> failed to apply"
+    m = re.search(r"Patch\s+(\S+\.patch)\s+failed", line)
+    if m:
+        return m.group(1)
+
+    # "Failed to apply '<path>/<name>.patch'"
+    m = re.search(r"Failed to apply ['\"]?([^'\"]+\.patch)['\"]?", line)
+    if m:
+        # Return just the filename, not the full path
+        return Path(m.group(1)).name
+
+    return ""
+
+
 def _analyze_pq_failure(output: str) -> list[PatchHealthReport]:
     """Analyze gbp pq output to classify patch failures.
 
@@ -446,6 +475,12 @@ def _analyze_pq_failure(output: str) -> list[PatchHealthReport]:
             parts = line.split(":", 1)
             if len(parts) > 1:
                 current_patch = parts[1].strip()
+
+        # Detect patch name from failure lines (gbp often skips "Applying:")
+        if not current_patch:
+            extracted = _extract_patch_name_from_line(line)
+            if extracted:
+                current_patch = extracted
 
         # Detect failure types
         if current_patch:
@@ -499,6 +534,19 @@ def _analyze_pq_failure(output: str) -> list[PatchHealthReport]:
                         output=line,
                     )
                 )
+            elif "patch does not apply" in line.lower() or "failed to apply" in line.lower():
+                # Generic application failure — only add if not already reported
+                already = any(r.patch_name == current_patch for r in reports)
+                if not already:
+                    reports.append(
+                        PatchHealthReport(
+                            patch_name=current_patch,
+                            success=False,
+                            failure_reason=PatchFailureReason.CONFLICT,
+                            suggested_action="Patch conflicts with upstream; may need drop or refresh",
+                            output=line,
+                        )
+                    )
 
     return reports
 

@@ -1,12 +1,12 @@
 import json
 from pathlib import Path
 
-from packastack.planning.validated_plan import resolve_dependency_with_spec
-from packastack.reports.dep_sync import (
+from packastack.logs.dep_sync import (
     DependencySatisfactionSummary,
     render_satisfaction_text,
     save_satisfaction_report,
 )
+from packastack.planning.validated_plan import resolve_dependency_with_spec
 
 
 class _StubIndex:

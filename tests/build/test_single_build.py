@@ -165,6 +165,13 @@ class TestSingleBuildContext:
             skip_repo_regen=False,
             no_spinner=False,
             build_deps=True,
+            min_version_policy="",
+            dep_report=False,
+            fail_on_cloud_archive_required=False,
+            fail_on_mir_required=False,
+            update_control_min_versions=False,
+            normalize_to_prev_lts_floor=False,
+            dry_run_control_edit=False,
             paths={"cache_root": Path("/tmp/cache")},
         )
 
@@ -246,10 +253,18 @@ class TestFetchPackagingRepo:
             skip_repo_regen=False,
             no_spinner=False,
             build_deps=True,
+            min_version_policy="",
+            dep_report=False,
+            fail_on_cloud_archive_required=False,
+            fail_on_mir_required=False,
+            update_control_min_versions=False,
+            normalize_to_prev_lts_floor=False,
+            dry_run_control_edit=False,
             paths={
                 "cache_root": Path("/tmp/cache"),
                 "build_root": Path("/tmp/build"),
             },
+            cfg={},
         )
 
         phase_result, _fetch_result = fetch_packaging_repo(ctx)
@@ -258,3 +273,432 @@ class TestFetchPackagingRepo:
         assert phase_result.exit_code == 3  # EXIT_FETCH_FAILED
         assert "Network error" in phase_result.error
         run.write_summary.assert_called_once()
+
+
+# =============================================================================
+# AI Patch Diagnosis Tests
+# =============================================================================
+
+
+def _make_ctx_for_patch_test(
+    tmp_path: Path,
+    *,
+    ai_enabled: bool = True,
+    has_upstream: bool = True,
+) -> SingleBuildContext:
+    """Create a minimal SingleBuildContext for _ai_diagnose_patch_failure tests."""
+    from packastack.planning.type_selection import BuildType
+
+    run = MagicMock()
+    run.log_event = MagicMock()
+
+    pkg_repo = tmp_path / "pkg"
+    pkg_repo.mkdir()
+
+    ctx = SingleBuildContext(
+        pkg_name="osc-lib",
+        package="osc-lib",
+        run=run,
+        target="devel",
+        openstack_target="epoxy",
+        ubuntu_series="plucky",
+        resolved_ubuntu="plucky",
+        cloud_archive="",
+        build_type=BuildType.RELEASE,
+        build_type_str="release",
+        binary=True,
+        builder="sbuild",
+        force=False,
+        offline=False,
+        skip_repo_regen=False,
+        no_spinner=False,
+        build_deps=True,
+        min_version_policy="",
+        dep_report=False,
+        fail_on_cloud_archive_required=False,
+        fail_on_mir_required=False,
+        update_control_min_versions=False,
+        normalize_to_prev_lts_floor=False,
+        dry_run_control_edit=False,
+        paths={
+            "cache_root": tmp_path / "cache",
+            "build_root": tmp_path / "build",
+        },
+        ai_enabled=ai_enabled,
+        cfg={"ai": {"api_key": "test-key", "model": "test", "max_tokens": 100, "timeout": 10}},
+        pkg_repo=pkg_repo,
+    )
+
+    if has_upstream:
+        ctx.upstream = MagicMock()
+        ctx.upstream.version = "3.2.0"
+
+    return ctx
+
+
+def _setup_patches(pkg_repo: Path, patches: dict[str, str]) -> None:
+    """Create patch files and a series file in debian/patches."""
+    patches_dir = pkg_repo / "debian" / "patches"
+    patches_dir.mkdir(parents=True)
+    series_lines = []
+    for name, content in patches.items():
+        (patches_dir / name).write_text(content)
+        series_lines.append(name)
+    (patches_dir / "series").write_text("\n".join(series_lines) + "\n")
+
+
+class TestAiDiagnosePatchFailure:
+    """Tests for _ai_diagnose_patch_failure function."""
+
+    def test_extracts_patch_name_from_error_and_drops(self, tmp_path: Path) -> None:
+        """Test extracts patch name from gbp error output and drops it."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix-brittle-tests.patch": "diff content"})
+
+        phase = PhaseResult.fail(
+            4, "Patch fix-brittle-tests.patch failed to apply"
+        )
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = True
+        diagnosis_result.explanation = "Patch was merged upstream"
+
+        drop_result = MagicMock()
+        drop_result.success = True
+
+        commit_result = MagicMock()
+        commit_result.returncode = 0
+        commit_result.stderr = ""
+
+        with (
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+            patch(
+                "packastack.debpkg.gbp.drop_patch",
+                return_value=drop_result,
+            ) as mock_drop,
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=commit_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is True
+        mock_diagnose.assert_called_once()
+        assert mock_diagnose.call_args.kwargs["patch_name"] == "fix-brittle-tests.patch"
+        mock_drop.assert_called_once_with(ctx.pkg_repo, "fix-brittle-tests.patch")
+        ctx.run.log_event.assert_called()
+
+    def test_falls_back_to_series_file(self, tmp_path: Path) -> None:
+        """Test falls back to series file when no patch names in error output."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        # Error with no parseable patch name
+        phase = PhaseResult.fail(4, "patch queue import failed")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = True
+        diagnosis_result.explanation = "Upstreamed"
+
+        drop_result = MagicMock()
+        drop_result.success = True
+
+        commit_result = MagicMock()
+        commit_result.returncode = 0
+
+        with (
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+            patch(
+                "packastack.debpkg.gbp.drop_patch",
+                return_value=drop_result,
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=commit_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is True
+        # Should have tried the patch from series file
+        assert mock_diagnose.call_args.kwargs["patch_name"] == "fix.patch"
+
+    def test_ai_says_keep_returns_false(self, tmp_path: Path) -> None:
+        """Test returns False when AI says patch should be kept."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"ubuntu-fix.patch": "diff"})
+
+        phase = PhaseResult.fail(
+            4, "Patch ubuntu-fix.patch failed to apply"
+        )
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = False
+        diagnosis_result.explanation = "Ubuntu-specific fix still needed"
+
+        with patch(
+            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            return_value=diagnosis_result,
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is False
+
+    def test_no_failing_patches_returns_false(self, tmp_path: Path) -> None:
+        """Test returns False when no failing patches can be identified."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        # No patches dir at all
+        phase = PhaseResult.fail(4, "some unrelated error")
+
+        result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is False
+
+    def test_drop_failure_continues_to_next_patch(self, tmp_path: Path) -> None:
+        """Test continues to next patch when drop fails."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {
+            "fail-drop.patch": "diff1",
+            "ok-drop.patch": "diff2",
+        })
+
+        phase = PhaseResult.fail(4, "patch queue import failed")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = True
+        diagnosis_result.explanation = "Upstreamed"
+
+        fail_drop = MagicMock(success=False, error="permission denied")
+        ok_drop = MagicMock(success=True)
+
+        commit_result = MagicMock(returncode=0, stderr="")
+
+        with (
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ),
+            patch(
+                "packastack.debpkg.gbp.drop_patch",
+                side_effect=[fail_drop, ok_drop],
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=commit_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        # Second patch succeeded, so overall True
+        assert result is True
+
+    def test_commit_failure_continues_to_next_patch(self, tmp_path: Path) -> None:
+        """Test continues when git commit fails after dropping a patch."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {
+            "patch-a.patch": "diff1",
+            "patch-b.patch": "diff2",
+        })
+
+        phase = PhaseResult.fail(4, "patch queue import failed")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = True
+        diagnosis_result.explanation = "Upstreamed"
+
+        drop_result = MagicMock(success=True)
+        fail_commit = MagicMock(returncode=1, stderr="commit error")
+        ok_commit = MagicMock(returncode=0, stderr="")
+
+        with (
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ),
+            patch(
+                "packastack.debpkg.gbp.drop_patch",
+                return_value=drop_result,
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                side_effect=[fail_commit, ok_commit],
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        # Second patch commit succeeded
+        assert result is True
+
+    def test_diagnosis_not_diagnosed_skips_patch(self, tmp_path: Path) -> None:
+        """Test skips patch when AI returns diagnosed=False."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        phase = PhaseResult.fail(
+            4, "Patch fix.patch failed to apply"
+        )
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = False
+        diagnosis_result.error = "timeout"
+
+        with patch(
+            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            return_value=diagnosis_result,
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is False
+
+    def test_empty_error_output_with_no_series(self, tmp_path: Path) -> None:
+        """Test returns False when error is empty and no series file exists."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        # Create debian/patches dir but no series file
+        (ctx.pkg_repo / "debian" / "patches").mkdir(parents=True)
+
+        phase = PhaseResult.fail(4, "")
+
+        result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is False
+
+    def test_reads_patch_content_for_ai(self, tmp_path: Path) -> None:
+        """Test passes patch file content to AI for diagnosis."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        patch_content = "--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1 +1 @@\n-old\n+new\n"
+        _setup_patches(ctx.pkg_repo, {"fix-setup.patch": patch_content})
+
+        phase = PhaseResult.fail(
+            4, "Patch fix-setup.patch failed to apply"
+        )
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = False
+        diagnosis_result.explanation = "Still needed"
+
+        with patch(
+            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            return_value=diagnosis_result,
+        ) as mock_diagnose:
+            _ai_diagnose_patch_failure(ctx, phase)
+
+        # Verify patch content was passed to AI
+        assert mock_diagnose.call_args.kwargs["patch_content"] == patch_content
+
+    def test_version_from_upstream_context(self, tmp_path: Path) -> None:
+        """Test uses upstream version when available."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path, has_upstream=True)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = False
+        diagnosis_result.explanation = "Needed"
+
+        with patch(
+            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            return_value=diagnosis_result,
+        ) as mock_diagnose:
+            _ai_diagnose_patch_failure(ctx, phase)
+
+        assert mock_diagnose.call_args.kwargs["version"] == "3.2.0"
+
+    def test_version_empty_without_upstream(self, tmp_path: Path) -> None:
+        """Test uses empty version when no upstream context."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path, has_upstream=False)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = False
+        diagnosis_result.explanation = "Needed"
+
+        with patch(
+            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            return_value=diagnosis_result,
+        ) as mock_diagnose:
+            _ai_diagnose_patch_failure(ctx, phase)
+
+        assert mock_diagnose.call_args.kwargs["version"] == ""
+
+    def test_series_file_skips_comments_and_blanks(self, tmp_path: Path) -> None:
+        """Test series file parsing skips comments and blank lines."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        patches_dir = ctx.pkg_repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "real.patch").write_text("diff")
+        (patches_dir / "series").write_text(
+            "# comment\n\nreal.patch\n  \n# another comment\n"
+        )
+
+        phase = PhaseResult.fail(4, "patch queue import failed")
+
+        diagnosis_result = MagicMock()
+        diagnosis_result.diagnosed = True
+        diagnosis_result.can_drop = True
+        diagnosis_result.explanation = "Upstreamed"
+
+        drop_result = MagicMock(success=True)
+        commit_result = MagicMock(returncode=0, stderr="")
+
+        with (
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+            patch(
+                "packastack.debpkg.gbp.drop_patch",
+                return_value=drop_result,
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=commit_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is True
+        # Only the real patch should have been diagnosed
+        assert mock_diagnose.call_count == 1
+        assert mock_diagnose.call_args.kwargs["patch_name"] == "real.patch"

@@ -509,6 +509,55 @@ class TestAnalyzePQFailure:
         reports = gbp._analyze_pq_failure("")
         assert reports == []
 
+    def test_gbp_failed_to_apply_pattern(self) -> None:
+        """Test parsing 'Patch X failed to apply' from gbp output."""
+        output = (
+            "gbp:warning: Patch fix-brittle-tag-help-tests.patch failed to apply, "
+            "retrying with whitespace fixup\n"
+            "gbp:error: Failed to apply '/tmp/debian/patches/fix-brittle-tag-help-tests.patch': "
+            "Error running git apply: error: patch failed: foo.py:217\n"
+            "error: foo.py: patch does not apply"
+        )
+        reports = gbp._analyze_pq_failure(output)
+
+        assert len(reports) > 0
+        assert reports[0].patch_name == "fix-brittle-tag-help-tests.patch"
+        assert reports[0].success is False
+
+    def test_gbp_failed_to_apply_no_applying_prefix(self) -> None:
+        """Should detect patch name even without 'Applying:' line."""
+        output = (
+            "gbp:error: Failed to apply '/home/user/debian/patches/my-fix.patch': "
+            "error: patch does not apply"
+        )
+        reports = gbp._analyze_pq_failure(output)
+
+        assert len(reports) > 0
+        assert reports[0].patch_name == "my-fix.patch"
+
+
+class TestExtractPatchNameFromLine:
+    """Tests for _extract_patch_name_from_line function."""
+
+    def test_patch_failed_to_apply(self) -> None:
+        """Test 'Patch X failed to apply' pattern."""
+        line = "gbp:warning: Patch fix-foo.patch failed to apply, retrying"
+        assert gbp._extract_patch_name_from_line(line) == "fix-foo.patch"
+
+    def test_failed_to_apply_with_path(self) -> None:
+        """Test 'Failed to apply /path/to/patch' pattern."""
+        line = "gbp:error: Failed to apply '/tmp/debian/patches/fix-bar.patch': error"
+        assert gbp._extract_patch_name_from_line(line) == "fix-bar.patch"
+
+    def test_no_patch_name(self) -> None:
+        """Test line with no patch name."""
+        assert gbp._extract_patch_name_from_line("some random line") == ""
+
+    def test_failed_to_apply_no_quotes(self) -> None:
+        """Test Failed to apply without quotes around path."""
+        line = "Failed to apply debian/patches/my-fix.patch: error"
+        assert gbp._extract_patch_name_from_line(line) == "my-fix.patch"
+
 
 class TestCheckUpstreamedPatches:
     """Tests for check_upstreamed_patches function."""

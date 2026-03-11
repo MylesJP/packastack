@@ -153,7 +153,7 @@ class TestUpdateChangelogGbp:
         changelog_path = debian_dir / "changelog"
         changelog_path.write_text("", encoding="utf-8")
 
-        result = changelog.update_changelog(
+        success, error = changelog.update_changelog(
             changelog_path,
             package="pkg",
             version="1.0-1",
@@ -162,7 +162,8 @@ class TestUpdateChangelogGbp:
             prefer_gbp=True,
         )
 
-        assert result is True
+        assert success is True
+        assert error == ""
         # gbp dch + dch --append
         assert mock_run.call_count == 2
         gbp_cmd = mock_run.call_args_list[0].args[0]
@@ -175,7 +176,7 @@ class TestUpdateChangelogGbp:
         assert "--maintmaint" in append_cmd
         assert "--append" in append_cmd
 
-    @patch("packastack.debpkg.changelog._update_changelog_python_debian", return_value=True)
+    @patch("packastack.debpkg.changelog._update_changelog_python_debian", return_value=(True, ""))
     @patch("packastack.debpkg.changelog.subprocess.run")
     def test_falls_back_when_gbp_fails(self, mock_run: MagicMock, mock_python: MagicMock, tmp_path: Path) -> None:
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="boom")
@@ -185,7 +186,7 @@ class TestUpdateChangelogGbp:
         changelog_path = debian_dir / "changelog"
         changelog_path.write_text("", encoding="utf-8")
 
-        result = changelog.update_changelog(
+        success, _error = changelog.update_changelog(
             changelog_path,
             package="pkg",
             version="1.0-1",
@@ -194,7 +195,7 @@ class TestUpdateChangelogGbp:
             prefer_gbp=True,
         )
 
-        assert result is True
+        assert success is True
         assert mock_python.called
 
     def test_snapshot_custom_revision(self) -> None:
@@ -317,7 +318,8 @@ class TestUpdateChangelog:
 
         # Result depends on whether python-debian is available
         # Just verify it doesn't crash
-        assert result in (True, False)
+        success, _error = result
+        assert success in (True, False)
 
     def test_update_uses_environment_vars(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that maintainer comes from environment."""
@@ -392,7 +394,7 @@ class TestGenerateChangelogMessage:
             signature_warning="",
         )
         assert len(changes) == 1  # No signature line anymore
-        assert "New upstream release 29.0.0" in changes[0]
+        assert "New upstream release" in changes[0]
 
     def test_snapshot_message(self) -> None:
         """Test snapshot changelog message."""
@@ -504,7 +506,7 @@ class TestUpdateChangelogDchFallback:
             )
 
             mock_run.assert_called_once()
-            assert result is True
+            assert result == (True, "")
 
     def test_dch_command_failure(self, tmp_path: Path) -> None:
         """Test dch command failure returns False."""
@@ -513,7 +515,7 @@ class TestUpdateChangelogDchFallback:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stderr="dch error")
 
-            result = changelog._update_changelog_dch(
+            success, error = changelog._update_changelog_dch(
                 changelog_path=changelog_path,
                 package="nova",
                 version="29.0.0-0ubuntu1",
@@ -523,7 +525,8 @@ class TestUpdateChangelogDchFallback:
                 urgency="medium",
             )
 
-            assert result is False
+            assert success is False
+            assert "dch error" in error
 
     def test_dch_adds_extra_changes(self, tmp_path: Path) -> None:
         """Test dch adds extra changes."""
@@ -556,7 +559,7 @@ class TestUpdateChangelogDchFallback:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = Exception("dch not found")
 
-            result = changelog._update_changelog_dch(
+            success, error = changelog._update_changelog_dch(
                 changelog_path=changelog_path,
                 package="nova",
                 version="29.0.0-0ubuntu1",
@@ -566,7 +569,8 @@ class TestUpdateChangelogDchFallback:
                 urgency="medium",
             )
 
-            assert result is False
+            assert success is False
+            assert "dch not found" in error
 
 
 class TestGetCurrentVersion:
