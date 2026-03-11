@@ -402,6 +402,60 @@ class TestFetchReleaseTarball:
         assert path == tarball
         assert provenance.tarball.method == "official"
 
+    def test_official_tarball_passes_signing_key(self, tmp_path: Path):
+        """Test official tarball passes signing key to verification."""
+        provenance = self._make_provenance()
+        upstream_config = self._make_upstream_config()
+        upstream = MagicMock()
+        upstream.version = "1.0.0"
+        upstream.tarball_url = "https://example.com/test-1.0.0.tar.gz"
+
+        tarball = tmp_path / "test-1.0.0.tar.gz"
+        tarball.touch()
+
+        # Create the signing key in the package repo
+        signing_key = tmp_path / "debian" / "upstream" / "signing-key.asc"
+        signing_key.parent.mkdir(parents=True)
+        signing_key.touch()
+
+        tarball_result = MagicMock()
+        tarball_result.success = True
+        tarball_result.path = tarball
+        tarball_result.signature_verified = True
+        tarball_result.signature_warning = ""
+
+        with patch(
+            "packastack.build.tarball.run_uscan"
+        ) as mock_uscan:
+            mock_uscan.return_value = (False, None, "no watch file")
+            with patch(
+                "packastack.build.tarball.download_and_verify_tarball"
+            ) as mock_dl:
+                mock_dl.return_value = tarball_result
+                with patch("packastack.build.tarball.activity"):
+                    with patch(
+                        "packastack.build.tarball.cache_tarball"
+                    ):
+                        path, sig_verified, _sig_warn = fetch_release_tarball(
+                            upstream=upstream,
+                            upstream_config=upstream_config,
+                            pkg_repo=tmp_path,
+                            workspace=tmp_path,
+                            provenance=provenance,
+                            offline=False,
+                            project_key="test",
+                            package_name="python-test",
+                            build_type=MagicMock(value="release"),
+                            cache_base=tmp_path,
+                            force=False,
+                            run=MagicMock(),
+                        )
+
+        assert path == tarball
+        assert sig_verified is True
+        # Verify signing key was passed to download_and_verify_tarball
+        mock_dl.assert_called_once_with(upstream, tmp_path, keyring_path=signing_key)
+
     def test_pypi_fallback(self, tmp_path: Path):
         """Test PyPI fallback when uscan and official fail."""
         provenance = self._make_provenance()

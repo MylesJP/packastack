@@ -266,7 +266,9 @@ def fetch_release_tarball(
     # 2) Official tarball (if available)
     if upstream and upstream.tarball_url:
         activity("prepare", f"Downloading official tarball: {upstream.tarball_url}")
-        tarball_result = download_and_verify_tarball(upstream, workspace)
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        keyring = signing_key if signing_key.exists() else None
+        tarball_result = download_and_verify_tarball(upstream, workspace, keyring_path=keyring)
         if tarball_result.success:
             activity("prepare", "Tarball selected: official")
             record(

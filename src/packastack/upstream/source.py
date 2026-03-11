@@ -267,7 +267,7 @@ def verify_signature(
     cmd = ["gpg", "--verify"]
 
     if keyring_path and keyring_path.exists():
-        cmd.extend(["--keyring", str(keyring_path)])
+        cmd.extend(["--no-default-keyring", "--keyring", str(keyring_path)])
 
     cmd.extend([str(signature_path), str(tarball_path)])
 

@@ -351,6 +351,40 @@ class TestVerifySignature:
             assert verified is False
             assert "Bad signature" in msg
 
+    def test_with_keyring(self, tmp_path: Path) -> None:
+        """Test verification uses --no-default-keyring with custom keyring."""
+        tarball = tmp_path / "test.tar.gz"
+        signature = tmp_path / "test.tar.gz.asc"
+        keyring = tmp_path / "signing-key.asc"
+        tarball.touch()
+        signature.touch()
+        keyring.touch()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            verified, _msg = upstream.verify_signature(tarball, signature, keyring_path=keyring)
+
+            assert verified is True
+            cmd = mock_run.call_args[0][0]
+            assert "--no-default-keyring" in cmd
+            assert "--keyring" in cmd
+            assert str(keyring) in cmd
+
+    def test_without_keyring_no_extra_flags(self, tmp_path: Path) -> None:
+        """Test verification without keyring does not pass --no-default-keyring."""
+        tarball = tmp_path / "test.tar.gz"
+        signature = tmp_path / "test.tar.gz.asc"
+        tarball.touch()
+        signature.touch()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            upstream.verify_signature(tarball, signature)
+
+            cmd = mock_run.call_args[0][0]
+            assert "--no-default-keyring" not in cmd
+            assert "--keyring" not in cmd
+
 
 class TestDownloadAndVerifyTarball:
     """Tests for download_and_verify_tarball function."""
