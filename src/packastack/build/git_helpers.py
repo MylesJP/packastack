@@ -352,6 +352,10 @@ def git_commit(
                 stdout=add_stdout,
                 stderr=add_stderr or f"Failed to stage files: {files}",
             )
+        # Check whether anything was actually staged; if not, skip the commit.
+        diff_rc, _, _ = run_command(["git", "diff", "--cached", "--quiet"], cwd=repo_path)
+        if diff_rc == 0:
+            return CommandResult(returncode=0, stdout="nothing to commit", stderr="")
 
     # Build full message with extra lines
     full_message = message

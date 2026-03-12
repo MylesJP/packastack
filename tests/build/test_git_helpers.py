@@ -7,6 +7,7 @@
 """Tests for git_helpers module."""
 
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +17,7 @@ from packastack.build.git_helpers import (
     ensure_no_merge_paths,
     extract_upstream_version,
     get_git_author_env,
+    git_commit,
     maybe_disable_gpg_sign,
     maybe_enable_sphinxdoc,
     no_gpg_sign_enabled,
@@ -307,3 +309,83 @@ class TestGitCommitError:
         assert issubclass(GitCommitError, Exception)
         with pytest.raises(GitCommitError):
             raise GitCommitError("Test error")
+
+
+class TestGitCommit:
+    """Tests for git_commit function."""
+
+    def _make_repo(self, tmp_path: Path) -> Path:
+        """Create a minimal fake git repo directory."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        return repo
+
+    def test_not_a_git_repo_returns_success(self, tmp_path):
+        """Non-git directories return success without running git."""
+        repo = tmp_path / "not-a-repo"
+        repo.mkdir()
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            result = git_commit(repo, "test message")
+        mock_run.assert_not_called()
+        assert result.returncode == 0
+
+    def test_nothing_staged_after_add_returns_success(self, tmp_path):
+        """When git add stages nothing, commit is skipped and success returned."""
+        repo = self._make_repo(tmp_path)
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            # git add succeeds (rc=0), git diff --cached --quiet also rc=0 (nothing staged)
+            mock_run.side_effect = [
+                (0, "", ""),   # git add
+                (0, "", ""),   # git diff --cached --quiet
+            ]
+            result = git_commit(repo, "d/patches/*: refresh patches", files=["debian/patches"])
+        assert result.returncode == 0
+        assert result.stdout == "nothing to commit"
+        # git commit should NOT have been called
+        commit_calls = [c for c in mock_run.call_args_list if "commit" in c.args[0]]
+        assert not commit_calls
+
+    def test_staged_changes_commits_successfully(self, tmp_path):
+        """When files are staged, the commit proceeds normally."""
+        repo = self._make_repo(tmp_path)
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "", ""),    # git add
+                (1, "", ""),    # git diff --cached --quiet (rc=1 means changes staged)
+                (0, "1 file changed", ""),  # git commit
+            ]
+            result = git_commit(repo, "d/patches/*: refresh patches", files=["debian/patches"])
+        assert result.returncode == 0
+
+    def test_git_add_failure_returns_error(self, tmp_path):
+        """When git add fails, returns a failed CommandResult immediately."""
+        repo = self._make_repo(tmp_path)
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            mock_run.return_value = (1, "", "pathspec did not match any files")
+            result = git_commit(repo, "msg", files=["debian/patches"])
+        assert result.returncode == 1
+        assert "pathspec did not match any files" in result.stderr
+
+    def test_no_files_skips_add_and_diff_check(self, tmp_path):
+        """When no files specified, git add and diff check are not run."""
+        repo = self._make_repo(tmp_path)
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            mock_run.return_value = (0, "commit output", "")
+            result = git_commit(repo, "test commit")
+        # Only the commit call should have been made
+        assert mock_run.call_count == 1
+        assert result.returncode == 0
+
+    def test_commit_failure_returns_error(self, tmp_path):
+        """When git commit fails, the error is propagated."""
+        repo = self._make_repo(tmp_path)
+        with patch("packastack.debpkg.gbp.run_command") as mock_run:
+            mock_run.side_effect = [
+                (0, "", ""),   # git add
+                (1, "", ""),   # git diff --cached --quiet (changes staged)
+                (1, "", "error: commit failed"),  # git commit
+            ]
+            result = git_commit(repo, "msg", files=["debian/patches"])
+        assert result.returncode == 1
+        assert result.stderr == "error: commit failed"
