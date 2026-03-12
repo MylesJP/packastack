@@ -578,6 +578,64 @@ def remove_pgp_options_from_watch(watch_path: Path) -> bool:
     return False
 
 
+def restore_pgp_options_to_watch(watch_path: Path) -> bool:
+    """Restore PGP signature verification options in debian/watch.
+
+    For release and RC builds that have an upstream signing key, the watch
+    file needs ``pgpsigurlmangle=s/$/.asc/`` so that uscan can locate and
+    verify the detached GPG signature alongside the tarball.
+
+    A prior snapshot build may have stripped this option via
+    :func:`remove_pgp_options_from_watch`; this function adds it back.
+
+    Args:
+        watch_path: Path to the debian/watch file.
+
+    Returns:
+        True if the file was modified.
+    """
+    if not watch_path.exists():
+        return False
+
+    try:
+        content = watch_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    # Already has pgpsigurlmangle — nothing to do.
+    if re.search(r"pgpsigurlmangle", content, re.IGNORECASE):
+        return False
+
+    original = content
+
+    # Insert pgpsigurlmangle at the end of the existing opts= value.
+    # Watch files look like:
+    #   opts=uversionmangle=...,pgpsigurlmangle=s/$/.asc/ \
+    # or with a backslash continuation:
+    #   opts=uversionmangle=... \
+    #
+    # Strategy: greedily match the full opts value, then backtrack to the
+    # line-continuation backslash at end-of-line (preceded by whitespace).
+    # The greedy .* ensures we skip past embedded backslashes in sed
+    # expressions like s/\.0rc/~rc/.
+    content = re.sub(
+        r"(opts\s*=\s*.*)(\s\\)\s*$",
+        r"\1,pgpsigurlmangle=s/$/.asc/\2",
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    if content != original:
+        try:
+            watch_path.write_text(content, encoding="utf-8")
+            return True
+        except OSError:
+            return False
+
+    return False
+
+
 def ensure_pgp_verification_valid(debian_dir: Path) -> tuple[bool, str]:
     """Ensure PGP verification in watch file is valid.
 

@@ -370,16 +370,19 @@ def import_orig(
     Returns:
         ImportOrigResult with success status.
     """
-    # Check if upstream tag already exists (e.g., from previous push)
+    # Check if upstream tag already exists (e.g., from previous push).
+    # gbp replaces "~" with "_" in git tag names (since "~" is an invalid git ref
+    # character), so check both the raw version and the git-safe form.
     # Skip for component imports - they update the existing upstream commit
     if upstream_version and not component:
-        check_tag_cmd = ["git", "tag", "-l", upstream_version]
+        git_safe_version = upstream_version.replace("~", "_")
+        check_tag_cmd = ["git", "tag", "-l", git_safe_version]
         tag_rc, tag_out, _ = run_command(check_tag_cmd, cwd=repo_path)
-        if tag_rc == 0 and tag_out.strip() == upstream_version:
+        if tag_rc == 0 and tag_out.strip() == git_safe_version:
             # Tag exists, skip import
             return ImportOrigResult(
                 success=True,
-                output=f"Upstream tag '{upstream_version}' already exists, skipping import",
+                output=f"Upstream tag '{git_safe_version}' already exists, skipping import",
                 upstream_version=upstream_version,
             )
 

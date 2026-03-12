@@ -769,8 +769,10 @@ def fetch_packaging_repo(
     from packastack.debpkg.watch import (
         check_watch_mismatch,
         fix_oslo_watch_pattern,
+        has_upstream_signing_key,
         parse_watch_file,
         remove_pgp_options_from_watch,
+        restore_pgp_options_to_watch,
         update_signing_key,
         upgrade_watch_version,
         verify_signing_key_with_uscan,
@@ -809,11 +811,13 @@ def fetch_packaging_repo(
                 ctx.provenance.watch_mismatch.message = mismatch.message
 
     watch_updated = False
+    watch_changes: list[str] = []
     signing_key_updated = False
 
     if upgrade_watch_version(watch_path):
         activity("prepare", "Updated debian/watch to version=4")
         watch_updated = True
+        watch_changes.append("upgrade to version=4")
 
     # Fix oslo.* watch patterns to accept both oslo.* and oslo_* naming
     if fix_oslo_watch_pattern(watch_path, ctx.package):
@@ -822,6 +826,7 @@ def fetch_packaging_repo(
             f"Updated debian/watch to accept {ctx.package} or {ctx.package.replace('.', '_')} naming",
         )
         watch_updated = True
+        watch_changes.append("fix oslo.* naming pattern")
 
     # Update or remove signing key based on build type
     from packastack.planning.type_selection import BuildType
@@ -829,12 +834,8 @@ def fetch_packaging_repo(
     is_snapshot = ctx.build_type == BuildType.SNAPSHOT
     releases_repo = ctx.paths.get("openstack_releases_repo")
 
-    # For snapshot builds, remove PGP signature verification options from watch file
-    # since there are no official signed tarballs for snapshots
-    if is_snapshot and remove_pgp_options_from_watch(watch_path):
-        activity("prepare", "Removed PGP options from debian/watch for snapshot build")
-        watch_updated = True
-
+    # Update or remove the signing key on disk first (committed separately below)
+    # so that the PGP-options check in the watch file can see the current state.
     if update_signing_key(pkg_repo, releases_repo, ctx.openstack_target, is_snapshot):
         signing_key_updated = True
         if is_snapshot:
@@ -842,11 +843,31 @@ def fetch_packaging_repo(
         else:
             activity("prepare", f"Updated debian/upstream/signing-key.asc for {ctx.openstack_target}")
 
+    # For snapshot builds, remove PGP signature verification options from watch file
+    # since there are no official signed tarballs for snapshots
+    if is_snapshot and remove_pgp_options_from_watch(watch_path):
+        activity("prepare", "Removed PGP options from debian/watch for snapshot build")
+        watch_updated = True
+        watch_changes.append("remove pgpsigurlmangle for snapshot")
+
+    # For release/RC builds with a signing key, restore pgpsigurlmangle so uscan
+    # can verify the detached GPG signature.  A prior snapshot build may have
+    # stripped this option.
+    if (
+        not is_snapshot
+        and has_upstream_signing_key(pkg_repo / "debian")
+        and restore_pgp_options_to_watch(watch_path)
+    ):
+        activity("prepare", "Restored PGP options in debian/watch for signed upstream tarball")
+        watch_updated = True
+        watch_changes.append("restore pgpsigurlmangle for signed tarball")
+
     # Commit watch file update (separate commit per file)
     if watch_updated:
+        watch_commit_msg = "d/watch: " + ", ".join(watch_changes)
         commit_result = git_commit(
             pkg_repo,
-            "d/watch: update for new upstream",
+            watch_commit_msg,
             files=["debian/watch"],
         )
         if commit_result.returncode == 0:
@@ -1917,13 +1938,27 @@ def import_and_patch(
                 return PhaseResult.fail(EXIT_FETCH_FAILED, branch_result.error)
             run.log_event({"event": "import-orig.branch_failed", "error": branch_result.error})
 
-        # Extract version for import-orig
+        # Extract version for import-orig.
+        # For RC/beta versions, normalize to Debian tilde form (e.g. "22.0.0.0rc1" ->
+        # "22.0.0~rc1") so that gbp import-orig:
+        #   • stores the pristine-tar entry as "pkg_22.0.0~rc1.orig.tar.gz" (what
+        #     gbp buildpackage will look for based on debian/changelog), and
+        #   • creates the git tag as "22.0.0_rc1" (gbp replaces "~" with "_" for
+        #     git-safe tag names, matching historical RC tag conventions).
         if ctx.build_type == BuildType.SNAPSHOT and snapshot_result:
             import_version = snapshot_result.upstream_version
         elif ctx.upstream:
             import_version = ctx.upstream.version
         else:
             import_version = None
+
+        if import_version:
+            from packastack.debpkg.changelog import split_milestone_version
+
+            milestone_parts = split_milestone_version(import_version)
+            if milestone_parts:
+                base, marker = milestone_parts
+                import_version = f"{base}~{marker}"
 
         # Import without merging - we'll handle the merge manually to preserve packaging files
         import_result = import_orig(
@@ -2038,8 +2073,10 @@ def import_and_patch(
                         }
                     )
 
-            # Now manually merge the upstream tag, preserving packaging files
-            upstream_tag = import_result.upstream_version
+            # Now manually merge the upstream tag, preserving packaging files.
+            # gbp replaces "~" with "_" in git tag names (since "~" is an invalid
+            # git ref character), so convert accordingly for all git operations.
+            upstream_tag = (import_result.upstream_version or "").replace("~", "_")
             if upstream_tag:
                 activity("import-orig", f"Merging upstream tag '{upstream_tag}' with -Xtheirs strategy")
 

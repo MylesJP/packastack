@@ -282,6 +282,79 @@ https://example.com/foo-(.+).tar.gz
         assert msg == ""
 
 
+class TestRestorePgpOptionsToWatch:
+    """Tests for restore_pgp_options_to_watch function."""
+
+    def test_restores_pgpsigurlmangle(self, tmp_path: Path) -> None:
+        """Adds pgpsigurlmangle to opts when missing."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            "version=4\n"
+            "opts=uversionmangle=s/\\.([a-zA-Z])/~$1/;s/%7E/~/;s/\\.0b/~b/;s/\\.0rc/~rc/ \\\n"
+            " https://tarballs.opendev.org/openstack/aodh/ aodh-(\\d.*)\\.tar\\.gz\n"
+        )
+
+        result = watch.restore_pgp_options_to_watch(watch_file)
+
+        assert result is True
+        content = watch_file.read_text()
+        assert "pgpsigurlmangle=s/$/.asc/" in content
+        assert "uversionmangle" in content
+
+    def test_no_change_when_already_present(self, tmp_path: Path) -> None:
+        """Returns False when pgpsigurlmangle already exists."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            "version=4\n"
+            "opts=uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/ \\\n"
+            " https://tarballs.opendev.org/openstack/aodh/ aodh-(\\d.*)\\.tar\\.gz\n"
+        )
+
+        result = watch.restore_pgp_options_to_watch(watch_file)
+
+        assert result is False
+
+    def test_no_change_when_file_missing(self, tmp_path: Path) -> None:
+        """Returns False for missing file."""
+        watch_file = tmp_path / "watch"
+
+        result = watch.restore_pgp_options_to_watch(watch_file)
+
+        assert result is False
+
+    def test_no_change_without_opts(self, tmp_path: Path) -> None:
+        """Returns False when there is no opts= line to modify."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            "version=4\n"
+            "https://tarballs.opendev.org/openstack/aodh/ aodh-(\\d.*)\\.tar\\.gz\n"
+        )
+
+        result = watch.restore_pgp_options_to_watch(watch_file)
+
+        assert result is False
+
+    def test_roundtrip_remove_then_restore(self, tmp_path: Path) -> None:
+        """Removing then restoring PGP options produces a valid watch file."""
+        original = (
+            "version=4\n"
+            "opts=uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/ \\\n"
+            " https://tarballs.opendev.org/openstack/aodh/ aodh-(\\d.*)\\.tar\\.gz\n"
+        )
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(original)
+
+        # Remove
+        assert watch.remove_pgp_options_from_watch(watch_file) is True
+        assert "pgpsigurlmangle" not in watch_file.read_text()
+
+        # Restore
+        assert watch.restore_pgp_options_to_watch(watch_file) is True
+        content = watch_file.read_text()
+        assert "pgpsigurlmangle=s/$/.asc/" in content
+        assert "uversionmangle" in content
+
+
 class TestParseDehsOutput:
     """Tests for parse_dehs_output function."""
 
