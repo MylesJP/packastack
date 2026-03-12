@@ -178,6 +178,7 @@ class BuildAllRequest:
         offline: Offline mode.
         dry_run: Show plan without building.
         ppa_upload: Upload to PPA on success.
+        build_deps: Auto-build missing dependencies for each package.
     """
 
     target: str = "devel"
@@ -197,6 +198,7 @@ class BuildAllRequest:
     offline: bool = False
     dry_run: bool = False
     ppa_upload: bool = False
+    build_deps: bool = False
 
 
 @dataclass(frozen=True)

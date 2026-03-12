@@ -219,6 +219,7 @@ def run_single_build(
     force: bool,
     run_dir: Path,
     ppa_upload: bool = False,
+    build_deps: bool = False,
 ) -> tuple[bool, FailureType | None, str, str]:
     """Run a single package build as a subprocess.
 
@@ -232,6 +233,7 @@ def run_single_build(
         force: Force through warnings.
         run_dir: Directory for logs.
         ppa_upload: Whether to upload to PPA after build.
+        build_deps: Whether to auto-build missing dependencies.
 
     Returns:
         Tuple of (success, failure_type, message, log_path).
@@ -250,8 +252,10 @@ def run_single_build(
         "--yes",  # No prompts
         "--no-cleanup",  # Keep workspace for debugging
         "--skip-repo-regen",  # Coordinator handles repo regeneration
-        "--no-build-deps",  # Coordinator handles dependencies
     ]
+
+    if not build_deps:
+        cmd.append("--no-build-deps")
 
     if ppa_upload:
         cmd.append("--ppa-upload")

@@ -332,6 +332,7 @@ def run_build_all(
     offline: bool,
     dry_run: bool,
     ppa_upload: bool = False,
+    build_deps: bool = False,
 ) -> int:
     """Run build-all and return exit code (without sys.exit).
 
@@ -355,6 +356,7 @@ def run_build_all(
         offline: Run in offline mode.
         dry_run: Show plan without building.
         ppa_upload: Upload to PPA on success.
+        build_deps: Whether to auto-build missing dependencies.
 
     Returns:
         Exit code.
@@ -386,6 +388,7 @@ def run_build_all(
                 offline=offline,
                 dry_run=dry_run,
                 ppa_upload=ppa_upload,
+                build_deps=build_deps,
             )
             exit_code = _run_build_all(run=run, request=request)
         except Exception as e:
@@ -494,6 +497,8 @@ def build(
     Special subset commands:
       `packastack build libraries` - Build all Oslo and other library packages
       `packastack build clients` - Build all Python client packages
+      `packastack build rc1` - Build all packages with an RC1 release
+      `packastack build rc` - Build all packages with any RC release
 
     Exit codes:
       0 - Success
@@ -508,7 +513,7 @@ def build(
       9 - Registry error
       10 - Retired project (skipped)
     """
-    # Check for special subset commands: "libraries" or "clients"
+    # Check for special subset commands: "libraries", "clients", "rc", "rc1", etc.
     if package in ("libraries", "clients"):
         from packastack.commands.build_subset import SubsetType, run_subset_build
 
@@ -527,6 +532,32 @@ def build(
             offline=offline,
             dry_run=dry_run,
             ppa_upload=ppa_upload,
+        )
+        sys.exit(exit_code)
+
+    # "rc" builds all RC packages; "rc1", "rc2", etc. filter to a specific RC
+    import re as _re
+
+    _rc_match = _re.fullmatch(r"rc(\d+)?", package, _re.IGNORECASE) if package else None
+    if _rc_match:
+        from packastack.commands.build_rc import run_build_rc
+
+        rc_number = int(_rc_match.group(1)) if _rc_match.group(1) else None
+        exit_code = run_build_rc(
+            target=target,
+            ubuntu_series=ubuntu_series,
+            cloud_archive=cloud_archive,
+            build_type=build_type,
+            binary=binary,
+            keep_going=keep_going,
+            max_failures=max_failures,
+            parallel=parallel,
+            force=force,
+            offline=offline,
+            dry_run=dry_run,
+            ppa_upload=ppa_upload,
+            rc_number=rc_number,
+            build_deps=build_deps,
         )
         sys.exit(exit_code)
 

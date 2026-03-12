@@ -115,6 +115,7 @@ def _run_build_all(
     offline = request.offline
     dry_run = request.dry_run
     ppa_upload = request.ppa_upload
+    build_deps = request.build_deps
 
     cfg = load_config()
     paths = resolve_paths(cfg)
@@ -444,6 +445,7 @@ def _run_build_all(
             local_repo=local_repo,
             run=run,
             ppa_upload=ppa_upload,
+            build_deps=build_deps,
         )
     else:
         _run_sequential_builds(
@@ -459,6 +461,7 @@ def _run_build_all(
             local_repo=local_repo,
             run=run,
             ppa_upload=ppa_upload,
+            build_deps=build_deps,
         )
 
     # Mark completion
@@ -513,6 +516,7 @@ def _run_sequential_builds(
     local_repo: Path,
     run: RunContext,
     ppa_upload: bool = False,
+    build_deps: bool = False,
 ) -> int:
     """Run builds sequentially in topological order.
 
@@ -529,6 +533,7 @@ def _run_sequential_builds(
         local_repo: Path to local APT repository.
         run: RunContext for logging.
         ppa_upload: Whether to upload to PPA after build.
+        build_deps: Whether to auto-build missing dependencies.
 
     Returns:
         Exit code.
@@ -542,7 +547,8 @@ def _run_sequential_builds(
         TimeRemainingColumn,
     )
 
-    total = len(state.build_order)
+    pending = state.get_pending_packages()
+    total = len(pending)
     built = 0
     failed_set: set[str] = set()
     host_arch = get_host_arch()
@@ -565,25 +571,23 @@ def _run_sequential_builds(
         if progress:
             task = progress.add_task("Building packages", total=total)
 
-        for i, pkg in enumerate(state.build_order, 1):
+        built_index = 0
+        for pkg in state.build_order:
             pkg_state = state.packages.get(pkg)
             if pkg_state is None:
-                if progress and task is not None:
-                    progress.advance(task)
                 continue
-
-            if progress and task is not None:
-                progress.update(task, description=f"Building {pkg}")
 
             # Skip non-pending packages
             if pkg_state.status != PackageStatus.PENDING:
                 if pkg_state.status == PackageStatus.SUCCESS:
                     built += 1
-                if progress and task is not None:
-                    progress.advance(task)
                 continue
 
-            activity("all", f"[{i}/{total}] Building: {pkg}")
+            built_index += 1
+            if progress and task is not None:
+                progress.update(task, description=f"Building {pkg}")
+
+            activity("all", f"[{built_index}/{total}] Building: {pkg}")
 
             state.mark_started(pkg)
             save_state(state, state_dir)
@@ -598,6 +602,7 @@ def _run_sequential_builds(
                 force=force,
                 run_dir=run_dir,
                 ppa_upload=ppa_upload,
+                build_deps=build_deps,
             )
 
             if success:
@@ -627,8 +632,8 @@ def _run_sequential_builds(
                 break
 
             # Progress update every 10 packages
-            if i % 10 == 0:
-                activity("all", f"Progress: {built} ok, {len(failed_set)} fail, {total - i} remaining")
+            if built_index % 10 == 0:
+                activity("all", f"Progress: {built} ok, {len(failed_set)} fail, {total - built_index} remaining")
 
     return EXIT_SUCCESS if not failed_set else EXIT_ALL_BUILD_FAILED
 
@@ -648,6 +653,7 @@ def _run_parallel_builds(
     local_repo: Path,
     run: RunContext,
     ppa_upload: bool = False,
+    build_deps: bool = False,
 ) -> int:
     """Run builds in parallel, respecting dependencies.
 
@@ -679,7 +685,8 @@ def _run_parallel_builds(
         TimeRemainingColumn,
     )
 
-    total = len(state.build_order)
+    pending = state.get_pending_packages()
+    total = len(pending)
     built = 0
     failed_set: set[str] = set()
     lock = threading.Lock()
@@ -730,11 +737,7 @@ def _run_parallel_builds(
     with progress_context as progress:
         task = None
         if progress:
-            completed = sum(
-                1 for pkg in state.build_order
-                if (state.packages.get(pkg) and state.packages[pkg].status != PackageStatus.PENDING)
-            )
-            task = progress.add_task("Building packages", total=total, completed=completed)
+            task = progress.add_task("Building packages", total=total)
 
         # Execute batches - recompute after each batch to pick up skipped packages
         batch_num = 0
@@ -752,16 +755,15 @@ def _run_parallel_builds(
             with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
                 futures = {}
 
+                batch_pkgs = []
                 for pkg in batch:
                     pkg_state = state.packages.get(pkg)
                     if pkg_state is None or pkg_state.status != PackageStatus.PENDING:
                         continue
 
-                    if progress and task is not None:
-                        progress.update(task, description=f"Building {pkg}")
-
                     activity("all", f"[start] {pkg}")
                     state.mark_started(pkg)
+                    batch_pkgs.append(pkg)
 
                     future = executor.submit(
                         run_single_build,
@@ -774,8 +776,13 @@ def _run_parallel_builds(
                         force=force,
                         run_dir=run_dir,
                         ppa_upload=ppa_upload,
+                        build_deps=build_deps,
                     )
                     futures[future] = pkg
+
+                if progress and task is not None:
+                    in_flight = set(batch_pkgs)
+                    progress.update(task, description=f"Building {len(in_flight)} packages")
 
                 # Wait for batch to complete
                 for future in concurrent.futures.as_completed(futures):
@@ -786,6 +793,9 @@ def _run_parallel_builds(
                     except Exception as e:
                         on_complete(pkg, False, FailureType.UNKNOWN, str(e), "")
                     if progress and task is not None:
+                        in_flight.discard(pkg)
+                        if in_flight:
+                            progress.update(task, description=f"Building {len(in_flight)} packages")
                         progress.advance(task)
 
             # Regenerate local repo indexes after each batch completes
