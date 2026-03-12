@@ -149,6 +149,7 @@ omit = [
     "src/packastack/build/tools.py",
     "src/packastack/commands/build_helpers/*",
     "src/packastack/commands/build.py",
+    "src/packastack/commands/build_rc.py",
     "src/packastack/commands/clean.py",
     "src/packastack/commands/plan.py",
     "src/packastack/commands/refresh.py",
