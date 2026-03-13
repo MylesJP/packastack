@@ -24,6 +24,7 @@ from packastack.build.single_build import (
     PrepareResult,
     SingleBuildContext,
     ValidateDepsResult,
+    _resolve_modify_delete_conflicts,
     resolve_lp_bug_key,
 )
 
@@ -705,3 +706,67 @@ class TestAiDiagnosePatchFailure:
         # Only the real patch should have been diagnosed
         assert mock_diagnose.call_count == 1
         assert mock_diagnose.call_args.kwargs["patch_name"] == "real.patch"
+
+
+class TestResolveModifyDeleteConflicts:
+    """Tests for _resolve_modify_delete_conflicts helper."""
+
+    def test_resolves_unmerged_files(self, tmp_path: Path) -> None:
+        """Should git-rm unmerged files and conclude the merge."""
+        from packastack.build.single_build import run_command
+
+        pkg_repo = tmp_path / "repo"
+        pkg_repo.mkdir()
+
+        # Set up a real git repo with a modify/delete conflict
+        run_command(["git", "init", "-b", "master"], cwd=pkg_repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=pkg_repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=pkg_repo)
+
+        # Create initial commit with AUTHORS
+        (pkg_repo / "AUTHORS").write_text("initial")
+        (pkg_repo / "setup.py").write_text("setup()")
+        run_command(["git", "add", "."], cwd=pkg_repo)
+        run_command(["git", "commit", "-m", "initial"], cwd=pkg_repo)
+
+        # Branch: upstream modifies AUTHORS
+        run_command(["git", "checkout", "-b", "upstream"], cwd=pkg_repo)
+        (pkg_repo / "AUTHORS").write_text("modified by upstream")
+        run_command(["git", "add", "AUTHORS"], cwd=pkg_repo)
+        run_command(["git", "commit", "-m", "upstream change"], cwd=pkg_repo)
+
+        # Back to master: delete AUTHORS
+        run_command(["git", "checkout", "master"], cwd=pkg_repo)
+        run_command(["git", "rm", "AUTHORS"], cwd=pkg_repo)
+        run_command(["git", "commit", "-m", "remove AUTHORS"], cwd=pkg_repo)
+
+        # Merge upstream — triggers modify/delete conflict
+        merge_rc, _, _ = run_command(
+            ["git", "merge", "-Xtheirs", "upstream"], cwd=pkg_repo
+        )
+        assert merge_rc != 0  # Conflict expected
+
+        # Now resolve
+        success, resolved = _resolve_modify_delete_conflicts(pkg_repo, "test_tag")
+
+        assert success is True
+        assert "AUTHORS" in resolved
+        assert not (pkg_repo / "AUTHORS").exists()
+
+    def test_returns_false_when_no_unmerged_files(self, tmp_path: Path) -> None:
+        """Should return (False, []) when there are no unmerged files."""
+        from packastack.build.single_build import run_command
+
+        pkg_repo = tmp_path / "repo"
+        pkg_repo.mkdir()
+        run_command(["git", "init", "-b", "master"], cwd=pkg_repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=pkg_repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=pkg_repo)
+        (pkg_repo / "README").write_text("hello")
+        run_command(["git", "add", "."], cwd=pkg_repo)
+        run_command(["git", "commit", "-m", "initial"], cwd=pkg_repo)
+
+        success, resolved = _resolve_modify_delete_conflicts(pkg_repo, "test_tag")
+
+        assert success is False
+        assert resolved == []

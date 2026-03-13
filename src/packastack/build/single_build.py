@@ -912,7 +912,28 @@ def fetch_packaging_repo(
                 returncode=commit_result.returncode,
             )
 
-    # Verify signing key with uscan for non-snapshot builds
+    # Ensure sphinxdoc addon is enabled before patch application/commits
+    sphinxdoc_updated = maybe_enable_sphinxdoc(pkg_repo)
+    if sphinxdoc_updated:
+        commit_result = git_commit(
+            pkg_repo,
+            "d/rules: enable sphinxdoc to build documentation",
+            files=["debian/rules"],
+        )
+        if commit_result.returncode == 0:
+            activity("prepare", "Committed sphinxdoc enablement")
+        else:
+            raise GitCommitError(
+                "Failed to commit sphinxdoc enablement",
+                stderr=commit_result.stderr,
+                returncode=commit_result.returncode,
+            )
+
+    result.watch_updated = watch_updated
+    result.signing_key_updated = signing_key_updated
+
+    # Verify signing key with uscan after all watch and signing-key changes
+    # have been committed, so uscan sees the final state of both files.
     if not is_snapshot:
         signing_key_path = pkg_repo / "debian" / "upstream" / "signing-key.asc"
         if signing_key_path.exists():
@@ -937,7 +958,7 @@ def fetch_packaging_repo(
                         stderr=commit_result.stderr,
                         returncode=commit_result.returncode,
                     )
-                signing_key_updated = True
+                result.signing_key_updated = True
             elif verify_result.success:
                 activity("prepare", "Signing key verified successfully")
             else:
@@ -946,26 +967,6 @@ def fetch_packaging_repo(
                     "prepare",
                     f"Signing key verification warning: {verify_result.error}",
                 )
-
-    # Ensure sphinxdoc addon is enabled before patch application/commits
-    sphinxdoc_updated = maybe_enable_sphinxdoc(pkg_repo)
-    if sphinxdoc_updated:
-        commit_result = git_commit(
-            pkg_repo,
-            "d/rules: enable sphinxdoc to build documentation",
-            files=["debian/rules"],
-        )
-        if commit_result.returncode == 0:
-            activity("prepare", "Committed sphinxdoc enablement")
-        else:
-            raise GitCommitError(
-                "Failed to commit sphinxdoc enablement",
-                stderr=commit_result.stderr,
-                returncode=commit_result.returncode,
-            )
-
-    result.watch_updated = watch_updated
-    result.signing_key_updated = signing_key_updated
 
     return PhaseResult.ok(), result
 
@@ -1883,6 +1884,50 @@ def _auto_build_deps(ctx: SingleBuildContext, deps_to_build: list[str]) -> Phase
 # =============================================================================
 
 
+def _resolve_modify_delete_conflicts(
+    pkg_repo: Path,
+    upstream_tag: str,
+) -> tuple[bool, list[str]]:
+    """Auto-resolve modify/delete merge conflicts by deleting the files.
+
+    After a ``git merge -Xtheirs`` that leaves modify/delete conflicts
+    (packaging branch deleted files that upstream still ships, e.g.
+    pbr-generated AUTHORS, ChangeLog, PKG-INFO, *.egg-info/*), this
+    function removes the conflicting files and concludes the merge.
+
+    Args:
+        pkg_repo: Path to the packaging repository.
+        upstream_tag: The upstream tag being merged (for commit message).
+
+    Returns:
+        Tuple of (success, resolved_files).
+    """
+    unmerged_rc, unmerged_out, _ = run_command(
+        ["git", "diff", "--name-only", "--diff-filter=U"],
+        cwd=pkg_repo,
+    )
+    unmerged_files = [
+        f for f in unmerged_out.strip().splitlines() if f
+    ] if unmerged_rc == 0 else []
+
+    if not unmerged_files:
+        return False, []
+
+    for ufile in unmerged_files:
+        run_command(["git", "rm", "-f", "--", ufile], cwd=pkg_repo)
+
+    conclude_rc, _conclude_out, _conclude_err = run_command(
+        [
+            "git", "commit", "--no-edit",
+            "-m", f"Merging upstream release {upstream_tag}",
+        ],
+        cwd=pkg_repo,
+    )
+    if conclude_rc == 0:
+        return True, unmerged_files
+    return False, unmerged_files
+
+
 def import_and_patch(
     ctx: SingleBuildContext,
     upstream_tarball: Path | None,
@@ -2087,8 +2132,29 @@ def import_and_patch(
 
                     if merge_rc == 0:
                         activity("import-orig", "Upstream tag merged successfully")
+                    else:
+                        # Merge had conflicts — try to auto-resolve modify/delete
+                        # conflicts.  These occur when the packaging branch deleted
+                        # files (e.g. pbr-generated AUTHORS, ChangeLog, PKG-INFO,
+                        # *.egg-info/*) that upstream still ships.  We honour the
+                        # packaging branch's deletion.
+                        resolved, resolved_files = _resolve_modify_delete_conflicts(
+                            pkg_repo, upstream_tag,
+                        )
+                        if resolved:
+                            activity(
+                                "import-orig",
+                                f"Auto-resolved {len(resolved_files)} modify/delete conflict(s)",
+                            )
+                            for rfile in resolved_files:
+                                activity("import-orig", f"  Resolved conflict: {rfile} (delete)")
+                            merge_rc = 0
+                            run.log_event({
+                                "event": "import-orig.merge_conflict_resolved",
+                                "resolved_files": resolved_files,
+                            })
 
-                        # Restore packaging-only files that may have been deleted
+                    if merge_rc == 0:
                         packaging_files = [".launchpad.yaml", ".gitattributes"]
                         for pfile in packaging_files:
                             file_path = pkg_repo / pfile
