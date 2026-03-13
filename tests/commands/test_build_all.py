@@ -1030,6 +1030,32 @@ class TestRunSingleBuild:
 
         assert "--ppa-upload" in captured["cmd"]
 
+    def test_archive_deps_flag_included_in_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should include --archive-deps in command when archive_deps=True."""
+        captured: dict[str, object] = {}
+
+        def fake_run(cmd: list[str], **kwargs: object) -> SimpleNamespace:
+            captured["cmd"] = cmd
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        _run_single_build(
+            package="nova",
+            target="dalmatian",
+            ubuntu_series="noble",
+            cloud_archive="",
+            build_type="release",
+            binary=True,
+            force=False,
+            run_dir=tmp_path,
+            archive_deps=True,
+        )
+
+        assert "--archive-deps" in captured["cmd"]
+
 
 class TestParallelBatchesEdgeCases:
     """Tests for parallel batch computation edge cases."""

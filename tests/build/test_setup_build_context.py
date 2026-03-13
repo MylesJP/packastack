@@ -52,6 +52,7 @@ def base_setup_inputs(tmp_path, mock_run):
         skip_repo_regen=False,
         no_spinner=True,
         build_deps=False,
+        archive_deps=False,
         min_version_policy="enforce",
         dep_report=False,
         include_retired=False,

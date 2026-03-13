@@ -333,6 +333,7 @@ def run_build_all(
     dry_run: bool,
     ppa_upload: bool = False,
     build_deps: bool = False,
+    archive_deps: bool = False,
 ) -> int:
     """Run build-all and return exit code (without sys.exit).
 
@@ -357,6 +358,7 @@ def run_build_all(
         dry_run: Show plan without building.
         ppa_upload: Upload to PPA on success.
         build_deps: Whether to auto-build missing dependencies.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
 
     Returns:
         Exit code.
@@ -389,6 +391,7 @@ def run_build_all(
                 dry_run=dry_run,
                 ppa_upload=ppa_upload,
                 build_deps=build_deps,
+                archive_deps=archive_deps,
             )
             exit_code = _run_build_all(run=run, request=request)
         except Exception as e:
@@ -421,6 +424,11 @@ def build(
     binary: bool = typer.Option(True, "-b/-B", "--binary/--no-binary", help="Build binary packages with sbuild (default: on)"),
     builder: str = typer.Option("sbuild", "-x", "--builder", help="Builder for binary packages: sbuild or dpkg"),
     build_deps: bool = typer.Option(True, "-d/-D", "--build-deps/--no-build-deps", help="Auto-build missing dependencies"),
+    archive_deps: bool = typer.Option(
+        False,
+        "--archive-deps/--no-archive-deps",
+        help="Use archive dependencies only (disable local repo injection for sbuild)",
+    ),
     min_version_policy: str = typer.Option(
         "enforce",
         "--min-version-policy",
@@ -558,6 +566,7 @@ def build(
             ppa_upload=ppa_upload,
             rc_number=rc_number,
             build_deps=build_deps,
+            archive_deps=archive_deps,
         )
         sys.exit(exit_code)
 
@@ -590,6 +599,7 @@ def build(
             packages_file=packages_file,
             dry_run=dry_run,
             ppa_upload=ppa_upload,
+            archive_deps=archive_deps,
         )
     else:
         # Treat top-level --dry-run as validate-plan for single-package mode
@@ -610,6 +620,7 @@ def build(
             binary=binary,
             builder=builder,
             build_deps=build_deps,
+            archive_deps=archive_deps,
             min_version_policy=min_version_policy,
             fail_on_cloud_archive_required=fail_on_cloud_archive_required,
             fail_on_mir_required=fail_on_mir_required,
@@ -644,6 +655,7 @@ def _build_single_mode(
     binary: bool,
     builder: str,
     build_deps: bool,
+    archive_deps: bool,
     min_version_policy: str,
     fail_on_cloud_archive_required: bool,
     fail_on_mir_required: bool,
@@ -663,7 +675,7 @@ def _build_single_mode(
     resume_build_id: str = "",
 ) -> None:
     """Build a single package."""
-    with RunContext("build") as run:
+    with RunContext("build", package=package) as run:
         exit_code = EXIT_SUCCESS
         workspace: Path | None = None
         cleanup_on_exit = not no_cleanup
@@ -691,6 +703,7 @@ def _build_single_mode(
                 binary=binary,
                 builder=builder,
                 build_deps=build_deps,
+                archive_deps=archive_deps,
                 min_version_policy=policy_value,
                 dep_report=dep_report,
                 fail_on_cloud_archive_required=fail_on_cloud_archive_required,
@@ -751,6 +764,7 @@ def _build_all_mode(
     packages_file: str,
     dry_run: bool,
     ppa_upload: bool = False,
+    archive_deps: bool = False,
 ) -> None:
     """Build all packages in dependency order."""
     exit_code = run_build_all(
@@ -771,6 +785,7 @@ def _build_all_mode(
         offline=offline,
         dry_run=dry_run,
         ppa_upload=ppa_upload,
+        archive_deps=archive_deps,
     )
     sys.exit(exit_code)
 
@@ -1151,6 +1166,7 @@ def _run_build(
             skip_repo_regen=request.skip_repo_regen,
             no_spinner=request.no_spinner,
             build_deps=request.build_deps,
+            archive_deps=request.archive_deps,
             min_version_policy=request.min_version_policy,
             dep_report=request.dep_report,
             fail_on_cloud_archive_required=request.fail_on_cloud_archive_required,

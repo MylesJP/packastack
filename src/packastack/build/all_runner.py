@@ -116,6 +116,7 @@ def _run_build_all(
     dry_run = request.dry_run
     ppa_upload = request.ppa_upload
     build_deps = request.build_deps
+    archive_deps = request.archive_deps
 
     cfg = load_config()
     paths = resolve_paths(cfg)
@@ -446,6 +447,7 @@ def _run_build_all(
             run=run,
             ppa_upload=ppa_upload,
             build_deps=build_deps,
+            archive_deps=archive_deps,
         )
     else:
         _run_sequential_builds(
@@ -462,6 +464,7 @@ def _run_build_all(
             run=run,
             ppa_upload=ppa_upload,
             build_deps=build_deps,
+            archive_deps=archive_deps,
         )
 
     # Mark completion
@@ -517,6 +520,7 @@ def _run_sequential_builds(
     run: RunContext,
     ppa_upload: bool = False,
     build_deps: bool = False,
+    archive_deps: bool = False,
 ) -> int:
     """Run builds sequentially in topological order.
 
@@ -534,6 +538,7 @@ def _run_sequential_builds(
         run: RunContext for logging.
         ppa_upload: Whether to upload to PPA after build.
         build_deps: Whether to auto-build missing dependencies.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
 
     Returns:
         Exit code.
@@ -603,6 +608,7 @@ def _run_sequential_builds(
                 run_dir=run_dir,
                 ppa_upload=ppa_upload,
                 build_deps=build_deps,
+                archive_deps=archive_deps,
             )
 
             if success:
@@ -654,6 +660,7 @@ def _run_parallel_builds(
     run: RunContext,
     ppa_upload: bool = False,
     build_deps: bool = False,
+    archive_deps: bool = False,
 ) -> int:
     """Run builds in parallel, respecting dependencies.
 
@@ -672,6 +679,7 @@ def _run_parallel_builds(
         local_repo: Path to local APT repository.
         run: RunContext for logging.
         ppa_upload: Whether to upload to PPA after build.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
 
     Returns:
         Exit code.
@@ -777,6 +785,7 @@ def _run_parallel_builds(
                         run_dir=run_dir,
                         ppa_upload=ppa_upload,
                         build_deps=build_deps,
+                        archive_deps=archive_deps,
                     )
                     futures[future] = pkg
 

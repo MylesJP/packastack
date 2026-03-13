@@ -94,6 +94,7 @@ class BuildRequest:
         binary: --binary flag.
         builder: Builder for binary packages.
         build_deps: --build-deps flag.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
         no_cleanup: --no-cleanup flag.
         no_spinner: --no-spinner flag.
         validate_plan_only: --validate-plan flag.
@@ -118,6 +119,7 @@ class BuildRequest:
     binary: bool = True
     builder: str = "sbuild"
     build_deps: bool = True
+    archive_deps: bool = False
     # Minimum-version enforcement policy for upstream deps: enforce, report, ignore
     min_version_policy: str = "enforce"
     # Write dependency satisfaction report files during build
@@ -179,6 +181,7 @@ class BuildAllRequest:
         dry_run: Show plan without building.
         ppa_upload: Upload to PPA on success.
         build_deps: Auto-build missing dependencies for each package.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
     """
 
     target: str = "devel"
@@ -199,6 +202,7 @@ class BuildAllRequest:
     dry_run: bool = False
     ppa_upload: bool = False
     build_deps: bool = False
+    archive_deps: bool = False
 
 
 @dataclass(frozen=True)

@@ -176,6 +176,7 @@ def run_build_rc(
     ppa_upload: bool = False,
     rc_number: int | None = None,
     build_deps: bool = False,
+    archive_deps: bool = False,
 ) -> int:
     """Build all packages that have an RC release for the target series.
 
@@ -197,6 +198,7 @@ def run_build_rc(
         ppa_upload: Upload to PPA on success.
         rc_number: Specific RC number to filter on (e.g. 1 for RC1).
         build_deps: Whether to auto-build missing dependencies.
+        archive_deps: Use archive dependencies only; do not inject local repo into sbuild.
 
     Returns:
         Exit code.
@@ -353,6 +355,7 @@ def run_build_rc(
                     dry_run=False,
                     ppa_upload=ppa_upload,
                     build_deps=build_deps,
+                    archive_deps=archive_deps,
                 )
             finally:
                 Path(packages_file).unlink(missing_ok=True)
