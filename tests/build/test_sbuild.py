@@ -159,7 +159,7 @@ class TestBuildSbuildCommand:
         )
         cmd = build_sbuild_command(config)
         assert cmd[0] == "sbuild"
-        # Note: --nolog is no longer used so sbuild creates log files
+        assert "--nolog" in cmd  # stdout capture requires --nolog
         assert "-d" in cmd
         assert "noble" in cmd
         assert str(tmp_path / "pkg.dsc") in cmd

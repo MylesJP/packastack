@@ -161,8 +161,11 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
     Returns:
         Complete sbuild command as a list of arguments.
     """
-    # Note: We no longer use --nolog so sbuild will create its log file
-    cmd = ["sbuild"]
+    # Use --nolog so sbuild prints everything to stdout (which we capture)
+    # rather than writing to $log_dir.  Without this flag sbuild sends its
+    # build log only to the log-file and stdout stays empty, making it
+    # impossible for packastack (and the AI diagnosis) to see the output.
+    cmd = ["sbuild", "--nolog"]
 
     # Distribution
     if config.distribution:
