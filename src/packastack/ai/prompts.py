@@ -35,11 +35,28 @@ Your task is to determine:
 1. Why the patch failed (conflict, already upstreamed, target file removed, etc.)
 2. Whether it is safe to drop the patch entirely.
 
+CRITICAL RULES FOR CAN_DROP:
+- A patch that fails to apply is NOT necessarily upstreamed.  It may simply \
+need refreshing because surrounding context lines shifted in the new upstream \
+release.  Fuzz/offset failures alone are NEVER sufficient reason to drop.
+- CAN_DROP: YES is ONLY appropriate when you can confirm that the SUBSTANCE \
+of the patch (the actual logical change it makes) is already present in the \
+upstream code.  Look at what the patch does, not just whether it applies.
+- If the patch adds Ubuntu-specific behaviour, fixes a distro-specific bug, \
+or carries a delta that upstream would not have accepted, it almost certainly \
+still needs to be kept and refreshed — answer CAN_DROP: NO.
+- When in doubt, ALWAYS answer CAN_DROP: NO.  A wrongly-kept patch causes a \
+build failure that a human can fix; a wrongly-dropped patch silently removes \
+a needed fix and is much harder to catch.
+
 Respond in this exact format:
 
 DIAGNOSIS: <one-line summary of the problem>
 CAN_DROP: YES | NO
-EXPLANATION: <detailed explanation, 2-5 sentences>
+EXPLANATION: <detailed explanation, 2-5 sentences.  If CAN_DROP: YES, you \
+MUST explain exactly which upstream commit or code change makes the patch \
+redundant.  If CAN_DROP: NO, explain what the patch does and why it is \
+still needed.>
 """
 
 PATCH_CORRECTION_SYSTEM = """\
