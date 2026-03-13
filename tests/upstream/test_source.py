@@ -118,6 +118,17 @@ class TestBuildTarballUrl:
         url = upstream.build_tarball_url("python-aodhclient", "3.10.0", tarball_base="aodhclient")
         assert url == "https://tarballs.opendev.org/openstack/python-aodhclient/aodhclient-3.10.0.tar.gz"
 
+    def test_tarball_base_with_hyphen_normalized(self) -> None:
+        """Test tarball_base hyphens are normalized to underscores in filename.
+
+        openstack-releases uses PyPI naming (hyphens) in tarball-base, but
+        tarballs.opendev.org serves files with underscores. E.g. placement
+        has tarball-base: openstack-placement but the file is
+        openstack_placement-15.0.0.0rc1.tar.gz.
+        """
+        url = upstream.build_tarball_url("placement", "15.0.0.0rc1", tarball_base="openstack-placement")
+        assert url == "https://tarballs.opendev.org/openstack/placement/openstack_placement-15.0.0.0rc1.tar.gz"
+
     def test_tarball_base_empty_uses_default(self) -> None:
         """Test empty tarball_base uses the default normalization."""
         url = upstream.build_tarball_url("nova", "29.0.0", tarball_base="")

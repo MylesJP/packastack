@@ -148,7 +148,9 @@ def build_tarball_url(project: str, version: str, tarball_base: str = "") -> str
     # openstack-releases, or the project name with special characters
     # normalized to underscores.
     if tarball_base:
-        tarball_name = tarball_base
+        # tarball-base from openstack-releases uses PyPI naming (hyphens), but
+        # tarballs.opendev.org normalizes hyphens to underscores in filenames.
+        tarball_name = tarball_base.replace("-", "_")
     else:
         tarball_name = project
         tarball_name = tarball_name.replace(".", "_")
