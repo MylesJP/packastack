@@ -24,10 +24,11 @@ must never go into the log files; therefore spinner/console output writes to
 sys.__stdout__ when available.
 
 Build outputs are organized under ``build/{package}/{build_id}/`` where
-*build_id* is a timestamp string (``YYYYMMDD-HHMMSS``).  Because the
-package name is not known at context-manager entry, RunContext initially
-writes to a staging directory ``build/.runs/{build_id}/`` and relocates
-when :meth:`relocate_to_package_dir` is called.
+*build_id* is a timestamp string (``YYYYMMDD-HHMMSS``). When the package
+name is known at context-manager entry, RunContext writes directly to the
+package directory. Otherwise it uses a staging directory
+``build/.runs/{build_id}/`` and relocates when
+:meth:`relocate_to_package_dir` is called.
 """
 
 from __future__ import annotations
@@ -52,15 +53,19 @@ class RunContext:
             ...
     """
 
-    def __init__(self, command: str) -> None:
+    def __init__(self, command: str, package: str = "") -> None:
         self.command = command
+        self.package = package
         self.cfg = load_config()
         self.paths = {k: Path(v).expanduser().resolve() for k, v in self.cfg.get("paths", {}).items()}
         self.build_root = self.paths.get("build_root", Path.home() / ".cache" / "packastack" / "build")
         now_utc = datetime.datetime.now(datetime.UTC)
         self.build_id = now_utc.strftime("%Y%m%d-%H%M%S")
         self.run_id = self.build_id  # backward-compat alias
-        self.run_path = self.build_root / ".runs" / self.build_id
+        if package:
+            self.run_path = self.build_root / package / self.build_id
+        else:
+            self.run_path = self.build_root / ".runs" / self.build_id
         self.logs_path = self.run_path / "logs"
         self.stdout_file: Any | None = None
         self.stderr_file: Any | None = None

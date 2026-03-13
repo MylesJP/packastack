@@ -51,6 +51,14 @@ class TestRunContext:
             assert ".runs" in str(ctx.run_path)
             assert ctx.build_root in ctx.run_path.parents
 
+    def test_package_directory_when_package_provided(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        with run.RunContext("build", package="ceilometer") as ctx:
+            assert ".runs" not in str(ctx.run_path)
+            assert ctx.run_path == ctx.build_root / "ceilometer" / ctx.build_id
+            assert ctx.logs_path == ctx.run_path / "logs"
+
     def test_creates_stdout_log(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
             print("test output")
