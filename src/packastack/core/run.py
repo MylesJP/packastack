@@ -53,14 +53,14 @@ class RunContext:
             ...
     """
 
-    def __init__(self, command: str, package: str = "") -> None:
+    def __init__(self, command: str, package: str = "", build_id: str = "") -> None:
         self.command = command
         self.package = package
         self.cfg = load_config()
         self.paths = {k: Path(v).expanduser().resolve() for k, v in self.cfg.get("paths", {}).items()}
         self.build_root = self.paths.get("build_root", Path.home() / ".cache" / "packastack" / "build")
         now_utc = datetime.datetime.now(datetime.UTC)
-        self.build_id = now_utc.strftime("%Y%m%d-%H%M%S")
+        self.build_id = build_id or now_utc.strftime("%Y%m%d-%H%M%S")
         self.run_id = self.build_id  # backward-compat alias
         if package:
             self.run_path = self.build_root / package / self.build_id

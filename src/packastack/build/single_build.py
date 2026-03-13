@@ -2359,9 +2359,24 @@ def import_and_patch(
     # -------------------------------------------------------------------------
     # Update debian/changelog with the new version
     # -------------------------------------------------------------------------
-    from packastack.debpkg.changelog import generate_changelog_message, update_changelog
+    from packastack.debpkg.changelog import (
+        generate_changelog_message,
+        get_current_version,
+        update_changelog,
+    )
 
     debian_dir = pkg_repo / "debian"
+
+    # Skip changelog update if the version already matches (e.g. resume).
+    current_changelog_version = get_current_version(debian_dir / "changelog")
+    if current_changelog_version == new_version:
+        activity("changelog", f"debian/changelog already at {new_version}, skipping update")
+        run.log_event({
+            "event": "changelog.already_current",
+            "version": new_version,
+        })
+        return PhaseResult.ok()
+
     git_sha = snapshot_result.git_sha if snapshot_result else ""
     signature_verified = False  # Will be updated from ctx if available
 

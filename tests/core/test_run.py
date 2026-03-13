@@ -59,6 +59,22 @@ class TestRunContext:
             assert ctx.run_path == ctx.build_root / "ceilometer" / ctx.build_id
             assert ctx.logs_path == ctx.run_path / "logs"
 
+    def test_custom_build_id_reused(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        with run.RunContext("build", package="nova", build_id="20260313-221733") as ctx:
+            assert ctx.build_id == "20260313-221733"
+            assert ctx.run_id == "20260313-221733"
+            assert ctx.run_path == ctx.build_root / "nova" / "20260313-221733"
+
+    def test_empty_build_id_generates_timestamp(
+        self, temp_home: Path, mock_config: Path
+    ) -> None:
+        with run.RunContext("build", package="nova", build_id="") as ctx:
+            # Should be a generated timestamp, not empty
+            assert ctx.build_id
+            assert len(ctx.build_id) == 15  # YYYYMMDD-HHMMSS
+
     def test_creates_stdout_log(self, temp_home: Path, mock_config: Path) -> None:
         with run.RunContext("test") as ctx:
             print("test output")
