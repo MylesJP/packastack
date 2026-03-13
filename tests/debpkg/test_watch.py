@@ -282,6 +282,97 @@ https://example.com/foo-(.+).tar.gz
         assert msg == ""
 
 
+class TestFixMalformedWatchOpts:
+    """Tests for fix_malformed_watch_opts function."""
+
+    def test_moves_leaked_option_inside_quotes(self, tmp_path: Path) -> None:
+        """Options after the closing quote are moved inside."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            'version=4\n'
+            'opts="uversionmangle=s/\\.([a-zA-Z])/~$1/;s/%7E/~/;s/\\.0b/~b/;s/\\.0rc/~rc/"'
+            ',pgpsigurlmangle=s/$/.asc/ \\\n'
+            ' https://tarballs.opendev.org/openstack/heat-dashboard/'
+            ' heat_dashboard-(\\d{1,2}\\.\\d.*)\\.tar\\.gz\n'
+        )
+
+        result = watch.fix_malformed_watch_opts(watch_file)
+
+        assert result is True
+        content = watch_file.read_text()
+        # pgpsigurlmangle should now be inside the quotes
+        assert ',pgpsigurlmangle=s/$/.asc/"' in content
+        # No option should appear after the closing quote
+        assert '",pgpsigurlmangle' not in content
+
+    def test_multiple_leaked_options(self, tmp_path: Path) -> None:
+        """Multiple leaked options are all moved inside the quotes."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            'version=4\n'
+            'opts="uversionmangle=s/\\.0rc/~rc/"'
+            ',pgpsigurlmangle=s/$/.asc/,pgpmode=auto \\\n'
+            ' https://example.com/ foo-(\\d.*)\\.tar\\.gz\n'
+        )
+
+        result = watch.fix_malformed_watch_opts(watch_file)
+
+        assert result is True
+        content = watch_file.read_text()
+        assert ',pgpsigurlmangle=s/$/.asc/,pgpmode=auto"' in content
+
+    def test_no_change_for_correct_quoting(self, tmp_path: Path) -> None:
+        """Returns False when opts are correctly quoted."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            'version=4\n'
+            'opts="uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/" \\\n'
+            ' https://example.com/ foo-(\\d.*)\\.tar\\.gz\n'
+        )
+
+        result = watch.fix_malformed_watch_opts(watch_file)
+
+        assert result is False
+
+    def test_no_change_for_unquoted_opts(self, tmp_path: Path) -> None:
+        """Returns False for correctly-formed unquoted opts."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            "version=4\n"
+            "opts=uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/ \\\n"
+            " https://example.com/ foo-(\\d.*)\\.tar\\.gz\n"
+        )
+
+        result = watch.fix_malformed_watch_opts(watch_file)
+
+        assert result is False
+
+    def test_no_change_for_missing_file(self, tmp_path: Path) -> None:
+        """Returns False when file does not exist."""
+        result = watch.fix_malformed_watch_opts(tmp_path / "watch")
+
+        assert result is False
+
+    def test_preserves_rest_of_file(self, tmp_path: Path) -> None:
+        """Fix only touches the malformed opts line, not other content."""
+        watch_file = tmp_path / "watch"
+        url_line = (
+            " https://tarballs.opendev.org/openstack/heat-dashboard/"
+            " heat_dashboard-(\\d{1,2}\\.\\d.*)\\.tar\\.gz\n"
+        )
+        watch_file.write_text(
+            'version=4\n'
+            'opts="uversionmangle=s/\\.0rc/~rc/",pgpsigurlmangle=s/$/.asc/ \\\n'
+            + url_line
+        )
+
+        watch.fix_malformed_watch_opts(watch_file)
+
+        content = watch_file.read_text()
+        assert url_line in content
+        assert content.startswith("version=4\n")
+
+
 class TestRestorePgpOptionsToWatch:
     """Tests for restore_pgp_options_to_watch function."""
 
@@ -353,6 +444,44 @@ class TestRestorePgpOptionsToWatch:
         content = watch_file.read_text()
         assert "pgpsigurlmangle=s/$/.asc/" in content
         assert "uversionmangle" in content
+
+    def test_restores_inside_quoted_opts(self, tmp_path: Path) -> None:
+        """Inserts pgpsigurlmangle before the closing quote for quoted opts."""
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(
+            'version=4\n'
+            'opts="uversionmangle=s/\\.([a-zA-Z])/~$1/;s/%7E/~/;s/\\.0b/~b/;s/\\.0rc/~rc/" \\\n'
+            ' https://tarballs.opendev.org/openstack/heat-dashboard/'
+            ' heat_dashboard-(\\d{1,2}\\.\\d.*)\\.tar\\.gz\n'
+        )
+
+        result = watch.restore_pgp_options_to_watch(watch_file)
+
+        assert result is True
+        content = watch_file.read_text()
+        # Must be inside the quotes, not after
+        assert ',pgpsigurlmangle=s/$/.asc/"' in content
+        assert '",pgpsigurlmangle' not in content
+
+    def test_roundtrip_quoted_opts(self, tmp_path: Path) -> None:
+        """Remove then restore PGP options with quoted opts stays valid."""
+        original = (
+            'version=4\n'
+            'opts="uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/" \\\n'
+            ' https://tarballs.opendev.org/openstack/aodh/ aodh-(\\d.*)\\.tar\\.gz\n'
+        )
+        watch_file = tmp_path / "watch"
+        watch_file.write_text(original)
+
+        # Remove
+        assert watch.remove_pgp_options_from_watch(watch_file) is True
+        assert "pgpsigurlmangle" not in watch_file.read_text()
+
+        # Restore
+        assert watch.restore_pgp_options_to_watch(watch_file) is True
+        content = watch_file.read_text()
+        assert ',pgpsigurlmangle=s/$/.asc/"' in content
+        assert '",pgpsigurlmangle' not in content
 
 
 class TestParseDehsOutput:

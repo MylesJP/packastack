@@ -480,10 +480,67 @@ def format_mismatch_warning(warning: WatchMismatchWarning) -> str:
     return "\n".join(lines)
 
 
+# Pattern to detect options placed after the closing quote of opts="..."
+# e.g. opts="uversionmangle=...",pgpsigurlmangle=s/$/.asc/ \
+# The options after the closing " must be moved inside the quotes.
+_OPTS_LEAKED_RE = re.compile(
+    r'(opts\s*=\s*"[^"]*)(")((?:,\s*\w+=\S+)+)(\s)',
+    re.IGNORECASE,
+)
+
+
+def fix_malformed_watch_opts(watch_path: Path) -> bool:
+    """Fix malformed opts= lines where options leak outside the closing quote.
+
+    In uscan v4 watch files, all options must be comma-separated inside the
+    ``opts="..."`` quoted string.  Some packaging repos have a malformed
+    pattern where one or more options appear *after* the closing quote::
+
+        opts="uversionmangle=s/\\.0rc/~rc/",pgpsigurlmangle=s/$/.asc/ \\
+
+    uscan rejects such lines with ``malformed opts=...``.  This function
+    detects the pattern and moves the leaked options inside the quotes::
+
+        opts="uversionmangle=s/\\.0rc/~rc/,pgpsigurlmangle=s/$/.asc/" \\
+
+    Args:
+        watch_path: Path to the debian/watch file.
+
+    Returns:
+        True if the file was modified.
+    """
+    if not watch_path.exists():
+        return False
+
+    try:
+        content = watch_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+    original = content
+
+    # Move leaked options inside the closing quote.
+    # Group 1: opts="<everything inside>   (without closing quote)
+    # Group 2: the closing "
+    # Group 3: leaked options like ,pgpsigurlmangle=s/$/.asc/
+    # Group 4: trailing whitespace (space before backslash or EOL)
+    content = _OPTS_LEAKED_RE.sub(r'\1\3\2\4', content)
+
+    if content != original:
+        try:
+            watch_path.write_text(content, encoding="utf-8")
+            return True
+        except OSError:
+            return False
+
+    return False
+
+
 # Patterns for PGP signature options in watch files
-# Match pgpsigurlmangle=value or pgpmode=value with optional leading comma
+# Match pgpsigurlmangle=value or pgpmode=value with optional leading comma.
+# The character class excludes quotes so we don't eat a closing opts="..." quote.
 PGP_OPTION_PATTERN = re.compile(
-    r",?\s*(?:pgpsigurlmangle|pgpmode)\s*=\s*[^,\s\\]+",
+    r",?\s*(?:pgpsigurlmangle|pgpmode)\s*=\s*[^,\s\\\"]+",
     re.IGNORECASE,
 )
 
@@ -609,22 +666,35 @@ def restore_pgp_options_to_watch(watch_path: Path) -> bool:
     original = content
 
     # Insert pgpsigurlmangle at the end of the existing opts= value.
-    # Watch files look like:
-    #   opts=uversionmangle=...,pgpsigurlmangle=s/$/.asc/ \
-    # or with a backslash continuation:
-    #   opts=uversionmangle=... \
+    # Watch files come in two flavours:
+    #   Quoted:   opts="uversionmangle=..." \
+    #   Unquoted: opts=uversionmangle=... \
     #
-    # Strategy: greedily match the full opts value, then backtrack to the
-    # line-continuation backslash at end-of-line (preceded by whitespace).
-    # The greedy .* ensures we skip past embedded backslashes in sed
-    # expressions like s/\.0rc/~rc/.
+    # For quoted opts we must insert *before* the closing quote to avoid
+    # the "malformed opts=" error from uscan.  For unquoted opts we
+    # insert before the trailing whitespace + backslash continuation.
+
+    # Try quoted form first: insert before the closing "
     content = re.sub(
-        r"(opts\s*=\s*.*)(\s\\)\s*$",
-        r"\1,pgpsigurlmangle=s/$/.asc/\2",
+        r'(opts\s*=\s*"[^"]*)("\s*\\)\s*$',
+        r'\1,pgpsigurlmangle=s/$/.asc/\2',
         content,
         count=1,
         flags=re.MULTILINE,
     )
+
+    if content == original:
+        # Fall back to unquoted form: greedily match the full opts value,
+        # then backtrack to the line-continuation backslash at end-of-line.
+        # The greedy .* ensures we skip past embedded backslashes in sed
+        # expressions like s/\.0rc/~rc/.
+        content = re.sub(
+            r"(opts\s*=\s*.*)(\s\\)\s*$",
+            r"\1,pgpsigurlmangle=s/$/.asc/\2",
+            content,
+            count=1,
+            flags=re.MULTILINE,
+        )
 
     if content != original:
         try:
