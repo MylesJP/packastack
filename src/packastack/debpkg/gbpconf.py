@@ -332,6 +332,80 @@ def get_components(repo_path: Path) -> list[str]:
     return components
 
 
+class suppress_components_for_import:
+    """Context manager that creates a temporary gbp.conf without ``component`` keys.
+
+    ``gbp import-orig`` reads ``component`` from ``[import-orig]`` (and
+    ``[buildpackage]``) and automatically expects the component tarball
+    to exist alongside the main tarball.  When Packastack needs to import
+    the main tarball *first* and generate component tarballs later (e.g.
+    via ``debian/bundle-xstatic.sh``), this context manager writes a
+    copy of the config *without* those keys to a temporary file and
+    exposes it via :attr:`env` so that callers can set
+    ``GBP_CONF_FILES`` when invoking gbp.
+
+    The in-repo ``debian/gbp.conf`` is **never modified**, so the git
+    working tree stays clean.
+
+    Usage::
+
+        with suppress_components_for_import(pkg_repo) as ctx:
+            import_orig(pkg_repo, tarball, ..., env=ctx.env)
+        # temp file is cleaned up automatically
+
+    If the repo has no gbp.conf or no component keys, :attr:`env` is
+    an empty dict (no override needed).
+    """
+
+    def __init__(self, repo_path: Path) -> None:
+        self.conf_path = repo_path / "debian" / "gbp.conf"
+        self.env: dict[str, str] = {}
+        self._tmpfile: Path | None = None
+
+    def __enter__(self) -> suppress_components_for_import:
+        if not self.conf_path.exists():
+            return self
+
+        try:
+            original = self.conf_path.read_text(encoding="utf-8")
+
+            parser = configparser.ConfigParser()
+            parser.read_string(original)
+
+            changed = False
+            for section in ("import-orig", "buildpackage"):
+                if parser.has_section(section) and parser.has_option(section, "component"):
+                    parser.remove_option(section, "component")
+                    changed = True
+
+            if changed:
+                import os
+                import tempfile
+
+                fd, tmp_path = tempfile.mkstemp(prefix="gbp-conf-", suffix=".conf")
+                os.close(fd)
+                self._tmpfile = Path(tmp_path)
+                with self._tmpfile.open("w", encoding="utf-8") as fh:
+                    parser.write(fh)
+                # Override gbp's config search path to use only this temp file
+                self.env = {"GBP_CONF_FILES": str(self._tmpfile)}
+        except (configparser.Error, OSError):
+            pass
+
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        if self._tmpfile is not None:
+            self._tmpfile.unlink(missing_ok=True)
+            self._tmpfile = None
+            self.env = {}
+
+
 if __name__ == "__main__":
     import sys
 

@@ -347,6 +347,7 @@ def import_orig(
     pristine_tar: bool = True,
     merge: bool = True,
     component: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> ImportOrigResult:
     """Import an upstream tarball using gbp import-orig.
 
@@ -366,6 +367,9 @@ def import_orig(
         merge: If True, merge upstream into the current branch.
         component: Component name for gbp component tarballs (e.g., "xstatic").
             When set, passes --component=<name> to gbp import-orig.
+        env: Additional environment variables for the gbp subprocess
+            (e.g., ``{"GBP_CONF_FILES": "/tmp/override.conf"}`` to
+            override the default config search path).
 
     Returns:
         ImportOrigResult with success status.
@@ -408,7 +412,7 @@ def import_orig(
 
     cmd.append(str(tarball_path))
 
-    returncode, stdout, stderr = run_command(cmd, cwd=repo_path)
+    returncode, stdout, stderr = run_command(cmd, cwd=repo_path, env=env)
     output = stdout + stderr
 
     # Try to extract the version from output

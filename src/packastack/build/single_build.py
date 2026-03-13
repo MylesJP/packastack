@@ -206,6 +206,7 @@ class SingleBuildContext:
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
+    archive_deps: bool
     min_version_policy: str
     dep_report: bool
     fail_on_cloud_archive_required: bool
@@ -277,6 +278,7 @@ class SetupInputs:
     skip_repo_regen: bool
     no_spinner: bool
     build_deps: bool
+    archive_deps: bool
     min_version_policy: str
     dep_report: bool
     include_retired: bool
@@ -627,6 +629,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         skip_repo_regen=inputs.skip_repo_regen,
         no_spinner=inputs.no_spinner,
         build_deps=inputs.build_deps,
+        archive_deps=inputs.archive_deps,
         min_version_policy=inputs.min_version_policy,
         dep_report=inputs.dep_report,
         fail_on_cloud_archive_required=inputs.fail_on_cloud_archive_required,
@@ -768,6 +771,7 @@ def fetch_packaging_repo(
     # Check debian/watch for mismatch with registry (advisory only)
     from packastack.debpkg.watch import (
         check_watch_mismatch,
+        fix_malformed_watch_opts,
         fix_oslo_watch_pattern,
         has_upstream_signing_key,
         parse_watch_file,
@@ -779,6 +783,7 @@ def fetch_packaging_repo(
     )
 
     watch_path = pkg_repo / "debian" / "watch"
+
     watch_result = parse_watch_file(watch_path)
     if watch_result.mode.value != "unknown" and ctx.upstream_config:
         mismatch = check_watch_mismatch(
@@ -813,6 +818,14 @@ def fetch_packaging_repo(
     watch_updated = False
     watch_changes: list[str] = []
     signing_key_updated = False
+
+    # Fix malformed opts= quoting before any other watch processing.
+    # Some packaging repos have options outside the closing quote which
+    # causes uscan to reject the line entirely.
+    if fix_malformed_watch_opts(watch_path):
+        activity("prepare", "Fixed malformed opts= quoting in debian/watch")
+        watch_updated = True
+        watch_changes.append("fix malformed opts= quoting")
 
     if upgrade_watch_version(watch_path):
         activity("prepare", "Updated debian/watch to version=4")
@@ -1960,7 +1973,81 @@ def import_and_patch(
                 base, marker = milestone_parts
                 import_version = f"{base}~{marker}"
 
-        # Import without merging - we'll handle the merge manually to preserve packaging files
+        # Import without merging - we'll handle the merge manually to preserve packaging files.
+        # If the package declares gbp components (e.g., xstatic), the component
+        # tarballs must exist *before* the main import so that gbp import-orig
+        # can handle everything in a single atomic call.  We invoke the same
+        # debian/bundle-<component>.sh scripts that uploaders use manually,
+        # keeping the process transparent and reproducible.
+        from packastack.debpkg.gbpconf import get_components
+
+        components = get_components(pkg_repo)
+
+        for comp_name in components:
+            bundle_script = pkg_repo / "debian" / f"bundle-{comp_name}.sh"
+            if not bundle_script.exists():
+                activity(
+                    "import-orig",
+                    f"Component '{comp_name}' declared but no bundle script found",
+                )
+                continue
+
+            comp_version = import_version or ""
+            if not comp_version:
+                activity(
+                    "import-orig",
+                    f"Skipping component '{comp_name}': no version available",
+                )
+                continue
+
+            activity(
+                "import-orig",
+                f"Generating component tarball: bundle-{comp_name}.sh {comp_version}",
+            )
+            bundle_cmd = ["bash", str(bundle_script), comp_version]
+            bundle_rc, bundle_out, bundle_err = run_command(
+                bundle_cmd, cwd=pkg_repo
+            )
+
+            if bundle_rc != 0:
+                activity(
+                    "import-orig",
+                    f"Component bundle script failed: {bundle_err or bundle_out}",
+                )
+                run.log_event(
+                    {
+                        "event": "import-orig.component_bundle_failed",
+                        "component": comp_name,
+                        "error": bundle_err or bundle_out,
+                    }
+                )
+                continue
+
+            comp_tarball = (
+                pkg_repo.parent
+                / f"{ctx.pkg_name}_{comp_version}.orig-{comp_name}.tar.gz"
+            )
+            if comp_tarball.exists():
+                activity(
+                    "import-orig",
+                    f"Component tarball generated: {comp_tarball.name}",
+                )
+                run.log_event(
+                    {
+                        "event": "import-orig.component_generated",
+                        "component": comp_name,
+                        "tarball": str(comp_tarball),
+                    }
+                )
+            else:
+                activity(
+                    "import-orig",
+                    f"Component tarball not found after bundle: {comp_tarball.name}",
+                )
+
+        # Now import the main tarball.  If component tarballs were pre-generated
+        # above, gbp import-orig finds them alongside the main tarball (they
+        # share the same parent directory) and imports everything at once.
         import_result = import_orig(
             pkg_repo,
             upstream_tarball,
@@ -1979,99 +2066,6 @@ def import_and_patch(
                     "version": import_result.upstream_version,
                 }
             )
-
-            # Import component tarballs (e.g., xstatic) if declared
-            from packastack.debpkg.gbpconf import get_components
-
-            components = get_components(pkg_repo)
-            for comp_name in components:
-                bundle_script = pkg_repo / "debian" / f"bundle-{comp_name}.sh"
-                if not bundle_script.exists():
-                    activity(
-                        "import-orig",
-                        f"Component '{comp_name}' declared but no bundle script found",
-                    )
-                    continue
-
-                comp_version = import_version or import_result.upstream_version or ""
-                if not comp_version:
-                    activity(
-                        "import-orig",
-                        f"Skipping component '{comp_name}': no version available",
-                    )
-                    continue
-
-                activity(
-                    "import-orig",
-                    f"Generating component tarball: bundle-{comp_name}.sh {comp_version}",
-                )
-                bundle_cmd = [str(bundle_script), comp_version]
-                bundle_rc, bundle_out, bundle_err = run_command(
-                    bundle_cmd, cwd=pkg_repo
-                )
-                if bundle_rc != 0:
-                    activity(
-                        "import-orig",
-                        f"Component bundle script failed: {bundle_err or bundle_out}",
-                    )
-                    run.log_event(
-                        {
-                            "event": "import-orig.component_bundle_failed",
-                            "component": comp_name,
-                            "error": bundle_err or bundle_out,
-                        }
-                    )
-                    continue
-
-                # Locate the generated component tarball
-                comp_tarball = (
-                    pkg_repo.parent
-                    / f"{ctx.pkg_name}_{comp_version}.orig-{comp_name}.tar.gz"
-                )
-                if not comp_tarball.exists():
-                    activity(
-                        "import-orig",
-                        f"Component tarball not found: {comp_tarball.name}",
-                    )
-                    continue
-
-                activity(
-                    "import-orig",
-                    f"Importing component tarball: {comp_tarball.name}",
-                )
-                comp_result = import_orig(
-                    pkg_repo,
-                    comp_tarball,
-                    upstream_version=comp_version,
-                    upstream_branch=upstream_branch_name,
-                    pristine_tar=True,
-                    merge=False,
-                    component=comp_name,
-                )
-                if comp_result.success:
-                    activity(
-                        "import-orig",
-                        f"Component '{comp_name}' imported successfully",
-                    )
-                    run.log_event(
-                        {
-                            "event": "import-orig.component_complete",
-                            "component": comp_name,
-                            "tarball": str(comp_tarball),
-                        }
-                    )
-                else:
-                    activity(
-                        "import-orig",
-                        f"Component '{comp_name}' import failed: {comp_result.output}",
-                    )
-                    run.log_event(
-                        {
-                            "event": "import-orig.component_failed",
-                            "component": comp_name,
-                            "error": comp_result.output,
-                        }
-                    )
 
             # Now manually merge the upstream tag, preserving packaging files.
             # gbp replaces "~" with "_" in git tag names (since "~" is an invalid
@@ -2484,7 +2478,7 @@ def build_packages(
                 use_builder = Builder.DPKG
             else:
                 # Ensure local repo has indexes before sbuild
-                if not ctx.skip_repo_regen:
+                if not ctx.skip_repo_regen and not ctx.archive_deps:
                     from packastack.build.localrepo_helpers import refresh_local_repo_indexes
                     refresh_local_repo_indexes(ctx.local_repo, host_arch, run, phase="build")
 
@@ -2493,7 +2487,7 @@ def build_packages(
                     output_dir=build_output,
                     distribution=ctx.resolved_ubuntu,
                     arch=host_arch,
-                    local_repo_root=ctx.local_repo,
+                    local_repo_root=None if ctx.archive_deps else ctx.local_repo,
                     chroot_name=ctx.schroot_name,
                     run_log_dir=run.logs_path,
                     source_package=ctx.package,

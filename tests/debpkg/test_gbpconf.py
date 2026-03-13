@@ -548,3 +548,117 @@ component =
 
         result = gbpconf.get_components(tmp_path)
         assert result == ["xstatic"]
+
+
+class TestSuppressComponentsForImport:
+    """Tests for suppress_components_for_import context manager."""
+
+    def test_creates_temp_config_without_component(self, tmp_path: Path) -> None:
+        """Test a temp config is created without component keys and env is set."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        original = """\
+[DEFAULT]
+debian-branch = master
+
+[import-orig]
+component = xstatic
+
+[buildpackage]
+component = xstatic
+export-dir = ../build-area/
+"""
+        conf_path.write_text(original)
+
+        with gbpconf.suppress_components_for_import(tmp_path) as ctx:
+            import configparser
+
+            # env should point to a temp file
+            assert "GBP_CONF_FILES" in ctx.env
+            tmp_conf = Path(ctx.env["GBP_CONF_FILES"])
+            assert tmp_conf.exists()
+
+            # The temp config should not have component keys
+            parser = configparser.ConfigParser()
+            parser.read(tmp_conf)
+            assert not parser.has_option("import-orig", "component")
+            assert not parser.has_option("buildpackage", "component")
+
+            # The in-repo file must be unchanged
+            assert conf_path.read_text() == original
+
+        # Temp file is cleaned up
+        assert not tmp_conf.exists()
+        assert ctx.env == {}
+        # In-repo file still untouched
+        assert conf_path.read_text() == original
+
+    def test_noop_when_no_component(self, tmp_path: Path) -> None:
+        """Test env is empty when gbp.conf has no component setting."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        original = """\
+[DEFAULT]
+debian-branch = master
+
+[buildpackage]
+export-dir = ../build-area/
+"""
+        conf_path.write_text(original)
+
+        with gbpconf.suppress_components_for_import(tmp_path) as ctx:
+            assert ctx.env == {}
+            assert conf_path.read_text() == original
+
+    def test_noop_when_no_gbp_conf(self, tmp_path: Path) -> None:
+        """Test context manager is a no-op when gbp.conf doesn't exist."""
+        with gbpconf.suppress_components_for_import(tmp_path) as ctx:
+            assert ctx.env == {}
+
+    def test_cleans_up_on_exception(self, tmp_path: Path) -> None:
+        """Test temp file is cleaned up even if an exception occurs."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = master
+
+[import-orig]
+component = xstatic
+""")
+
+        tmp_conf_path = None
+        try:
+            with gbpconf.suppress_components_for_import(tmp_path) as ctx:
+                tmp_conf_path = Path(ctx.env["GBP_CONF_FILES"])
+                assert tmp_conf_path.exists()
+                raise ValueError("simulated failure")
+        except ValueError:
+            pass
+
+        assert tmp_conf_path is not None
+        assert not tmp_conf_path.exists()
+
+    def test_only_import_orig_component(self, tmp_path: Path) -> None:
+        """Test strips component from import-orig only (no buildpackage)."""
+        debian_dir = tmp_path / "debian"
+        debian_dir.mkdir()
+        conf_path = debian_dir / "gbp.conf"
+        conf_path.write_text("""\
+[DEFAULT]
+debian-branch = master
+
+[import-orig]
+component = xstatic
+""")
+
+        with gbpconf.suppress_components_for_import(tmp_path) as ctx:
+            import configparser
+
+            assert "GBP_CONF_FILES" in ctx.env
+            parser = configparser.ConfigParser()
+            parser.read(ctx.env["GBP_CONF_FILES"])
+            assert not parser.has_option("import-orig", "component")
