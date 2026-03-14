@@ -18,14 +18,14 @@ Build-all orchestration state is stored under: `~/.cache/packastack/build/.build
 ## Code Conventions
 All code should be pep8 compliant and pass formatting checks using the black linter and formatter.
 All code should have 100% unit test coverage.
-All cli commands use the click framework
+All cli commands use the Typer framework
 The documentation should be kept in sync with any changes to functionality.
 
 ### Coverage Exclusions
 Methods or functions that only contain a `pass` statement should include `# pragma: no cover` at the end of the line to exclude them from coverage reporting. This typically applies to:
 - Abstract methods in base classes
 - Exception class definitions
-- Click group/command definitions that only serve as entry points
+- Typer app/command definitions that only serve as entry points
 
 **Example:**
 ```python
@@ -77,10 +77,10 @@ Assume many interactions will fail. Some examples include:
 Commands should try and be idempotent if possible and the state of the world rolled back after error if not.
 Specific exceptions should be raised rather than top level exceptions such as RuntimeException or Exception.
 
-### Click CLI Style
-- Use `@click.option` with `required=True` for mandatory args instead of positional arguments
+### Typer CLI Style
+- Use `typer.Option()` for mandatory args instead of positional arguments
 - Boolean flags use `--flag/--no-flag` pattern (e.g., `--remote/--no-remote`, `--push/--no-push`)
-- Echo success messages after operations: `click.echo(f"Created tag {name}")`
+- Echo success messages after operations: `typer.echo(f"Created tag {name}")`
 
 ## Development Workflow
 
@@ -116,7 +116,7 @@ See `.python-version` - ensure compatibility with `>=3.12` features when adding 
 
 ## Key Dependencies
 - **GitPython** (`git` module): All Git operations go through this library
-- **Click**: CLI framework - use decorators for commands and options, not manual arg parsing
+- **Typer**: CLI framework - use type annotations for commands and options, not manual arg parsing
 - **launchpadlib**: library used for interacting with launchpad
 
 ## Common Pitfalls
