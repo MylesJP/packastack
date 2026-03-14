@@ -1328,7 +1328,7 @@ def _run_build(
             signature_verified=outcome.signature_verified,
             artifacts=[str(a) for a in outcome.artifacts],
             provenance=summarize_provenance(ctx.provenance) if ctx.provenance else None,
-                dependency_reports={k: str(v) for k, v in (ctx.dependency_reports or {}).items()},
+            dependency_reports={k: str(v) for k, v in (ctx.dependency_reports or {}).items()},
             exit_code=EXIT_SUCCESS,
         )
 

@@ -17,7 +17,6 @@ def _badge(text: str, color: str) -> str:
 
 
 def _status_cell(status: dict[str, Any]) -> str:
-    status.get("found")
     comp = status.get("component", "?")
     version = status.get("version") or "—"
     reason = status.get("reason", "")

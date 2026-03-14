@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/myles/.cache/packastack/build/aodh/20260312-163852/**)",
+      "Bash(git -C /home/myles/.cache/packastack/build/aodh/20260312-163852/aodh branch -a)",
+      "Bash(git -C /home/myles/.cache/packastack/build/aodh/20260312-163852/aodh log pristine-tar --oneline)",
+      "Bash(git -C /home/myles/.cache/packastack/build/aodh/20260312-163852/aodh tag -l)",
+      "Bash(ls -la /home/myles/.cache/packastack/build/aodh/20260312-163852/aodh*.tar.gz)",
+      "Read(//home/myles/.cache/packastack/build/aodh/20260312-174332/aodh/debian/**)",
+      "Read(//tmp/**)",
+      "Read(//home/myles/.cache/packastack/build/octavia/20260312-212911/logs/**)",
+      "Read(//home/myles/.cache/packastack/build/octavia/20260312-212911/build-output/**)",
+      "Read(//home/myles/**)",
+      "Bash(ls -lt ~/ubuntu/logs/octavia*)",
+      "Bash(find /home/myles -name *octavia*18.0.0*build* -newer /home/myles/.cache/packastack/build/octavia/20260312-212911/logs/sbuild.stderr.log -type f)",
+      "Bash(find /home/myles -path */ubuntu/logs/* -name *octavia* -type f)",
+      "Read(//var/log/**)",
+      "Bash(find /tmp -name *octavia*sbuild* -o -name *octavia*.build)",
+      "Bash(mkdir -p ~/ubuntu/logs)",
+      "Bash(sbuild --version)",
+      "Bash(sbuild --help)",
+      "Bash(col -b)",
+      "Bash(ls -d /home/myles/.cache/packastack/build/octavia/2026031*)",
+      "Bash(pip install:*)",
+      "Bash(desloppify update-skill:*)",
+      "Bash(ls -d /home/myles/gazpacho-pkg/packastack/*/)",
+      "Bash(desloppify scan:*)",
+      "Bash(desloppify next:*)",
+      "Bash(desloppify review:*)"
+    ]
+  }
+}
