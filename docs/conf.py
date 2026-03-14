@@ -2,9 +2,6 @@
 #
 # This file is based on the Canonical Sphinx Docs Starter Pack.
 
-import sys
-import os
-
 # -- Project information -----------------------------------------------------
 project = 'PackaStack'
 copyright = '2025 Canonical Ltd.'
