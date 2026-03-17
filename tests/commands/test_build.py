@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -201,6 +202,85 @@ class TestSetWorkspace:
         local_vars = {"workspace": None}
         build._set_workspace(tmp_path, local_vars)
         assert local_vars["workspace"] == tmp_path
+
+
+class TestBuildSingleModeResumeBuildId:
+    """Tests that _build_single_mode passes the correct build_id to RunContext on resume."""
+
+    _COMMON_KWARGS: ClassVar[dict] = {
+        "package": "cinder",
+        "target": "devel",
+        "ubuntu_series": "noble",
+        "cloud_archive": "",
+        "build_type": "release",
+        "force": False,
+        "offline": False,
+        "validate_plan_only": False,
+        "plan_upload": False,
+        "upload": False,
+        "binary": False,
+        "builder": "sbuild",
+        "build_deps": False,
+        "archive_deps": False,
+        "min_version_policy": "report",
+        "fail_on_cloud_archive_required": False,
+        "fail_on_mir_required": False,
+        "update_control_min_versions": False,
+        "normalize_to_prev_lts_floor": False,
+        "dry_run_control_edit": False,
+        "dep_report": False,
+        "no_cleanup": False,
+        "no_spinner": True,
+        "yes": False,
+        "include_retired": False,
+    }
+
+    def _call(self, resume_run_id: str = "", resume_build_id: str = "") -> MagicMock:
+        """Call _build_single_mode with mocked RunContext and capture the build_id argument.
+
+        Returns the mock RunContext constructor so callers can assert on it.
+        """
+        mock_run_ctx = MagicMock()
+        mock_run_ctx.__enter__ = MagicMock(return_value=mock_run_ctx)
+        mock_run_ctx.__exit__ = MagicMock(return_value=False)
+
+        mock_cls = MagicMock(return_value=mock_run_ctx)
+        with ExitStack() as stack:
+            stack.enter_context(patch("packastack.commands.build.RunContext", mock_cls))
+            # _run_build will be called inside the context — mock it to exit cleanly
+            stack.enter_context(
+                patch.object(build, "_run_build", return_value=build.EXIT_SUCCESS)
+            )
+            # sys.exit is called at the end — catch it
+            stack.enter_context(pytest.raises(SystemExit))
+
+            build._build_single_mode(
+                **self._COMMON_KWARGS,
+                resume_workspace=bool(resume_run_id or resume_build_id),
+                resume_run_id=resume_run_id,
+                resume_build_id=resume_build_id,
+            )
+        return mock_cls
+
+    def test_resume_build_id_used(self) -> None:
+        """--resume-build passes build_id to RunContext."""
+        mock_cls = self._call(resume_build_id="20260317-205732")
+        mock_cls.assert_called_once_with("build", package="cinder", build_id="20260317-205732")
+
+    def test_resume_run_id_used(self) -> None:
+        """--resume-run-id passes build_id to RunContext (backward compat)."""
+        mock_cls = self._call(resume_run_id="20260317-205732")
+        mock_cls.assert_called_once_with("build", package="cinder", build_id="20260317-205732")
+
+    def test_resume_build_id_takes_precedence(self) -> None:
+        """--resume-build takes precedence over --resume-run-id."""
+        mock_cls = self._call(resume_run_id="20260317-111111", resume_build_id="20260317-222222")
+        mock_cls.assert_called_once_with("build", package="cinder", build_id="20260317-222222")
+
+    def test_no_resume_generates_new_id(self) -> None:
+        """Without resume flags, build_id is empty (RunContext generates a fresh timestamp)."""
+        mock_cls = self._call()
+        mock_cls.assert_called_once_with("build", package="cinder", build_id="")
 
 
 class TestEnsureNoMergePaths:

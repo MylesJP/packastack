@@ -675,7 +675,8 @@ def _build_single_mode(
     resume_build_id: str = "",
 ) -> None:
     """Build a single package."""
-    with RunContext("build", package=package, build_id=resume_build_id) as run:
+    effective_build_id = resume_build_id or resume_run_id
+    with RunContext("build", package=package, build_id=effective_build_id) as run:
         exit_code = EXIT_SUCCESS
         workspace: Path | None = None
         cleanup_on_exit = not no_cleanup
