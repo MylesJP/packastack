@@ -186,8 +186,12 @@ def _parse_refresh_response(response: AIResponse, patch_name: str) -> PatchRefre
     end_idx = content.find(end_marker)
     if begin_idx != -1 and end_idx != -1 and end_idx > begin_idx:
         patch_start = begin_idx + len(begin_marker)
-        result.patch_content = content[patch_start:end_idx].strip()
-        if result.patch_content:
+        # Strip leading whitespace but preserve the trailing newline —
+        # unified diffs must end with a newline or git will report
+        # "corrupt patch".
+        raw = content[patch_start:end_idx].strip()
+        if raw:
+            result.patch_content = raw + "\n"
             result.refreshed = True
 
     if not result.explanation:
@@ -217,6 +221,125 @@ def _extract_dep3_header(patch_content: str) -> str:
             break
         header_lines.append(line)
     return "".join(header_lines)
+
+
+def _get_deleted_files(patch_content: str) -> list[str]:
+    """Return file paths that the patch deletes, or empty if it does anything else.
+
+    A patch is considered a pure file-deletion patch when every ``diff``
+    section has ``deleted file mode`` and ``+++ /dev/null``.  If any
+    hunk adds or modifies lines, the patch is not a pure deletion.
+
+    Args:
+        patch_content: Full content of the patch file.
+
+    Returns:
+        List of file paths being deleted, or empty list if the patch
+        is not a pure file-deletion patch.
+    """
+    deleted: list[str] = []
+    in_diff = False
+    has_deleted_mode = False
+    current_path = ""
+
+    for line in patch_content.splitlines():
+        if line.startswith("diff --git "):
+            # Finish previous diff section
+            if in_diff and has_deleted_mode and current_path:
+                deleted.append(current_path)
+            elif in_diff and not has_deleted_mode:
+                return []  # Non-deletion diff found
+            in_diff = True
+            has_deleted_mode = False
+            current_path = ""
+        elif line.startswith("deleted file mode"):
+            has_deleted_mode = True
+        elif line.startswith("--- a/"):
+            current_path = line[6:].strip()
+        elif in_diff and not has_deleted_mode and line.startswith("@@ "):
+            # A hunk in a non-deletion section
+            return []
+
+    # Handle last diff section
+    if in_diff and has_deleted_mode and current_path:
+        deleted.append(current_path)
+    elif in_diff and not has_deleted_mode:
+        return []
+
+    return deleted
+
+
+def _try_file_deletion_refresh(
+    patch_name: str,
+    original_content: str,
+    pkg_repo: Path,
+) -> PatchRefreshResult | None:
+    """Attempt to refresh a pure file-deletion patch.
+
+    When a patch only deletes files, and those files still exist but
+    have different content (e.g. upstream changed a few lines), this
+    regenerates the deletion diff from the current file contents.
+
+    Args:
+        patch_name: Name of the patch file.
+        original_content: Full content of the original patch.
+        pkg_repo: Path to the packaging repository.
+
+    Returns:
+        A successful PatchRefreshResult if the patch was refreshed,
+        or None if this strategy doesn't apply.
+    """
+    from packastack.debpkg.gbp import run_command
+
+    deleted_files = _get_deleted_files(original_content)
+    if not deleted_files:
+        return None
+
+    # All targeted files must still exist for this strategy to work
+    for fpath in deleted_files:
+        if not (pkg_repo / fpath).is_file():
+            return None
+
+    # Stage file deletions and capture the diff
+    for fpath in deleted_files:
+        rc, _, _stderr = run_command(
+            ["git", "rm", "--quiet", fpath], cwd=pkg_repo,
+        )
+        if rc != 0:
+            _revert_working_tree(pkg_repo)
+            return None
+
+    _, diff_output, _ = run_command(
+        ["git", "diff", "--cached", "HEAD"], cwd=pkg_repo,
+    )
+
+    # Revert
+    _revert_working_tree(pkg_repo)
+
+    if not diff_output.strip():
+        return None
+
+    # Rebuild patch with original DEP3 header + new diff body
+    header = _extract_dep3_header(original_content)
+    refreshed_content = header + diff_output
+
+    # Validate
+    from packastack.ai.build_diagnosis import validate_patch
+
+    tmp_name = f".tmp-refresh-{patch_name}"
+    validation = validate_patch(pkg_repo, refreshed_content, tmp_name)
+    if not validation.valid:
+        return None
+
+    return PatchRefreshResult(
+        refreshed=True,
+        patch_name=patch_name,
+        patch_content=refreshed_content,
+        explanation=(
+            "Mechanically refreshed (file-deletion): "
+            "regenerated deletion diff from current upstream file contents"
+        ),
+    )
 
 
 def attempt_mechanical_refresh(
@@ -277,6 +400,16 @@ def attempt_mechanical_refresh(
             patch_name=patch_name,
             error="Patch already applies cleanly (issue is in an earlier patch)",
         )
+
+    # Special case: file deletion patches.  When a patch only deletes
+    # files that still exist, the content may have changed upstream
+    # causing the old deletion hunks to mismatch.  Regenerate the
+    # deletion diff from the current file contents.
+    deletion_result = _try_file_deletion_refresh(
+        patch_name, original, pkg_repo
+    )
+    if deletion_result is not None:
+        return deletion_result
 
     strategies: list[tuple[str, list[str], list[str]]] = [
         # (name, check_cmd, apply_cmd)

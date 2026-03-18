@@ -32,9 +32,11 @@ from packastack.ai.patch_diagnosis import (
     PatchRefreshResult,
     _extract_affected_paths,
     _extract_dep3_header,
+    _get_deleted_files,
     _parse_patch_response,
     _parse_refresh_response,
     _revert_working_tree,
+    _try_file_deletion_refresh,
     attempt_mechanical_refresh,
     auto_drop_upstreamed_patches,
     diagnose_patch_failure,
@@ -503,6 +505,26 @@ class TestParseRefreshResponse:
         result = _parse_refresh_response(response, "original.patch")
         assert result.patch_name == "renamed.patch"
 
+    def test_patch_content_ends_with_newline(self) -> None:
+        """Patch content must end with a newline for git apply."""
+        response = AIResponse(
+            success=True,
+            content=(
+                "ACTION: REFRESH\n"
+                "--- BEGIN PATCH ---\n"
+                "diff --git a/f.py b/f.py\n"
+                "--- a/f.py\n"
+                "+++ b/f.py\n"
+                "@@ -1 +1 @@\n"
+                "-old\n"
+                "+new\n"
+                "--- END PATCH ---\n"
+            ),
+        )
+        result = _parse_refresh_response(response, "fix.patch")
+        assert result.refreshed is True
+        assert result.patch_content.endswith("\n")
+
 
 class TestExtractAffectedPaths:
     """Tests for _extract_affected_paths function."""
@@ -620,6 +642,196 @@ class TestRevertWorkingTree:
 
         assert (repo / "file.txt").read_text() == "original\n"
         assert not (repo / "new.txt").exists()
+
+
+class TestGetDeletedFiles:
+    """Tests for _get_deleted_files function."""
+
+    def test_returns_deleted_file_path(self) -> None:
+        patch = (
+            "diff --git a/tests/test_foo.py b/tests/test_foo.py\n"
+            "deleted file mode 100644\n"
+            "index abc1234..0000000\n"
+            "--- a/tests/test_foo.py\n"
+            "+++ /dev/null\n"
+            "@@ -1,3 +0,0 @@\n"
+            "-line1\n"
+            "-line2\n"
+            "-line3\n"
+        )
+        assert _get_deleted_files(patch) == ["tests/test_foo.py"]
+
+    def test_returns_multiple_deleted_files(self) -> None:
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "deleted file mode 100644\n"
+            "index abc..000\n"
+            "--- a/a.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-a\n"
+            "diff --git a/b.py b/b.py\n"
+            "deleted file mode 100644\n"
+            "index def..000\n"
+            "--- a/b.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-b\n"
+        )
+        assert _get_deleted_files(patch) == ["a.py", "b.py"]
+
+    def test_returns_empty_for_modification_patch(self) -> None:
+        patch = (
+            "diff --git a/file.py b/file.py\n"
+            "--- a/file.py\n"
+            "+++ b/file.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            " ctx\n"
+            "-old\n"
+            "+new\n"
+            " ctx\n"
+        )
+        assert _get_deleted_files(patch) == []
+
+    def test_returns_empty_for_mixed_patch(self) -> None:
+        """A patch that deletes one file and modifies another is not pure deletion."""
+        patch = (
+            "diff --git a/a.py b/a.py\n"
+            "deleted file mode 100644\n"
+            "index abc..000\n"
+            "--- a/a.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-a\n"
+            "diff --git a/b.py b/b.py\n"
+            "--- a/b.py\n"
+            "+++ b/b.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+        )
+        assert _get_deleted_files(patch) == []
+
+    def test_returns_empty_for_empty_content(self) -> None:
+        assert _get_deleted_files("") == []
+
+    def test_returns_empty_for_no_diff_sections(self) -> None:
+        assert _get_deleted_files("Subject: some patch\n---\n") == []
+
+
+class TestTryFileDeletionRefresh:
+    """Tests for _try_file_deletion_refresh function."""
+
+    def _init_repo(self, tmp_path: Path) -> Path:
+        from packastack.debpkg.gbp import run_command
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        run_command(["git", "init", "-b", "main"], cwd=repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=repo)
+        return repo
+
+    def test_refreshes_file_deletion_patch(self, tmp_path: Path) -> None:
+        """Regenerates deletion diff when file content has changed."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        # Create a file with content that differs from the patch
+        (repo / "test_foo.py").write_text("new_line1\nline2\nline3\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        # Patch tries to delete the old version (different content)
+        original_patch = (
+            "Subject: Remove test_foo\n"
+            "---\n"
+            "diff --git a/test_foo.py b/test_foo.py\n"
+            "deleted file mode 100644\n"
+            "index abc1234..0000000\n"
+            "--- a/test_foo.py\n"
+            "+++ /dev/null\n"
+            "@@ -1,3 +0,0 @@\n"
+            "-old_line1\n"
+            "-line2\n"
+            "-line3\n"
+        )
+
+        result = _try_file_deletion_refresh("rm.patch", original_patch, repo)
+
+        assert result is not None
+        assert result.refreshed is True
+        assert result.patch_name == "rm.patch"
+        assert "deleted file mode" in result.patch_content
+        assert "-new_line1" in result.patch_content
+        # DEP3 header preserved
+        assert "Subject: Remove test_foo" in result.patch_content
+
+    def test_returns_none_for_modification_patch(self, tmp_path: Path) -> None:
+        repo = self._init_repo(tmp_path)
+        (repo / "file.py").write_text("content\n")
+
+        from packastack.debpkg.gbp import run_command
+
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        mod_patch = (
+            "diff --git a/file.py b/file.py\n"
+            "--- a/file.py\n"
+            "+++ b/file.py\n"
+            "@@ -1 +1 @@\n"
+            "-content\n"
+            "+changed\n"
+        )
+        result = _try_file_deletion_refresh("fix.patch", mod_patch, repo)
+        assert result is None
+
+    def test_returns_none_when_file_missing(self, tmp_path: Path) -> None:
+        """Returns None if the file to delete no longer exists."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+        (repo / "dummy").write_text("x\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        del_patch = (
+            "diff --git a/gone.py b/gone.py\n"
+            "deleted file mode 100644\n"
+            "index abc..000\n"
+            "--- a/gone.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-old\n"
+        )
+        result = _try_file_deletion_refresh("rm.patch", del_patch, repo)
+        assert result is None
+
+    def test_reverts_working_tree(self, tmp_path: Path) -> None:
+        """Working tree is clean after refresh."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+        (repo / "test_foo.py").write_text("content\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        del_patch = (
+            "diff --git a/test_foo.py b/test_foo.py\n"
+            "deleted file mode 100644\n"
+            "index abc..000\n"
+            "--- a/test_foo.py\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-old_content\n"
+        )
+        _try_file_deletion_refresh("rm.patch", del_patch, repo)
+
+        # File should still exist after refresh
+        assert (repo / "test_foo.py").exists()
+        assert (repo / "test_foo.py").read_text() == "content\n"
 
 
 class TestAttemptMechanicalRefresh:
@@ -855,6 +1067,42 @@ class TestAttemptMechanicalRefresh:
 
         assert (repo / "file.txt").read_text() == original
 
+    def test_refreshes_file_deletion_with_changed_content(self, tmp_path: Path) -> None:
+        """File deletion patch is refreshed when upstream changed the file."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        # File exists with content that differs from what patch expects
+        (repo / "test_foo.py").write_text("new_line1\nline2\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_content = (
+            "Subject: Skip test\n"
+            "---\n"
+            "diff --git a/test_foo.py b/test_foo.py\n"
+            "deleted file mode 100644\n"
+            "index abc1234..0000000\n"
+            "--- a/test_foo.py\n"
+            "+++ /dev/null\n"
+            "@@ -1,2 +0,0 @@\n"
+            "-old_line1\n"
+            "-line2\n"
+        )
+        patch_file = patches_dir / "skip.patch"
+        patch_file.write_text(patch_content)
+
+        result = attempt_mechanical_refresh("skip.patch", patch_file, repo)
+
+        assert result.refreshed is True
+        assert "file-deletion" in result.explanation
+        assert "deleted file mode" in result.patch_content
+        assert "-new_line1" in result.patch_content
+        assert "Subject: Skip test" in result.patch_content
+
 
 class TestRefreshFailingPatch:
     """Tests for refresh_failing_patch function."""
@@ -1008,7 +1256,7 @@ class TestRefreshFailingPatch:
             )
 
         assert result.refreshed is True
-        assert result.patch_content == "good patch"
+        assert result.patch_content == "good patch\n"
 
     @patch("packastack.ai.patch_diagnosis.call_ai")
     def test_validation_fails_all_attempts(
