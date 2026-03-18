@@ -2366,7 +2366,7 @@ def import_and_patch(
     # -------------------------------------------------------------------------
     # Fix sudoers files for sudo-rs compatibility (before changelog)
     # -------------------------------------------------------------------------
-    _fix_sudoers_wildcards(ctx)
+    _fix_sudoers_args(ctx)
 
     # -------------------------------------------------------------------------
     # Update debian/changelog with the new version
@@ -2792,12 +2792,13 @@ class SingleBuildOutcome:
 # =============================================================================
 
 
-def _fix_sudoers_wildcards(ctx: SingleBuildContext) -> None:
-    """Remove trailing wildcards from sudoers files for sudo-rs compatibility.
+def _fix_sudoers_args(ctx: SingleBuildContext) -> None:
+    """Remove command arguments from sudoers files for sudo-rs compatibility.
 
     sudo-rs does not support wildcard (*) matching in command arguments.
-    This silently fixes any ``debian/*_sudoers`` files that use the old
-    rootwrap pattern and commits the change.
+    In sudoers syntax a command with no arguments already matches any
+    invocation, so stripping all arguments preserves the intended behaviour.
+    This fixes any ``debian/*_sudoers`` files and commits the change.
     """
     from packastack.debpkg.sudoers import fix_sudoers_in_debian_dir
 
@@ -2806,14 +2807,14 @@ def _fix_sudoers_wildcards(ctx: SingleBuildContext) -> None:
 
     if result.files_fixed:
         fixed_names = ", ".join(result.files_fixed)
-        activity("sudoers", f"Fixed sudo-rs wildcards in: {fixed_names}")
+        activity("sudoers", f"Fixed sudoers command arguments in: {fixed_names}")
         ctx.run.log_event({
             "event": "sudoers.fixed",
             "files": result.files_fixed,
         })
         commit_result = git_commit(
             ctx.pkg_repo,
-            "d/sudoers: remove trailing wildcards for sudo-rs compatibility",
+            "d/sudoers: remove command arguments for sudo-rs compatibility",
             files=[f"debian/{f}" for f in result.files_fixed],
         )
         if commit_result.returncode == 0:

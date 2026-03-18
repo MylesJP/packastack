@@ -12,46 +12,63 @@ from pathlib import Path
 
 from packastack.debpkg.sudoers import (
     SudoersFixResult,
+    fix_sudoers_args,
     fix_sudoers_in_debian_dir,
-    fix_sudoers_wildcard,
 )
 
 
-class TestFixSudoersWildcard:
-    """Tests for fix_sudoers_wildcard function."""
+class TestFixSudoersArgs:
+    """Tests for fix_sudoers_args function."""
 
-    def test_removes_trailing_wildcard_from_rootwrap_line(self, tmp_path: Path) -> None:
+    def test_strips_config_and_wildcard(self, tmp_path: Path) -> None:
+        """Removes both config path arg and trailing wildcard."""
         sudoers = tmp_path / "cinder_sudoers"
         sudoers.write_text(
             "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *\n"
         )
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is True
-        content = sudoers.read_text()
-        assert content == (
-            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n"
+        assert sudoers.read_text() == (
+            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap\n"
         )
 
-    def test_removes_wildcard_without_config_arg(self, tmp_path: Path) -> None:
+    def test_strips_config_path_without_wildcard(self, tmp_path: Path) -> None:
+        """Removes config path arg even when there's no trailing wildcard."""
+        sudoers = tmp_path / "manila_sudoers"
+        sudoers.write_text(
+            "manila ALL = (root) NOPASSWD: /usr/bin/manila-rootwrap /etc/manila/rootwrap.conf\n"
+        )
+
+        result = fix_sudoers_args(sudoers)
+
+        assert result is True
+        assert sudoers.read_text() == (
+            "manila ALL = (root) NOPASSWD: /usr/bin/manila-rootwrap\n"
+        )
+
+    def test_strips_wildcard_only(self, tmp_path: Path) -> None:
+        """Removes bare wildcard argument."""
         sudoers = tmp_path / "nova_sudoers"
         sudoers.write_text(
             "nova ALL = (root) NOPASSWD: /usr/bin/nova-rootwrap *\n"
         )
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is True
-        content = sudoers.read_text()
-        assert content == "nova ALL = (root) NOPASSWD: /usr/bin/nova-rootwrap\n"
+        assert sudoers.read_text() == (
+            "nova ALL = (root) NOPASSWD: /usr/bin/nova-rootwrap\n"
+        )
 
-    def test_no_change_when_no_wildcard(self, tmp_path: Path) -> None:
+    def test_no_change_when_no_args(self, tmp_path: Path) -> None:
+        """No-op when command already has no arguments."""
         sudoers = tmp_path / "cinder_sudoers"
-        original = "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n"
+        original = "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap\n"
         sudoers.write_text(original)
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is False
         assert sudoers.read_text() == original
@@ -60,7 +77,7 @@ class TestFixSudoersWildcard:
         sudoers = tmp_path / "empty_sudoers"
         sudoers.write_text("")
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is False
 
@@ -71,13 +88,12 @@ class TestFixSudoersWildcard:
             "neutron ALL = (root) NOPASSWD: /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf *\n"
         )
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is True
-        content = sudoers.read_text()
-        assert content == (
+        assert sudoers.read_text() == (
             "# Allow neutron user to run rootwrap\n"
-            "neutron ALL = (root) NOPASSWD: /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf\n"
+            "neutron ALL = (root) NOPASSWD: /usr/bin/neutron-rootwrap\n"
         )
 
     def test_fixes_multiple_lines(self, tmp_path: Path) -> None:
@@ -87,13 +103,14 @@ class TestFixSudoersWildcard:
             "cinder ALL = (root) NOPASSWD: /usr/bin/privsep-helper *\n"
         )
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is True
         content = sudoers.read_text()
-        assert "*" not in content
-        assert "/usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n" in content
-        assert "/usr/bin/privsep-helper\n" in content
+        assert content == (
+            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap\n"
+            "cinder ALL = (root) NOPASSWD: /usr/bin/privsep-helper\n"
+        )
 
     def test_raises_oserror_on_missing_file(self, tmp_path: Path) -> None:
         missing = tmp_path / "nonexistent_sudoers"
@@ -101,7 +118,7 @@ class TestFixSudoersWildcard:
         import pytest
 
         with pytest.raises(OSError):
-            fix_sudoers_wildcard(missing)
+            fix_sudoers_args(missing)
 
     def test_handles_leading_whitespace(self, tmp_path: Path) -> None:
         sudoers = tmp_path / "indented_sudoers"
@@ -109,12 +126,11 @@ class TestFixSudoersWildcard:
             "  cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *\n"
         )
 
-        result = fix_sudoers_wildcard(sudoers)
+        result = fix_sudoers_args(sudoers)
 
         assert result is True
-        content = sudoers.read_text()
-        assert content == (
-            "  cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n"
+        assert sudoers.read_text() == (
+            "  cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap\n"
         )
 
 
@@ -137,11 +153,26 @@ class TestFixSudoersInDebianDir:
         assert sorted(result.files_fixed) == ["cinder_sudoers", "nova_sudoers"]
         assert result.errors == []
 
+    def test_fixes_config_arg_without_wildcard(self, tmp_path: Path) -> None:
+        """Manila-style: config path but no wildcard should still be fixed."""
+        debian = tmp_path / "debian"
+        debian.mkdir()
+        (debian / "manila_sudoers").write_text(
+            "manila ALL = (root) NOPASSWD: /usr/bin/manila-rootwrap /etc/manila/rootwrap.conf\n"
+        )
+
+        result = fix_sudoers_in_debian_dir(debian)
+
+        assert result.files_scanned == 1
+        assert result.files_fixed == ["manila_sudoers"]
+        content = (debian / "manila_sudoers").read_text()
+        assert content == "manila ALL = (root) NOPASSWD: /usr/bin/manila-rootwrap\n"
+
     def test_skips_clean_sudoers_files(self, tmp_path: Path) -> None:
         debian = tmp_path / "debian"
         debian.mkdir()
         (debian / "cinder_sudoers").write_text(
-            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n"
+            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap\n"
         )
 
         result = fix_sudoers_in_debian_dir(debian)
@@ -195,7 +226,7 @@ class TestFixSudoersInDebianDir:
             "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *\n"
         )
         (debian / "neutron_sudoers").write_text(
-            "neutron ALL = (root) NOPASSWD: /usr/bin/neutron-rootwrap /etc/neutron/rootwrap.conf\n"
+            "neutron ALL = (root) NOPASSWD: /usr/bin/neutron-rootwrap\n"
         )
 
         result = fix_sudoers_in_debian_dir(debian)

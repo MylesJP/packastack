@@ -24,9 +24,12 @@ pattern ships lines like::
 
     cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *
 
-The trailing ``*`` must be removed.  In sudoers syntax a command with no
-arguments already matches that command invoked with *any* arguments, so the
-functional behaviour is preserved.
+All arguments after the command path must be removed.  In sudoers syntax a
+command with no arguments already matches that command invoked with *any*
+arguments, so the functional behaviour is preserved.  The config file pinning
+(e.g. ``/etc/cinder/rootwrap.conf``) is not a meaningful security boundary
+since these are no-login system accounts and the rootwrap configs are owned
+by root.
 """
 
 from __future__ import annotations
@@ -35,9 +38,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Matches a NOPASSWD sudoers line ending with a bare wildcard ``*``.
-_NOPASSWD_TRAILING_WILDCARD_RE = re.compile(
-    r"^(.+NOPASSWD:\s+\S+.*)[ \t]+\*[ \t]*$",
+# Matches a NOPASSWD sudoers line that has arguments after the command path.
+# Captures everything up to and including the command path (group 1), so we
+# can replace the full match with just the command — dropping all arguments.
+_NOPASSWD_COMMAND_ARGS_RE = re.compile(
+    r"^(\s*\S+\s+ALL\s*=\s*\(root\)\s*NOPASSWD:\s*/\S+)"  # user + command
+    r"([ \t]+\S+.*)$",  # one or more arguments to strip
     re.MULTILINE,
 )
 
@@ -51,8 +57,8 @@ class SudoersFixResult:
     errors: list[str] = field(default_factory=list)
 
 
-def fix_sudoers_wildcard(sudoers_path: Path) -> bool:
-    """Remove trailing wildcard arguments from a single sudoers file.
+def fix_sudoers_args(sudoers_path: Path) -> bool:
+    """Remove all arguments after the command path in NOPASSWD lines.
 
     Args:
         sudoers_path: Path to a ``debian/*_sudoers`` file.
@@ -65,7 +71,7 @@ def fix_sudoers_wildcard(sudoers_path: Path) -> bool:
     """
     content = sudoers_path.read_text(encoding="utf-8")
 
-    new_content, count = _NOPASSWD_TRAILING_WILDCARD_RE.subn(r"\1", content)
+    new_content, count = _NOPASSWD_COMMAND_ARGS_RE.subn(r"\1", content)
 
     if count == 0:
         return False
@@ -75,7 +81,7 @@ def fix_sudoers_wildcard(sudoers_path: Path) -> bool:
 
 
 def fix_sudoers_in_debian_dir(debian_dir: Path) -> SudoersFixResult:
-    """Scan all ``*_sudoers`` files under *debian_dir* and fix wildcards.
+    """Scan all ``*_sudoers`` files under *debian_dir* and fix arguments.
 
     Args:
         debian_dir: Path to the ``debian/`` directory of a package.
@@ -93,7 +99,7 @@ def fix_sudoers_in_debian_dir(debian_dir: Path) -> SudoersFixResult:
             continue  # pragma: no cover
         result.files_scanned += 1
         try:
-            if fix_sudoers_wildcard(sudoers_file):
+            if fix_sudoers_args(sudoers_file):
                 result.files_fixed.append(sudoers_file.name)
         except OSError as exc:
             result.errors.append(f"{sudoers_file.name}: {exc}")
