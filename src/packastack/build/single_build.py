@@ -3054,26 +3054,21 @@ def _ai_diagnose_and_retry_build(
             activity("ai", f"AI diagnosis unavailable: {diagnosis.error}")
         return None, build_data
 
-    if diagnosis.needs_debian_edit:
-        edited_files = ", ".join(diagnosis.debian_edits.keys())
-        activity("ai", f"AI proposes debian edit: {edited_files}")
-        activity("ai", diagnosis.explanation)
-    elif diagnosis.needs_patch:
+    if diagnosis.needs_patch:
         activity("ai", f"AI proposes quilt patch: {diagnosis.patch_filename}")
         activity("ai", diagnosis.explanation)
+    else:
+        activity("ai", f"AI diagnosis: {diagnosis.explanation}")
 
-    if diagnosis.needs_debian_edit or diagnosis.needs_patch:
+    if diagnosis.needs_patch:
         if apply_ai_fix(ctx.pkg_repo, diagnosis, cfg=ctx.cfg):
             activity("ai", "Retrying build with AI-proposed fix...")
             retry_phase, retry_data = build_packages(ctx, new_version)
             if retry_phase.success:
-                if diagnosis.needs_debian_edit:
-                    activity("ai", f"Build passed with AI edit: {edited_files}")
-                else:
-                    activity(
-                        "ai",
-                        f"Build passed with AI patch: {diagnosis.patch_filename}",
-                    )
+                activity(
+                    "ai",
+                    f"Build passed with AI patch: {diagnosis.patch_filename}",
+                )
                 # Clean up memory on success
                 delete_memory(ctx.run.logs_path)
                 return retry_phase, retry_data
@@ -3086,10 +3081,9 @@ def _ai_diagnose_and_retry_build(
             sbuild_error = ""
             if retry_data.sbuild_result:
                 sbuild_error = getattr(retry_data.sbuild_result, "validation_message", "")
-            fix_desc = edited_files if diagnosis.needs_debian_edit else diagnosis.patch_filename
             memory.add_attempt(
-                patch_filename=fix_desc,
-                patch_content=diagnosis.patch_content or str(diagnosis.debian_edits),
+                patch_filename=diagnosis.patch_filename,
+                patch_content=diagnosis.patch_content,
                 build_error=sbuild_error,
                 diagnosis=diagnosis.explanation,
                 outcome="build_failed",
@@ -3101,10 +3095,9 @@ def _ai_diagnose_and_retry_build(
             memory = previous_memory or AIMemory(
                 package=ctx.pkg_name, version=new_version
             )
-            fix_desc = edited_files if diagnosis.needs_debian_edit else diagnosis.patch_filename
             memory.add_attempt(
-                patch_filename=fix_desc,
-                patch_content=diagnosis.patch_content or str(diagnosis.debian_edits),
+                patch_filename=diagnosis.patch_filename,
+                patch_content=diagnosis.patch_content,
                 build_error="Fix failed to apply",
                 diagnosis=diagnosis.explanation,
                 outcome="patch_invalid",

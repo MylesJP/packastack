@@ -152,25 +152,21 @@ You are given:
 
 Your task is to:
 1. Diagnose why the build failed.
-2. Determine the correct fix type:
-   - DEBIAN_EDIT: For changes to files under debian/ (rules, control, etc.). \
-These can be applied directly without a quilt patch.
-   - QUILT_PATCH: For changes to upstream source files (anything outside \
-debian/). These MUST be applied as a quilt patch in debian/patches/.
-   - NO_PATCH: If no automated fix is possible.
+2. If possible, propose a quilt patch to fix the upstream source code.
+
+IMPORTANT CONSTRAINTS:
+- You may ONLY propose quilt patches (files under debian/patches/).
+- You must NOT propose edits to other debian/ files such as debian/rules, \
+debian/control, debian/changelog, etc.  Those files are managed by the \
+human package maintainer.  If the fix requires changes to those files, \
+respond with ACTION: NO_PATCH and explain what the maintainer should do.
+- Quilt patches apply to upstream source code (anything outside debian/).
 
 Respond in this exact format:
 
 DIAGNOSIS: <one-line summary>
-ACTION: DEBIAN_EDIT | QUILT_PATCH | NO_PATCH
+ACTION: QUILT_PATCH | NO_PATCH
 EXPLANATION: <detailed explanation, 2-5 sentences>
-
-If ACTION is DEBIAN_EDIT, include one or more edit blocks:
---- BEGIN DEBIAN EDIT: debian/rules ---
-<complete replacement content of the file>
---- END DEBIAN EDIT ---
-
-You may include multiple DEBIAN EDIT blocks for different files.
 
 If ACTION is QUILT_PATCH, also include:
 PATCH_FILENAME: <descriptive-name>.patch
@@ -179,17 +175,13 @@ PATCH_FILENAME: <descriptive-name>.patch
 --- END PATCH ---
 
 Rules:
-- For DEBIAN_EDIT: provide the COMPLETE file content, not a diff. \
-Only edit files under debian/.
-- For QUILT_PATCH: the patch filename must end in .patch. \
-DEP3 headers must include Description, Author, Forwarded. \
-The unified diff must use correct context lines from the actual source files \
-provided to you. It must apply cleanly with `git apply --check`.
-- Prefer DEBIAN_EDIT over QUILT_PATCH when the fix only involves \
-debian/ files (e.g. changing the build system in d/rules, adding a \
-build dependency to d/control).
-- If the problem is a missing build dependency, use DEBIAN_EDIT to add it \
-to debian/control.
+- The patch filename must end in .patch.
+- DEP3 headers must include Description, Author, Forwarded.
+- The unified diff must use correct context lines from the actual source files \
+provided to you.  It must apply cleanly with `git apply --check`.
+- If the problem is a missing build dependency, packaging misconfiguration, \
+or anything else that requires editing debian/ files (NOT patches), respond \
+with ACTION: NO_PATCH and describe the needed change in EXPLANATION.
 - If the problem cannot be fixed automatically, use ACTION: NO_PATCH.
 """
 

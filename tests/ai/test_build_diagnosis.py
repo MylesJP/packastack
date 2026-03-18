@@ -582,10 +582,10 @@ class TestBuildDiagnosisResult:
 
 
 class TestParseDebianEditResponse:
-    """Tests for _parse_build_response handling DEBIAN_EDIT action."""
+    """Tests for _parse_build_response rejecting DEBIAN_EDIT action."""
 
-    def test_parses_debian_edit_response(self) -> None:
-        """Test parsing response with a debian edit proposal."""
+    def test_debian_edit_response_is_ignored(self) -> None:
+        """Test that DEBIAN_EDIT action is silently rejected."""
         response = AIResponse(
             success=True,
             content=(
@@ -604,13 +604,14 @@ class TestParseDebianEditResponse:
         )
         result = _parse_build_response(response)
         assert result.diagnosed is True
-        assert result.needs_debian_edit is True
+        assert result.needs_debian_edit is False
         assert result.needs_patch is False
-        assert "debian/rules" in result.debian_edits
-        assert "pybuild" in result.debian_edits["debian/rules"]
+        assert result.debian_edits == {}
+        # The explanation should still be preserved
+        assert "pybuild" in result.explanation
 
-    def test_parses_multiple_debian_edits(self) -> None:
-        """Test parsing response with multiple debian file edits."""
+    def test_debian_edit_with_multiple_blocks_ignored(self) -> None:
+        """Test that multiple debian edit blocks are still rejected."""
         response = AIResponse(
             success=True,
             content=(
@@ -629,10 +630,9 @@ class TestParseDebianEditResponse:
             ),
         )
         result = _parse_build_response(response)
-        assert result.needs_debian_edit is True
-        assert len(result.debian_edits) == 2
-        assert "debian/rules" in result.debian_edits
-        assert "debian/control" in result.debian_edits
+        assert result.needs_debian_edit is False
+        assert result.needs_patch is False
+        assert result.debian_edits == {}
 
     def test_incomplete_debian_edit_falls_back(self) -> None:
         """Test that debian edit without content falls back."""
@@ -930,10 +930,11 @@ class TestApplyDebianEdits:
 class TestApplyAiFix:
     """Tests for apply_ai_fix function."""
 
-    def test_routes_debian_edit(self, tmp_path: Path) -> None:
-        """Test that debian edits are routed to apply_debian_edits."""
+    def test_ignores_debian_edit(self, tmp_path: Path) -> None:
+        """Test that debian edits are NOT applied (patch-only policy)."""
         debian = tmp_path / "debian"
         debian.mkdir()
+        (debian / "rules").write_text("original")
 
         diagnosis = BuildDiagnosisResult(
             diagnosed=True,
@@ -941,11 +942,11 @@ class TestApplyAiFix:
             debian_edits={"debian/rules": "new content"},
         )
 
-        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
-            result = apply_ai_fix(tmp_path, diagnosis)
+        result = apply_ai_fix(tmp_path, diagnosis)
 
-        assert result is True
-        assert "new content" in (debian / "rules").read_text()
+        assert result is False
+        # File must remain untouched
+        assert (debian / "rules").read_text() == "original"
 
     def test_routes_quilt_patch(self, tmp_path: Path) -> None:
         """Test that quilt patches are routed to apply_ai_patch."""
@@ -971,10 +972,11 @@ class TestApplyAiFix:
         result = apply_ai_fix(tmp_path, diagnosis)
         assert result is False
 
-    def test_prefers_debian_edit_over_patch(self, tmp_path: Path) -> None:
-        """Test that debian edit takes priority when both are set."""
+    def test_patch_only_when_both_set(self, tmp_path: Path) -> None:
+        """Test that only patch is applied when both edit and patch are set."""
         debian = tmp_path / "debian"
         debian.mkdir()
+        (debian / "rules").write_text("original rules")
 
         diagnosis = BuildDiagnosisResult(
             diagnosed=True,
@@ -985,13 +987,17 @@ class TestApplyAiFix:
             patch_content="diff",
         )
 
-        with patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")):
+        with (
+            patch("packastack.ai.build_diagnosis.validate_patch") as mock_validate,
+            patch("packastack.debpkg.gbp.run_command", return_value=(0, "", "")),
+        ):
+            mock_validate.return_value = PatchValidationResult(valid=True)
             result = apply_ai_fix(tmp_path, diagnosis)
 
         assert result is True
-        # Verify debian edit was applied, not the patch
-        assert "edited content" in (debian / "rules").read_text()
-        assert not (tmp_path / "debian" / "patches" / "fix.patch").exists()
+        # Patch applied, but debian/rules must be untouched
+        assert (debian / "rules").read_text() == "original rules"
+        assert (tmp_path / "debian" / "patches" / "fix.patch").exists()
 
 
 class TestDiagnoseBuildFailureWithTreeContext:
@@ -1014,11 +1020,12 @@ class TestDiagnoseBuildFailureWithTreeContext:
             success=True,
             content=(
                 "DIAGNOSIS: Switch build system\n"
-                "ACTION: DEBIAN_EDIT\n"
-                "EXPLANATION: Replace python_distutils with pybuild\n"
-                "--- BEGIN DEBIAN EDIT: debian/rules ---\n"
-                "#!/usr/bin/make -f\n%:\n\tdh $@ --buildsystem=pybuild\n"
-                "--- END DEBIAN EDIT ---\n"
+                "ACTION: QUILT_PATCH\n"
+                "EXPLANATION: Patch upstream setup.cfg to fix build\n"
+                "PATCH_FILENAME: fix-build.patch\n"
+                "--- BEGIN PATCH ---\n"
+                "--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1 +1 @@\n-old\n+new\n"
+                "--- END PATCH ---\n"
             ),
         )
 
@@ -1037,8 +1044,8 @@ class TestDiagnoseBuildFailureWithTreeContext:
             )
 
         assert result.diagnosed is True
-        assert result.needs_debian_edit is True
-        assert "debian/rules" in result.debian_edits
+        assert result.needs_patch is True
+        assert result.patch_filename == "fix-build.patch"
 
         # Verify the AI was called with tree context
         call_args = mock_call.call_args

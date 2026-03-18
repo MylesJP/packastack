@@ -91,7 +91,10 @@ def _parse_build_response(response: AIResponse) -> BuildDiagnosisResult:
         if line_stripped.startswith("ACTION:"):
             value = line_stripped.split(":", 1)[1].strip().upper()
             if value == "DEBIAN_EDIT":
-                result.needs_debian_edit = True
+                # AI is not permitted to edit debian/ files directly.
+                # Treat this as "no automated fix" — the explanation
+                # will still describe what the maintainer should do.
+                pass
             elif value in ("PATCH", "QUILT_PATCH"):
                 result.needs_patch = True
         elif line_stripped.startswith("EXPLANATION:"):
@@ -686,8 +689,8 @@ def apply_ai_fix(
     Returns:
         True if the fix was applied and committed successfully.
     """
-    if diagnosis.needs_debian_edit:
-        return apply_debian_edits(pkg_repo, diagnosis)
+    # AI is restricted to patch-only changes.  Debian file edits
+    # (rules, control, etc.) are left to the human maintainer.
     if diagnosis.needs_patch:
         return apply_ai_patch(pkg_repo, diagnosis, cfg, max_correction_attempts)
     return False
