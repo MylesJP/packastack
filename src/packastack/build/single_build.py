@@ -2894,26 +2894,16 @@ def _ai_diagnose_patch_failure(
             # ---- Apply the result (from either strategy) ----
             refresh_result = mech_result
             if refresh_result.refreshed:
-                # Overwrite the original patch with the refreshed version
+                # Overwrite the original patch with the refreshed version.
+                # Do NOT commit here — the retry of import_and_patch will
+                # run pq_export which commits all refreshed patches together
+                # as "d/patches/*: refresh patches".
                 try:
                     patch_path.write_text(
                         refresh_result.patch_content, encoding="utf-8"
                     )
                 except OSError as exc:
                     activity("ai", f"Failed to write refreshed patch: {exc}")
-                    continue
-
-                commit_result = git_commit(
-                    ctx.pkg_repo,
-                    f"d/patches: refresh {patch_name} for {version}",
-                    files=["debian/patches"],
-                )
-                if commit_result.returncode != 0:
-                    activity(
-                        "ai",
-                        f"Failed to commit refreshed patch: "
-                        f"{commit_result.stderr}",
-                    )
                     continue
 
                 activity("ai", f"Refreshed patch: {patch_name}")

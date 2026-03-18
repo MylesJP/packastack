@@ -463,8 +463,6 @@ class TestAiDiagnosePatchFailure:
         mech_result.patch_content = "mechanically refreshed diff"
         mech_result.explanation = "Fixed with fuzz"
 
-        commit_result = MagicMock(returncode=0, stderr="")
-
         with (
             patch(
                 "packastack.debpkg.gbp.run_command",
@@ -477,10 +475,6 @@ class TestAiDiagnosePatchFailure:
             patch(
                 "packastack.ai.patch_diagnosis.refresh_failing_patch",
             ) as mock_ai_refresh,
-            patch(
-                "packastack.build.single_build.git_commit",
-                return_value=commit_result,
-            ),
         ):
             result = _ai_diagnose_patch_failure(ctx, phase)
 
@@ -509,8 +503,6 @@ class TestAiDiagnosePatchFailure:
         ai_result.patch_content = "ai refreshed diff"
         ai_result.explanation = "Updated context lines"
 
-        commit_result = MagicMock(returncode=0, stderr="")
-
         with (
             patch(
                 "packastack.debpkg.gbp.run_command",
@@ -524,10 +516,6 @@ class TestAiDiagnosePatchFailure:
                 "packastack.ai.patch_diagnosis.refresh_failing_patch",
                 return_value=ai_result,
             ),
-            patch(
-                "packastack.build.single_build.git_commit",
-                return_value=commit_result,
-            ),
         ):
             result = _ai_diagnose_patch_failure(ctx, phase)
 
@@ -537,43 +525,6 @@ class TestAiDiagnosePatchFailure:
         ctx.run.log_event.assert_called()
         logged = ctx.run.log_event.call_args[0][0]
         assert logged["event"] == "ai.patch_refreshed"
-
-    def test_reverse_apply_failure_refresh_commit_fails(self, tmp_path: Path) -> None:
-        """Test continues to next patch when refresh commit fails."""
-        from packastack.build.single_build import _ai_diagnose_patch_failure
-
-        ctx = _make_ctx_for_patch_test(tmp_path)
-        _setup_patches(ctx.pkg_repo, {"patch-a.patch": "diff a"})
-
-        phase = PhaseResult.fail(
-            4, "Patch patch-a.patch failed to apply"
-        )
-
-        mech_result = MagicMock()
-        mech_result.refreshed = True
-        mech_result.patch_content = "refreshed diff"
-        mech_result.explanation = "Fixed"
-
-        fail_commit = MagicMock(returncode=1, stderr="commit error")
-
-        with (
-            patch(
-                "packastack.debpkg.gbp.run_command",
-                return_value=(1, "", "does not apply"),
-            ),
-            patch(
-                "packastack.ai.patch_diagnosis.attempt_mechanical_refresh",
-                return_value=mech_result,
-            ),
-            patch(
-                "packastack.build.single_build.git_commit",
-                return_value=fail_commit,
-            ),
-        ):
-            result = _ai_diagnose_patch_failure(ctx, phase)
-
-        # Refresh commit failed, so no success
-        assert result is False
 
     def test_reverse_apply_failure_refresh_write_fails(self, tmp_path: Path) -> None:
         """Test continues when writing refreshed patch file fails."""
