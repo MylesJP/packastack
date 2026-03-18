@@ -1933,6 +1933,8 @@ def import_and_patch(
     upstream_tarball: Path | None,
     snapshot_result: SnapshotAcquisitionResult | None,
     new_version: str,
+    *,
+    ignore_new: bool = False,
 ) -> PhaseResult:
     """Import upstream tarball and apply patches.
 
@@ -1948,6 +1950,8 @@ def import_and_patch(
         upstream_tarball: Path to upstream tarball.
         snapshot_result: Snapshot result (for version info).
         new_version: The computed new version string.
+        ignore_new: Pass --ignore-new to gbp pq import so it tolerates
+            uncommitted changes (used during retry after patch refresh).
 
     Returns:
         PhaseResult indicating success or failure.
@@ -2255,12 +2259,12 @@ def import_and_patch(
             return PhaseResult.fail(EXIT_PATCH_FAILED, "Patches upstreamed")
         run.log_event({"event": "patches.upstreamed", "patches": [r.patch_name for r in upstreamed]})
 
-    pq_result = pq_import(pkg_repo)
+    pq_result = pq_import(pkg_repo, ignore_new=ignore_new)
     if pq_result.success:
         activity("patches", "Patches applied successfully")
     elif pq_result.needs_refresh:
         activity("patches", "Patches need refresh - forcing import with time-machine")
-        force_result = pq_import(pkg_repo, time_machine=0)
+        force_result = pq_import(pkg_repo, time_machine=0, ignore_new=ignore_new)
         if force_result.success:
             activity("patches", "Patches imported with offset/fuzz - exporting refreshed patches")
             export_result = pq_export(pkg_repo)
@@ -2813,6 +2817,18 @@ def _ai_diagnose_patch_failure(
 
     activity("ai", "Diagnosing patch failure...")
 
+    # Ensure .pc/ (quilt state dir) is excluded from git so gbp does not
+    # treat it as an uncommitted change during retry.
+    _exclude_path = ctx.pkg_repo / ".git" / "info" / "exclude"
+    try:
+        _exclude_path.parent.mkdir(parents=True, exist_ok=True)
+        _existing = _exclude_path.read_text() if _exclude_path.exists() else ""
+        if ".pc" not in _existing.splitlines():
+            with _exclude_path.open("a") as fh:
+                fh.write(".pc\n")
+    except OSError:
+        pass  # best-effort — not critical
+
     pq_output = phase_result.error or ""
     version = ctx.upstream.version if ctx.upstream else ""
 
@@ -3194,6 +3210,7 @@ def build_single_package(
                 upstream_tarball=prepare_data.upstream_tarball,
                 snapshot_result=prepare_data.snapshot_result,
                 new_version=prepare_data.new_version,
+                ignore_new=True,
             )
 
         if not import_result_phase.success:

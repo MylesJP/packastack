@@ -297,6 +297,8 @@ def _make_ctx_for_patch_test(
 
     pkg_repo = tmp_path / "pkg"
     pkg_repo.mkdir()
+    # Create minimal .git structure for exclude-file logic
+    (pkg_repo / ".git" / "info").mkdir(parents=True)
 
     ctx = SingleBuildContext(
         pkg_name="osc-lib",
@@ -525,6 +527,68 @@ class TestAiDiagnosePatchFailure:
         ctx.run.log_event.assert_called()
         logged = ctx.run.log_event.call_args[0][0]
         assert logged["event"] == "ai.patch_refreshed"
+
+    def test_pc_directory_excluded(self, tmp_path: Path) -> None:
+        """Test that .pc is added to .git/info/exclude."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
+
+        mech_result = MagicMock()
+        mech_result.refreshed = True
+        mech_result.patch_content = "refreshed"
+        mech_result.explanation = "ok"
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.attempt_mechanical_refresh",
+                return_value=mech_result,
+            ),
+        ):
+            _ai_diagnose_patch_failure(ctx, phase)
+
+        exclude = ctx.pkg_repo / ".git" / "info" / "exclude"
+        assert ".pc" in exclude.read_text().splitlines()
+
+    def test_pc_exclusion_idempotent(self, tmp_path: Path) -> None:
+        """Test that .pc is not duplicated in .git/info/exclude."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        # Pre-populate exclude with .pc
+        exclude = ctx.pkg_repo / ".git" / "info" / "exclude"
+        exclude.write_text(".pc\n")
+
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
+
+        mech_result = MagicMock()
+        mech_result.refreshed = True
+        mech_result.patch_content = "refreshed"
+        mech_result.explanation = "ok"
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.attempt_mechanical_refresh",
+                return_value=mech_result,
+            ),
+        ):
+            _ai_diagnose_patch_failure(ctx, phase)
+
+        lines = exclude.read_text().splitlines()
+        assert lines.count(".pc") == 1
 
     def test_reverse_apply_failure_refresh_write_fails(self, tmp_path: Path) -> None:
         """Test continues when writing refreshed patch file fails."""

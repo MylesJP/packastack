@@ -121,7 +121,12 @@ def run_command(
         return result.returncode, "", ""
 
 
-def pq_import(repo_path: Path, time_machine: int | None = None) -> PQResult:
+def pq_import(
+    repo_path: Path,
+    time_machine: int | None = None,
+    *,
+    ignore_new: bool = False,
+) -> PQResult:
     """Import patches using gbp pq import.
 
     This applies debian/patches to create the patch-queue branch.
@@ -129,6 +134,10 @@ def pq_import(repo_path: Path, time_machine: int | None = None) -> PQResult:
     Args:
         repo_path: Path to the git repository.
         time_machine: If set, use --time-machine=N to accept patches with offset/fuzz.
+        ignore_new: If True, pass --ignore-new so gbp tolerates uncommitted
+            changes in the working tree.  Used during retries after the
+            patch-refresh flow has written refreshed patches to disk without
+            committing them.
 
     Returns:
         PQResult with success status and any issues detected.
@@ -136,6 +145,8 @@ def pq_import(repo_path: Path, time_machine: int | None = None) -> PQResult:
     cmd = ["gbp", "pq", "import", "--force"]
     if time_machine is not None:
         cmd.append(f"--time-machine={time_machine}")
+    if ignore_new:
+        cmd.append("--ignore-new")
     returncode, stdout, stderr = run_command(cmd, cwd=repo_path)
 
     output = stdout + stderr

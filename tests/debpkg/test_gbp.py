@@ -180,6 +180,27 @@ class TestPQImport:
             assert result.success is False
             # Check patch_reports for fuzz
 
+    def test_ignore_new_flag(self, tmp_path: Path) -> None:
+        """Test that ignore_new adds --ignore-new to the command."""
+        with patch.object(gbp, "run_command") as mock_run:
+            mock_run.return_value = (0, "Importing patches", "")
+            result = gbp.pq_import(tmp_path, ignore_new=True)
+
+            assert result.success is True
+            cmd = mock_run.call_args[0][0]
+            assert "--ignore-new" in cmd
+
+    def test_ignore_new_with_time_machine(self, tmp_path: Path) -> None:
+        """Test that ignore_new and time_machine flags coexist."""
+        with patch.object(gbp, "run_command") as mock_run:
+            mock_run.return_value = (0, "Importing patches", "")
+            result = gbp.pq_import(tmp_path, time_machine=0, ignore_new=True)
+
+            assert result.success is True
+            cmd = mock_run.call_args[0][0]
+            assert "--ignore-new" in cmd
+            assert "--time-machine=0" in cmd
+
 
 class TestPQExport:
     """Tests for pq_export function."""
