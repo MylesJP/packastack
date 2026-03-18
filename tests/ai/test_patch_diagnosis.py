@@ -31,8 +31,11 @@ from packastack.ai.patch_diagnosis import (
     PatchDiagnosisResult,
     PatchRefreshResult,
     _extract_affected_paths,
+    _extract_dep3_header,
     _parse_patch_response,
     _parse_refresh_response,
+    _revert_working_tree,
+    attempt_mechanical_refresh,
     auto_drop_upstreamed_patches,
     diagnose_patch_failure,
     refresh_failing_patch,
@@ -550,6 +553,307 @@ class TestExtractAffectedPaths:
         """Test returns empty list for non-patch content."""
         paths = _extract_affected_paths("not a patch\n")
         assert paths == []
+
+
+class TestExtractDep3Header:
+    """Tests for _extract_dep3_header function."""
+
+    def test_extracts_header_before_diff_git(self) -> None:
+        """Test extracts header before 'diff --git' line."""
+        patch_content = (
+            "From: Author <author@example.com>\n"
+            "Date: Mon, 1 Jan 2024\n"
+            "Subject: Fix bug\n"
+            "\n"
+            "Description of the fix.\n"
+            "---\n"
+            "diff --git a/file.py b/file.py\n"
+            "--- a/file.py\n"
+            "+++ b/file.py\n"
+        )
+        header = _extract_dep3_header(patch_content)
+        assert "From: Author" in header
+        assert "Subject: Fix bug" in header
+        assert "Description of the fix." in header
+        assert "diff --git" not in header
+
+    def test_no_header(self) -> None:
+        """Test returns empty string when patch starts with diff."""
+        patch_content = "diff --git a/file.py b/file.py\n--- a/file.py\n"
+        header = _extract_dep3_header(patch_content)
+        assert header == ""
+
+    def test_preserves_trailing_separator(self) -> None:
+        """Test preserves the --- separator line."""
+        patch_content = (
+            "Subject: Fix\n"
+            "---\n"
+            " file.py | 1 +\n"
+            "diff --git a/file.py b/file.py\n"
+        )
+        header = _extract_dep3_header(patch_content)
+        assert header.endswith("diff --git a/file.py b/file.py\n") is False
+        assert "---\n" in header
+
+
+class TestRevertWorkingTree:
+    """Tests for _revert_working_tree function."""
+
+    def test_reverts_modifications(self, tmp_path: Path) -> None:
+        """Test reverts file modifications in a real git repo."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        run_command(["git", "init", "-b", "main"], cwd=repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=repo)
+        (repo / "file.txt").write_text("original\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        # Modify tracked file and add untracked file
+        (repo / "file.txt").write_text("modified\n")
+        (repo / "new.txt").write_text("new\n")
+
+        _revert_working_tree(repo)
+
+        assert (repo / "file.txt").read_text() == "original\n"
+        assert not (repo / "new.txt").exists()
+
+
+class TestAttemptMechanicalRefresh:
+    """Tests for attempt_mechanical_refresh function."""
+
+    def _init_repo(self, tmp_path: Path) -> Path:
+        """Create a minimal git repo with upstream-like content."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        run_command(["git", "init", "-b", "main"], cwd=repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=repo)
+        return repo
+
+    def test_returns_false_when_strict_apply_passes(self, tmp_path: Path) -> None:
+        """Test skips refresh when strict git apply already succeeds."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        # Create a file and commit
+        (repo / "file.txt").write_text("line1\nline2\nline3\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        # Create a patch that applies cleanly with strict matching
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_content = (
+            "Subject: Fix\n"
+            "---\n"
+            "diff --git a/file.txt b/file.txt\n"
+            "--- a/file.txt\n"
+            "+++ b/file.txt\n"
+            "@@ -1,3 +1,3 @@\n"
+            " line1\n"
+            "-line2\n"
+            "+line2-fixed\n"
+            " line3\n"
+        )
+        patch_file = patches_dir / "fix.patch"
+        patch_file.write_text(patch_content)
+
+        result = attempt_mechanical_refresh("fix.patch", patch_file, repo)
+        assert result.refreshed is False
+        assert "already applies" in result.error.lower()
+
+    def test_refreshes_with_offset(self, tmp_path: Path) -> None:
+        """Test refreshes patch that has wrong line offsets."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        # Create a file with extra lines at the top (shifting offsets)
+        (repo / "file.txt").write_text(
+            "new1\nnew2\nnew3\nline1\nline2\nline3\n"
+        )
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        # Create a patch with outdated line numbers (expects line 1, but now it's line 4)
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_content = (
+            "Subject: Fix offset\n"
+            "---\n"
+            "diff --git a/file.txt b/file.txt\n"
+            "--- a/file.txt\n"
+            "+++ b/file.txt\n"
+            "@@ -1,3 +1,3 @@\n"
+            " line1\n"
+            "-line2\n"
+            "+line2-fixed\n"
+            " line3\n"
+        )
+        patch_file = patches_dir / "fix.patch"
+        patch_file.write_text(patch_content)
+
+        result = attempt_mechanical_refresh("fix.patch", patch_file, repo)
+
+        assert result.refreshed is True
+        assert result.patch_name == "fix.patch"
+        # The refreshed patch should mention the correct line numbers
+        assert "line2-fixed" in result.patch_content
+        # DEP3 header should be preserved
+        assert "Subject: Fix offset" in result.patch_content
+
+    def test_preserves_dep3_header(self, tmp_path: Path) -> None:
+        """Test DEP3 headers from original patch are preserved."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        (repo / "file.txt").write_text("extra\nline1\nold\nline3\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        dep3_header = (
+            "From: Test Author <test@example.com>\n"
+            "Date: Tue, 1 Jan 2024\n"
+            "Subject: Important fix\n"
+            "\n"
+            "Ubuntu-Bug: https://bugs.launchpad.net/bug/123\n"
+            "Forwarded: no\n"
+            "---\n"
+        )
+        diff_body = (
+            "diff --git a/file.txt b/file.txt\n"
+            "--- a/file.txt\n"
+            "+++ b/file.txt\n"
+            "@@ -1,3 +1,3 @@\n"
+            " line1\n"
+            "-old\n"
+            "+new\n"
+            " line3\n"
+        )
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_file = patches_dir / "fix.patch"
+        patch_file.write_text(dep3_header + diff_body)
+
+        result = attempt_mechanical_refresh("fix.patch", patch_file, repo)
+
+        assert result.refreshed is True
+        assert "From: Test Author" in result.patch_content
+        assert "Ubuntu-Bug:" in result.patch_content
+        assert "Forwarded: no" in result.patch_content
+
+    def test_returns_false_when_all_strategies_fail(self, tmp_path: Path) -> None:
+        """Test returns not-refreshed when no strategy works."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        # Create file that doesn't match the patch at all
+        (repo / "file.txt").write_text("completely\ndifferent\ncontent\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_content = (
+            "diff --git a/file.txt b/file.txt\n"
+            "--- a/file.txt\n"
+            "+++ b/file.txt\n"
+            "@@ -1,3 +1,3 @@\n"
+            " alpha\n"
+            "-beta\n"
+            "+gamma\n"
+            " delta\n"
+        )
+        patch_file = patches_dir / "fix.patch"
+        patch_file.write_text(patch_content)
+
+        result = attempt_mechanical_refresh("fix.patch", patch_file, repo)
+
+        assert result.refreshed is False
+        assert "failed" in result.error.lower()
+
+    def test_reverts_working_tree_after_refresh(self, tmp_path: Path) -> None:
+        """Test working tree is clean after a successful refresh."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+
+        (repo / "file.txt").write_text("extra\nline1\nold\nline3\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        patch_content = (
+            "diff --git a/file.txt b/file.txt\n"
+            "--- a/file.txt\n"
+            "+++ b/file.txt\n"
+            "@@ -1,3 +1,3 @@\n"
+            " line1\n"
+            "-old\n"
+            "+new\n"
+            " line3\n"
+        )
+        patch_file = patches_dir / "fix.patch"
+        patch_file.write_text(patch_content)
+
+        original_content = (repo / "file.txt").read_text()
+        attempt_mechanical_refresh("fix.patch", patch_file, repo)
+
+        # Working tree should be unchanged
+        assert (repo / "file.txt").read_text() == original_content
+        _rc, status_out, _ = run_command(["git", "status", "--porcelain"], cwd=repo)
+        # Only untracked debian/patches should remain
+        for line in status_out.strip().splitlines():
+            assert "debian/" in line or line.strip() == ""
+
+    def test_handles_unreadable_patch_file(self, tmp_path: Path) -> None:
+        """Test handles unreadable patch file gracefully."""
+        repo = self._init_repo(tmp_path)
+        missing_path = repo / "debian" / "patches" / "missing.patch"
+
+        result = attempt_mechanical_refresh("missing.patch", missing_path, repo)
+
+        assert result.refreshed is False
+        assert "cannot read" in result.error.lower()
+
+    def test_reverts_working_tree_after_failed_strategy(self, tmp_path: Path) -> None:
+        """Test working tree reverts even when a strategy fails mid-apply."""
+        from packastack.debpkg.gbp import run_command
+
+        repo = self._init_repo(tmp_path)
+        (repo / "file.txt").write_text("original content\n")
+        run_command(["git", "add", "."], cwd=repo)
+        run_command(["git", "commit", "-m", "init"], cwd=repo)
+
+        original = (repo / "file.txt").read_text()
+
+        patches_dir = repo / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        # A patch that won't apply at all
+        patch_content = (
+            "diff --git a/nonexistent.py b/nonexistent.py\n"
+            "--- a/nonexistent.py\n"
+            "+++ b/nonexistent.py\n"
+            "@@ -1 +1 @@\n"
+            "-old function\n"
+            "+new function\n"
+        )
+        patch_file = patches_dir / "bad.patch"
+        patch_file.write_text(patch_content)
+
+        attempt_mechanical_refresh("bad.patch", patch_file, repo)
+
+        assert (repo / "file.txt").read_text() == original
 
 
 class TestRefreshFailingPatch:

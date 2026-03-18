@@ -196,6 +196,220 @@ def _parse_refresh_response(response: AIResponse, patch_name: str) -> PatchRefre
     return result
 
 
+def _extract_dep3_header(patch_content: str) -> str:
+    """Extract the DEP3 header from a quilt patch.
+
+    Returns everything before the first ``diff --git`` or ``diff -``
+    line, which is the DEP3 metadata (From, Date, Subject, Bug,
+    Forwarded, etc.) and the optional free-form description.
+
+    Args:
+        patch_content: Full content of the patch file.
+
+    Returns:
+        The header text including its trailing newline, or an empty
+        string if no header is present.
+    """
+    lines = patch_content.splitlines(keepends=True)
+    header_lines: list[str] = []
+    for line in lines:
+        if line.startswith("diff --git ") or line.startswith("diff -"):
+            break
+        header_lines.append(line)
+    return "".join(header_lines)
+
+
+def attempt_mechanical_refresh(
+    patch_name: str,
+    patch_path: Path,
+    pkg_repo: Path,
+) -> PatchRefreshResult:
+    """Try to refresh a patch mechanically without AI involvement.
+
+    When a quilt patch fails strict application (e.g. due to whitespace
+    changes or line-number offsets in context lines), this function
+    attempts to apply it with progressively relaxed matching, then
+    regenerates a clean patch from the actual result.
+
+    Strategies tried in order:
+
+    1. ``git apply --ignore-whitespace`` — handles whitespace-only
+       context differences (e.g. indentation changes).
+    2. ``git apply --3way`` — builds a fake ancestor from the index
+       lines embedded in the patch and performs a three-way merge.
+    3. ``patch -p1 -l --fuzz=3`` — GNU patch with loose whitespace
+       matching and generous fuzz (up to 3 context lines ignored).
+
+    On success the patch is applied, a clean diff is captured via
+    ``git diff``, DEP3 headers from the original are preserved, and
+    the working tree is reverted to its previous state.
+
+    Args:
+        patch_name: Name of the failing patch file.
+        patch_path: Absolute path to the patch file.
+        pkg_repo: Path to the packaging repository.
+
+    Returns:
+        PatchRefreshResult with refreshed patch content on success.
+    """
+    from packastack.debpkg.gbp import run_command
+
+    # Read original patch to preserve DEP3 header
+    try:
+        original = patch_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return PatchRefreshResult(
+            refreshed=False,
+            patch_name=patch_name,
+            error=f"Cannot read patch file: {exc}",
+        )
+
+    # First: if strict git apply already passes, the patch doesn't need
+    # refreshing (it might fail during gbp-pq only because an earlier
+    # patch in the series couldn't be applied).
+    strict_rc, _, _ = run_command(
+        ["git", "apply", "--check", str(patch_path)],
+        cwd=pkg_repo,
+    )
+    if strict_rc == 0:
+        return PatchRefreshResult(
+            refreshed=False,
+            patch_name=patch_name,
+            error="Patch already applies cleanly (issue is in an earlier patch)",
+        )
+
+    strategies: list[tuple[str, list[str], list[str]]] = [
+        # (name, check_cmd, apply_cmd)
+        (
+            "git-ignore-ws",
+            [
+                "git", "apply", "--check", "--ignore-whitespace",
+                str(patch_path),
+            ],
+            ["git", "apply", "--ignore-whitespace", str(patch_path)],
+        ),
+        (
+            "git-3way",
+            # --3way --check always exits 0 even with conflicts, so we
+            # skip the check and just try applying.
+            [],
+            ["git", "apply", "--3way", str(patch_path)],
+        ),
+        (
+            "patch-fuzz",
+            [
+                "patch", "-p1", "--dry-run", "-l", "--fuzz=3",
+                "--no-backup-if-mismatch", "--force",
+                "--input", str(patch_path),
+            ],
+            [
+                "patch", "-p1", "-l", "--fuzz=3",
+                "--no-backup-if-mismatch", "--force",
+                "--input", str(patch_path),
+            ],
+        ),
+    ]
+
+    errors: list[str] = []
+    for strategy_name, check_cmd, apply_cmd in strategies:
+        # Dry-run check (when available)
+        if check_cmd:
+            rc, _, stderr = run_command(check_cmd, cwd=pkg_repo)
+            if rc != 0:
+                errors.append(f"{strategy_name}: check failed: {stderr[:200]}")
+                continue
+
+        # Apply for real
+        rc, _stdout, stderr = run_command(apply_cmd, cwd=pkg_repo)
+        if rc != 0:
+            _revert_working_tree(pkg_repo)
+            errors.append(f"{strategy_name}: apply failed: {stderr[:200]}")
+            continue
+
+        # Check for merge conflicts left by --3way
+        _rc_status, status_out, _ = run_command(
+            ["git", "diff", "--name-only", "--diff-filter=U"],
+            cwd=pkg_repo,
+        )
+        if status_out.strip():
+            # Unresolved conflicts — revert and try next strategy
+            _revert_working_tree(pkg_repo)
+            errors.append(
+                f"{strategy_name}: merge conflicts in "
+                f"{status_out.strip()}"
+            )
+            continue
+
+        # Stage all changes (including new/deleted files)
+        run_command(["git", "add", "-A"], cwd=pkg_repo)
+
+        # Capture clean diff
+        _, diff_output, _ = run_command(
+            ["git", "diff", "--cached", "HEAD"],
+            cwd=pkg_repo,
+        )
+
+        # Revert everything
+        _revert_working_tree(pkg_repo)
+
+        if not diff_output.strip():
+            errors.append(f"{strategy_name}: empty diff after apply")
+            continue
+
+        # Rebuild patch: DEP3 header + clean diff body
+        header = _extract_dep3_header(original)
+        refreshed_content = header + diff_output
+
+        # Final sanity check: does the refreshed patch pass strict
+        # git apply --check?  Use a temporary filename so we don't
+        # overwrite the original patch file.
+        from packastack.ai.build_diagnosis import validate_patch
+
+        tmp_name = f".tmp-refresh-{patch_name}"
+        validation = validate_patch(pkg_repo, refreshed_content, tmp_name)
+        if not validation.valid:
+            errors.append(
+                f"{strategy_name}: regenerated patch fails strict check: "
+                f"{validation.error}"
+            )
+            continue
+
+        return PatchRefreshResult(
+            refreshed=True,
+            patch_name=patch_name,
+            patch_content=refreshed_content,
+            explanation=(
+                f"Mechanically refreshed ({strategy_name}): "
+                f"context lines and offsets updated to match "
+                f"current upstream source"
+            ),
+        )
+
+    return PatchRefreshResult(
+        refreshed=False,
+        patch_name=patch_name,
+        error=(
+            "All mechanical refresh strategies failed: "
+            + "; ".join(errors)
+        ),
+    )
+
+
+def _revert_working_tree(pkg_repo: Path) -> None:
+    """Reset the working tree to HEAD, removing any staged or unstaged changes.
+
+    Preserves the ``debian/`` directory since it contains packaging
+    files (including the patches being processed).
+
+    Args:
+        pkg_repo: Path to the git repository.
+    """
+    from packastack.debpkg.gbp import run_command
+
+    run_command(["git", "reset", "--hard", "HEAD"], cwd=pkg_repo)
+    run_command(["git", "clean", "-fd", "-e", "debian/"], cwd=pkg_repo)
+
+
 def _extract_affected_paths(patch_content: str) -> list[str]:
     """Extract file paths modified by a unified diff patch.
 

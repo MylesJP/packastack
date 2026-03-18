@@ -2295,7 +2295,10 @@ def import_and_patch(
                 patches=[str(r) for r in pq_result.patch_reports],
                 exit_code=EXIT_PATCH_FAILED,
             )
-            return PhaseResult.fail(EXIT_PATCH_FAILED, "Patch import failed")
+            return PhaseResult.fail(
+                EXIT_PATCH_FAILED,
+                f"Patch import failed\n{pq_result.output}",
+            )
 
     run.log_event({"event": "patches.complete", "success": pq_result.success})
 
@@ -2798,6 +2801,7 @@ def _ai_diagnose_patch_failure(
         True if one or more patches were dropped (caller should retry).
     """
     from packastack.ai.patch_diagnosis import (
+        attempt_mechanical_refresh,
         diagnose_patch_failure,
         refresh_failing_patch,
     )
@@ -2852,26 +2856,43 @@ def _ai_diagnose_patch_failure(
             activity(
                 "ai",
                 f"Patch '{patch_name}' is NOT fully upstreamed "
-                f"(reverse-apply failed) — attempting AI refresh",
+                f"(reverse-apply failed) — attempting refresh",
             )
 
-            # Read patch content for refresh context
-            refresh_patch_content = ""
-            with contextlib.suppress(OSError):
-                refresh_patch_content = patch_path.read_text(
-                    encoding="utf-8", errors="replace"
+            # ---- Strategy 1: mechanical refresh (fuzz / whitespace) ----
+            mech_result = attempt_mechanical_refresh(
+                patch_name=patch_name,
+                patch_path=patch_path,
+                pkg_repo=ctx.pkg_repo,
+            )
+
+            # ---- Strategy 2: AI refresh (fallback) ----
+            if not mech_result.refreshed:
+                activity(
+                    "ai",
+                    f"Mechanical refresh failed for '{patch_name}': "
+                    f"{mech_result.error} — trying AI refresh",
                 )
 
-            refresh_result = refresh_failing_patch(
-                patch_name=patch_name,
-                patch_content=refresh_patch_content,
-                pq_output=pq_output,
-                pkg_repo=ctx.pkg_repo,
-                pkg_name=ctx.pkg_name,
-                version=version,
-                cfg=ctx.cfg,
-            )
+                # Read patch content for AI context
+                refresh_patch_content = ""
+                with contextlib.suppress(OSError):
+                    refresh_patch_content = patch_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
 
+                mech_result = refresh_failing_patch(
+                    patch_name=patch_name,
+                    patch_content=refresh_patch_content,
+                    pq_output=pq_output,
+                    pkg_repo=ctx.pkg_repo,
+                    pkg_name=ctx.pkg_name,
+                    version=version,
+                    cfg=ctx.cfg,
+                )
+
+            # ---- Apply the result (from either strategy) ----
+            refresh_result = mech_result
             if refresh_result.refreshed:
                 # Overwrite the original patch with the refreshed version
                 try:
@@ -2906,7 +2927,7 @@ def _ai_diagnose_patch_failure(
                 reason = refresh_result.error or refresh_result.explanation
                 activity(
                     "ai",
-                    f"AI could not refresh '{patch_name}': {reason}",
+                    f"Could not refresh '{patch_name}': {reason}",
                 )
             continue
 
@@ -3177,7 +3198,7 @@ def build_single_package(
                 patches_dropped = _ai_diagnose_patch_failure(ctx, import_result_phase)
 
         if patches_dropped:
-            activity("ai", "Retrying patch import after dropping patches...")
+            activity("ai", "Retrying patch import after fixing patches...")
             import_result_phase = import_and_patch(
                 ctx,
                 upstream_tarball=prepare_data.upstream_tarball,
