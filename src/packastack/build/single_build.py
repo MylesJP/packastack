@@ -2783,6 +2783,44 @@ class SingleBuildOutcome:
 
 
 # =============================================================================
+# Debian Fixup Helpers
+# =============================================================================
+
+
+def _fix_sudoers_wildcards(ctx: SingleBuildContext) -> None:
+    """Remove trailing wildcards from sudoers files for sudo-rs compatibility.
+
+    sudo-rs does not support wildcard (*) matching in command arguments.
+    This silently fixes any ``debian/*_sudoers`` files that use the old
+    rootwrap pattern and commits the change.
+    """
+    from packastack.debpkg.sudoers import fix_sudoers_in_debian_dir
+
+    debian_dir = ctx.pkg_repo / "debian"
+    result = fix_sudoers_in_debian_dir(debian_dir)
+
+    if result.files_fixed:
+        fixed_names = ", ".join(result.files_fixed)
+        activity("sudoers", f"Fixed sudo-rs wildcards in: {fixed_names}")
+        ctx.run.log_event({
+            "event": "sudoers.fixed",
+            "files": result.files_fixed,
+        })
+        commit_result = git_commit(
+            ctx.pkg_repo,
+            "d/sudoers: remove trailing wildcards for sudo-rs compatibility",
+            files=[f"debian/{f}" for f in result.files_fixed],
+        )
+        if commit_result.returncode == 0:
+            activity("sudoers", "Committed sudoers fix")
+        else:
+            activity("sudoers", f"Warning: failed to commit sudoers fix: {commit_result.stderr}")
+
+    if result.errors:
+        for err in result.errors:
+            activity("sudoers", f"Warning: {err}")
+
+
 # AI Diagnosis Helpers
 # =============================================================================
 
@@ -3210,6 +3248,11 @@ def build_single_package(
             outcome.exit_code = import_result_phase.exit_code
             outcome.error = import_result_phase.error
             return outcome
+
+    # -------------------------------------------------------------------------
+    # Phase 4b: Fix sudoers files for sudo-rs compatibility
+    # -------------------------------------------------------------------------
+    _fix_sudoers_wildcards(ctx)
 
     # -------------------------------------------------------------------------
     # Phase 5: Build packages

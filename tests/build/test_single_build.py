@@ -1045,3 +1045,80 @@ class TestResolveModifyDeleteConflicts:
 
         assert success is False
         assert resolved == []
+
+
+class TestFixSudoersWildcards:
+    """Tests for _fix_sudoers_wildcards helper."""
+
+    def test_fixes_and_commits_sudoers(self, tmp_path: Path) -> None:
+        """Should fix sudoers wildcards and commit."""
+        from packastack.build.single_build import _fix_sudoers_wildcards, run_command
+
+        pkg_repo = tmp_path / "repo"
+        pkg_repo.mkdir()
+        debian = pkg_repo / "debian"
+        debian.mkdir()
+        (debian / "cinder_sudoers").write_text(
+            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf *\n"
+        )
+
+        # Set up git repo
+        run_command(["git", "init", "-b", "master"], cwd=pkg_repo)
+        run_command(["git", "config", "user.email", "test@test"], cwd=pkg_repo)
+        run_command(["git", "config", "user.name", "Test"], cwd=pkg_repo)
+        run_command(["git", "add", "."], cwd=pkg_repo)
+        run_command(["git", "commit", "-m", "initial"], cwd=pkg_repo)
+
+        ctx = MagicMock()
+        ctx.pkg_repo = pkg_repo
+
+        _fix_sudoers_wildcards(ctx)
+
+        # Verify the file was fixed
+        content = (debian / "cinder_sudoers").read_text()
+        assert "*" not in content
+        assert "/etc/cinder/rootwrap.conf\n" in content
+
+        # Verify a commit was made
+        _rc, stdout, _stderr = run_command(["git", "log", "--oneline", "-1"], cwd=pkg_repo)
+        assert "sudoers" in stdout.lower()
+
+        # Verify the event was logged
+        ctx.run.log_event.assert_called_once()
+        event = ctx.run.log_event.call_args[0][0]
+        assert event["event"] == "sudoers.fixed"
+        assert "cinder_sudoers" in event["files"]
+
+    def test_no_op_when_no_sudoers_files(self, tmp_path: Path) -> None:
+        """Should be a no-op when no sudoers files exist."""
+        from packastack.build.single_build import _fix_sudoers_wildcards
+
+        pkg_repo = tmp_path / "repo"
+        pkg_repo.mkdir()
+        (pkg_repo / "debian").mkdir()
+
+        ctx = MagicMock()
+        ctx.pkg_repo = pkg_repo
+
+        _fix_sudoers_wildcards(ctx)
+
+        ctx.run.log_event.assert_not_called()
+
+    def test_no_op_when_sudoers_already_clean(self, tmp_path: Path) -> None:
+        """Should be a no-op when sudoers files have no wildcards."""
+        from packastack.build.single_build import _fix_sudoers_wildcards
+
+        pkg_repo = tmp_path / "repo"
+        pkg_repo.mkdir()
+        debian = pkg_repo / "debian"
+        debian.mkdir()
+        (debian / "cinder_sudoers").write_text(
+            "cinder ALL = (root) NOPASSWD: /usr/bin/cinder-rootwrap /etc/cinder/rootwrap.conf\n"
+        )
+
+        ctx = MagicMock()
+        ctx.pkg_repo = pkg_repo
+
+        _fix_sudoers_wildcards(ctx)
+
+        ctx.run.log_event.assert_not_called()
