@@ -403,8 +403,8 @@ class TestAiDiagnosePatchFailure:
         mock_drop.assert_called_once_with(ctx.pkg_repo, "fix-brittle-tests.patch")
         ctx.run.log_event.assert_called()
 
-    def test_reverse_apply_failure_skips_ai(self, tmp_path: Path) -> None:
-        """Test that patches not upstreamed (reverse-apply fails) skip AI diagnosis."""
+    def test_reverse_apply_failure_skips_ai_diagnosis_calls_refresh(self, tmp_path: Path) -> None:
+        """Test that patches not upstreamed skip drop-diagnosis but try AI refresh."""
         from packastack.build.single_build import _ai_diagnose_patch_failure
 
         ctx = _make_ctx_for_patch_test(tmp_path)
@@ -414,6 +414,11 @@ class TestAiDiagnosePatchFailure:
             4, "Patch drop-zun.patch failed to apply"
         )
 
+        refresh_result = MagicMock()
+        refresh_result.refreshed = False
+        refresh_result.error = "Cannot refresh"
+        refresh_result.explanation = ""
+
         with (
             patch(
                 "packastack.debpkg.gbp.run_command",
@@ -422,11 +427,135 @@ class TestAiDiagnosePatchFailure:
             patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
             ) as mock_diagnose,
+            patch(
+                "packastack.ai.patch_diagnosis.refresh_failing_patch",
+                return_value=refresh_result,
+            ) as mock_refresh,
         ):
             result = _ai_diagnose_patch_failure(ctx, phase)
 
         assert result is False
         mock_diagnose.assert_not_called()
+        mock_refresh.assert_called_once()
+        assert mock_refresh.call_args.kwargs["patch_name"] == "drop-zun.patch"
+
+    def test_reverse_apply_failure_refresh_succeeds(self, tmp_path: Path) -> None:
+        """Test refresh path writes patch and commits when AI succeeds."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"drop-zun.patch": "old diff"})
+
+        phase = PhaseResult.fail(
+            4, "Patch drop-zun.patch failed to apply"
+        )
+
+        refresh_result = MagicMock()
+        refresh_result.refreshed = True
+        refresh_result.patch_content = "new refreshed diff"
+        refresh_result.explanation = "Updated context lines"
+
+        commit_result = MagicMock(returncode=0, stderr="")
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "patch does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.refresh_failing_patch",
+                return_value=refresh_result,
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=commit_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is True
+        # Verify patch file was overwritten
+        patch_path = ctx.pkg_repo / "debian" / "patches" / "drop-zun.patch"
+        assert patch_path.read_text() == "new refreshed diff"
+        # Verify event was logged
+        ctx.run.log_event.assert_called()
+        logged = ctx.run.log_event.call_args[0][0]
+        assert logged["event"] == "ai.patch_refreshed"
+
+    def test_reverse_apply_failure_refresh_commit_fails(self, tmp_path: Path) -> None:
+        """Test continues to next patch when refresh commit fails."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"patch-a.patch": "diff a"})
+
+        phase = PhaseResult.fail(
+            4, "Patch patch-a.patch failed to apply"
+        )
+
+        refresh_result = MagicMock()
+        refresh_result.refreshed = True
+        refresh_result.patch_content = "refreshed diff"
+        refresh_result.explanation = "Fixed"
+
+        fail_commit = MagicMock(returncode=1, stderr="commit error")
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.refresh_failing_patch",
+                return_value=refresh_result,
+            ),
+            patch(
+                "packastack.build.single_build.git_commit",
+                return_value=fail_commit,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        # Refresh commit failed, so no success
+        assert result is False
+
+    def test_reverse_apply_failure_refresh_write_fails(self, tmp_path: Path) -> None:
+        """Test continues when writing refreshed patch file fails."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
+
+        # Make the patch file read-only to cause write failure
+        patch_path = ctx.pkg_repo / "debian" / "patches" / "fix.patch"
+        patch_path.chmod(0o444)
+        # Also make the parent directory read-only
+        (ctx.pkg_repo / "debian" / "patches").chmod(0o555)
+
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
+
+        refresh_result = MagicMock()
+        refresh_result.refreshed = True
+        refresh_result.patch_content = "refreshed diff"
+        refresh_result.explanation = "Fixed"
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.refresh_failing_patch",
+                return_value=refresh_result,
+            ),
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        # Restore permissions for cleanup
+        (ctx.pkg_repo / "debian" / "patches").chmod(0o755)
+        patch_path.chmod(0o644)
+
+        assert result is False
 
     def test_falls_back_to_series_file(self, tmp_path: Path) -> None:
         """Test falls back to series file when no patch names in error output."""

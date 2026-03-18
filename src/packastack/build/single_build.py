@@ -2797,7 +2797,10 @@ def _ai_diagnose_patch_failure(
     Returns:
         True if one or more patches were dropped (caller should retry).
     """
-    from packastack.ai.patch_diagnosis import diagnose_patch_failure
+    from packastack.ai.patch_diagnosis import (
+        diagnose_patch_failure,
+        refresh_failing_patch,
+    )
     from packastack.debpkg.gbp import (
         _extract_patch_name_from_line,
         drop_patch,
@@ -2832,6 +2835,7 @@ def _ai_diagnose_patch_failure(
         return False
 
     dropped_any = False
+    refreshed_any = False
     for patch_name in failing_patches:
         patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
         if not patch_path.exists():
@@ -2848,8 +2852,62 @@ def _ai_diagnose_patch_failure(
             activity(
                 "ai",
                 f"Patch '{patch_name}' is NOT fully upstreamed "
-                f"(reverse-apply failed) — needs refresh, not drop",
+                f"(reverse-apply failed) — attempting AI refresh",
             )
+
+            # Read patch content for refresh context
+            refresh_patch_content = ""
+            with contextlib.suppress(OSError):
+                refresh_patch_content = patch_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+
+            refresh_result = refresh_failing_patch(
+                patch_name=patch_name,
+                patch_content=refresh_patch_content,
+                pq_output=pq_output,
+                pkg_repo=ctx.pkg_repo,
+                pkg_name=ctx.pkg_name,
+                version=version,
+                cfg=ctx.cfg,
+            )
+
+            if refresh_result.refreshed:
+                # Overwrite the original patch with the refreshed version
+                try:
+                    patch_path.write_text(
+                        refresh_result.patch_content, encoding="utf-8"
+                    )
+                except OSError as exc:
+                    activity("ai", f"Failed to write refreshed patch: {exc}")
+                    continue
+
+                commit_result = git_commit(
+                    ctx.pkg_repo,
+                    f"d/patches: refresh {patch_name} for {version}",
+                    files=["debian/patches"],
+                )
+                if commit_result.returncode != 0:
+                    activity(
+                        "ai",
+                        f"Failed to commit refreshed patch: "
+                        f"{commit_result.stderr}",
+                    )
+                    continue
+
+                activity("ai", f"Refreshed patch: {patch_name}")
+                ctx.run.log_event({
+                    "event": "ai.patch_refreshed",
+                    "patch_name": patch_name,
+                    "explanation": refresh_result.explanation,
+                })
+                refreshed_any = True
+            else:
+                reason = refresh_result.error or refresh_result.explanation
+                activity(
+                    "ai",
+                    f"AI could not refresh '{patch_name}': {reason}",
+                )
             continue
 
         # Read patch content for AI context
@@ -2904,7 +2962,7 @@ def _ai_diagnose_patch_failure(
         })
         dropped_any = True
 
-    return dropped_any
+    return dropped_any or refreshed_any
 
 
 def _ai_diagnose_and_retry_build(

@@ -99,6 +99,47 @@ Rules:
 - If you cannot produce a valid patch, respond with ACTION: NO_PATCH
 """
 
+PATCH_REFRESH_SYSTEM = """\
+You are a Debian packaging expert specialising in Ubuntu OpenStack packages.
+
+An existing quilt patch from ``debian/patches/`` failed to apply against \
+a new upstream release. The patch has NOT been upstreamed — it still \
+carries a needed delta. Your job is to produce a refreshed version of \
+the patch that applies cleanly against the current source tree.
+
+You are given:
+1. The original patch (the full quilt patch file including DEP3 headers)
+2. The ``gbp pq import`` error output showing which hunks failed
+3. The current contents of every file that the patch modifies, so you \
+can see exactly what the upstream source looks like now
+
+CRITICAL RULES:
+- Be CONSERVATIVE: the refreshed patch must make the SAME logical \
+change as the original. Do not add, remove, or alter the intended \
+behaviour. Only update context lines, line numbers, and offsets so \
+that the patch applies cleanly.
+- If a hunk targets code that no longer exists (function removed, file \
+restructured), and the change is no longer applicable, you may drop \
+that single hunk. Explain why in your EXPLANATION.
+- The patch MUST keep the same filename as the original.
+- Preserve any existing DEP3 headers (Description, Author, Forwarded, \
+Bug, etc.) from the original patch.
+- NEVER invent new changes that were not in the original patch.
+
+Respond in this exact format:
+
+DIAGNOSIS: <one-line summary of what changed in upstream that broke the patch>
+ACTION: REFRESH | NO_REFRESH
+EXPLANATION: <2-5 sentences explaining what you changed and why>
+PATCH_FILENAME: <same filename as the original>
+--- BEGIN PATCH ---
+<Complete refreshed patch with DEP3 headers and unified diff>
+--- END PATCH ---
+
+If the patch cannot be meaningfully refreshed (e.g. the entire target \
+code was rewritten), respond with ACTION: NO_REFRESH and explain why.
+"""
+
 BUILD_DIAGNOSIS_SYSTEM = """\
 You are a Debian packaging expert specialising in Ubuntu OpenStack packages \
 built with sbuild on Ubuntu.
@@ -185,6 +226,54 @@ def build_patch_context(
         f"== gbp pq import error output ==\n"
         f"{error_output}\n"
     )
+
+
+def build_patch_refresh_context(
+    patch_name: str,
+    patch_content: str,
+    error_output: str,
+    affected_files: dict[str, str],
+    pkg_name: str,
+    version: str,
+) -> str:
+    """Format context for an AI patch refresh request.
+
+    Includes the original patch, the error output, and the current
+    contents of every file the patch modifies so the AI can produce
+    an accurate refreshed patch.
+
+    Args:
+        patch_name: Name of the failing patch file.
+        patch_content: Full content of the original patch.
+        error_output: Output from gbp pq import showing the failure.
+        affected_files: Mapping of file paths (relative to repo root)
+            to their current contents in the source tree.
+        pkg_name: Debian package name.
+        version: Upstream version being imported.
+
+    Returns:
+        Formatted user message string.
+    """
+    parts = [
+        f"Package: {pkg_name}",
+        f"Version: {version}",
+        "",
+        f"== Original patch: {patch_name} ==",
+        patch_content,
+        "",
+        "== gbp pq import error output ==",
+        error_output,
+    ]
+
+    if affected_files:
+        parts.append("")
+        parts.append("== Current source file contents ==")
+        for fpath, fcontent in affected_files.items():
+            parts.append(f"--- {fpath} ---")
+            parts.append(fcontent)
+            parts.append("")
+
+    return "\n".join(parts)
 
 
 def build_sbuild_context(

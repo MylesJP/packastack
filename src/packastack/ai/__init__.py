@@ -25,8 +25,10 @@ from packastack.ai.memory import (
 from packastack.ai.patch_diagnosis import (
     AutoDropResult,
     PatchDiagnosisResult,
+    PatchRefreshResult,
     auto_drop_upstreamed_patches,
     diagnose_patch_failure,
+    refresh_failing_patch,
 )
 
 __all__ = [
@@ -34,6 +36,7 @@ __all__ = [
     "AutoDropResult",
     "BuildDiagnosisResult",
     "PatchDiagnosisResult",
+    "PatchRefreshResult",
     "PatchValidationResult",
     "apply_ai_fix",
     "apply_debian_edits",
@@ -45,6 +48,7 @@ __all__ = [
     "find_latest_memory",
     "is_ai_available",
     "load_memory",
+    "refresh_failing_patch",
     "save_memory",
     "validate_patch",
 ]
