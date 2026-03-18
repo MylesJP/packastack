@@ -2364,6 +2364,11 @@ def import_and_patch(
         activity("patches", "Skipping patch export/checkout (not a git repo)")
 
     # -------------------------------------------------------------------------
+    # Fix sudoers files for sudo-rs compatibility (before changelog)
+    # -------------------------------------------------------------------------
+    _fix_sudoers_wildcards(ctx)
+
+    # -------------------------------------------------------------------------
     # Update debian/changelog with the new version
     # -------------------------------------------------------------------------
     from packastack.debpkg.changelog import (
@@ -3248,11 +3253,6 @@ def build_single_package(
             outcome.exit_code = import_result_phase.exit_code
             outcome.error = import_result_phase.error
             return outcome
-
-    # -------------------------------------------------------------------------
-    # Phase 4b: Fix sudoers files for sudo-rs compatibility
-    # -------------------------------------------------------------------------
-    _fix_sudoers_wildcards(ctx)
 
     # -------------------------------------------------------------------------
     # Phase 5: Build packages

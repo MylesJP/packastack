@@ -686,7 +686,14 @@ def drop_patch(repo_path: Path, patch_name: str) -> DropPatchResult:
     try:
         if series_file.exists():
             lines = series_file.read_text(encoding="utf-8").splitlines()
-            filtered = [line for line in lines if line.strip() != patch_name]
+            # Compare only the patch filename (first field), ignoring
+            # options like -p1 that may follow on the same line.
+            filtered = [
+                line
+                for line in lines
+                if not line.strip()
+                or line.strip().split()[0] != patch_name
+            ]
             series_file.write_text(
                 "\n".join(filtered) + "\n" if filtered else "",
                 encoding="utf-8",

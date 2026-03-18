@@ -669,6 +669,20 @@ class TestDropPatch:
         assert result.success is False
         assert "Failed to remove" in result.error
 
+    def test_removes_series_entry_with_options(self, tmp_path: Path) -> None:
+        """Test that series entries with options like -p1 are also removed."""
+        patches_dir = tmp_path / "debian" / "patches"
+        patches_dir.mkdir(parents=True)
+        (patches_dir / "fix.patch").write_text("diff content\n")
+        (patches_dir / "series").write_text("fix.patch -p1\nother.patch\n")
+
+        result = gbp.drop_patch(tmp_path, "fix.patch")
+
+        assert result.success is True
+        series_content = (patches_dir / "series").read_text()
+        assert "fix.patch" not in series_content
+        assert "other.patch" in series_content
+
     def test_series_file_missing(self, tmp_path: Path) -> None:
         """Test succeeds when series file doesn't exist."""
         patches_dir = tmp_path / "debian" / "patches"
