@@ -2801,6 +2801,7 @@ def _ai_diagnose_patch_failure(
     from packastack.debpkg.gbp import (
         _extract_patch_name_from_line,
         drop_patch,
+        run_command,
     )
 
     activity("ai", "Diagnosing patch failure...")
@@ -2832,12 +2833,29 @@ def _ai_diagnose_patch_failure(
 
     dropped_any = False
     for patch_name in failing_patches:
+        patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
+        if not patch_path.exists():
+            continue
+
+        # ---- Gate: verify the patch is actually in upstream ----
+        # Only consider dropping when `git apply --check --reverse` succeeds,
+        # proving every hunk is already present in the working tree.
+        reverse_rc, _, _reverse_err = run_command(
+            ["git", "apply", "--check", "--reverse", str(patch_path)],
+            cwd=ctx.pkg_repo,
+        )
+        if reverse_rc != 0:
+            activity(
+                "ai",
+                f"Patch '{patch_name}' is NOT fully upstreamed "
+                f"(reverse-apply failed) — needs refresh, not drop",
+            )
+            continue
+
         # Read patch content for AI context
         patch_content = ""
-        patch_path = ctx.pkg_repo / "debian" / "patches" / patch_name
-        if patch_path.exists():
-            with contextlib.suppress(OSError):
-                patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
+        with contextlib.suppress(OSError):
+            patch_content = patch_path.read_text(encoding="utf-8", errors="replace")
 
         diagnosis = diagnose_patch_failure(
             patch_name=patch_name,

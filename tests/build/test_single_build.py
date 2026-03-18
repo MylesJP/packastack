@@ -379,6 +379,10 @@ class TestAiDiagnosePatchFailure:
 
         with (
             patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
                 return_value=diagnosis_result,
             ) as mock_diagnose,
@@ -398,6 +402,31 @@ class TestAiDiagnosePatchFailure:
         assert mock_diagnose.call_args.kwargs["patch_name"] == "fix-brittle-tests.patch"
         mock_drop.assert_called_once_with(ctx.pkg_repo, "fix-brittle-tests.patch")
         ctx.run.log_event.assert_called()
+
+    def test_reverse_apply_failure_skips_ai(self, tmp_path: Path) -> None:
+        """Test that patches not upstreamed (reverse-apply fails) skip AI diagnosis."""
+        from packastack.build.single_build import _ai_diagnose_patch_failure
+
+        ctx = _make_ctx_for_patch_test(tmp_path)
+        _setup_patches(ctx.pkg_repo, {"drop-zun.patch": "diff content"})
+
+        phase = PhaseResult.fail(
+            4, "Patch drop-zun.patch failed to apply"
+        )
+
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(1, "", "patch does not apply"),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+            ) as mock_diagnose,
+        ):
+            result = _ai_diagnose_patch_failure(ctx, phase)
+
+        assert result is False
+        mock_diagnose.assert_not_called()
 
     def test_falls_back_to_series_file(self, tmp_path: Path) -> None:
         """Test falls back to series file when no patch names in error output."""
@@ -421,6 +450,10 @@ class TestAiDiagnosePatchFailure:
         commit_result.returncode = 0
 
         with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
             patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
                 return_value=diagnosis_result,
@@ -456,9 +489,15 @@ class TestAiDiagnosePatchFailure:
         diagnosis_result.can_drop = False
         diagnosis_result.explanation = "Ubuntu-specific fix still needed"
 
-        with patch(
-            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
-            return_value=diagnosis_result,
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ),
         ):
             result = _ai_diagnose_patch_failure(ctx, phase)
 
@@ -500,6 +539,10 @@ class TestAiDiagnosePatchFailure:
 
         with (
             patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
                 return_value=diagnosis_result,
             ),
@@ -540,6 +583,10 @@ class TestAiDiagnosePatchFailure:
 
         with (
             patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
                 return_value=diagnosis_result,
             ),
@@ -572,9 +619,15 @@ class TestAiDiagnosePatchFailure:
         diagnosis_result.diagnosed = False
         diagnosis_result.error = "timeout"
 
-        with patch(
-            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
-            return_value=diagnosis_result,
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ),
         ):
             result = _ai_diagnose_patch_failure(ctx, phase)
 
@@ -611,10 +664,16 @@ class TestAiDiagnosePatchFailure:
         diagnosis_result.can_drop = False
         diagnosis_result.explanation = "Still needed"
 
-        with patch(
-            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
-            return_value=diagnosis_result,
-        ) as mock_diagnose:
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+        ):
             _ai_diagnose_patch_failure(ctx, phase)
 
         # Verify patch content was passed to AI
@@ -634,10 +693,16 @@ class TestAiDiagnosePatchFailure:
         diagnosis_result.can_drop = False
         diagnosis_result.explanation = "Needed"
 
-        with patch(
-            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
-            return_value=diagnosis_result,
-        ) as mock_diagnose:
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+        ):
             _ai_diagnose_patch_failure(ctx, phase)
 
         assert mock_diagnose.call_args.kwargs["version"] == "3.2.0"
@@ -656,10 +721,16 @@ class TestAiDiagnosePatchFailure:
         diagnosis_result.can_drop = False
         diagnosis_result.explanation = "Needed"
 
-        with patch(
-            "packastack.ai.patch_diagnosis.diagnose_patch_failure",
-            return_value=diagnosis_result,
-        ) as mock_diagnose:
+        with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
+            patch(
+                "packastack.ai.patch_diagnosis.diagnose_patch_failure",
+                return_value=diagnosis_result,
+            ) as mock_diagnose,
+        ):
             _ai_diagnose_patch_failure(ctx, phase)
 
         assert mock_diagnose.call_args.kwargs["version"] == ""
@@ -687,6 +758,10 @@ class TestAiDiagnosePatchFailure:
         commit_result = MagicMock(returncode=0, stderr="")
 
         with (
+            patch(
+                "packastack.debpkg.gbp.run_command",
+                return_value=(0, "", ""),
+            ),
             patch(
                 "packastack.ai.patch_diagnosis.diagnose_patch_failure",
                 return_value=diagnosis_result,
