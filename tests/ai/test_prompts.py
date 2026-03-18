@@ -251,3 +251,55 @@ class TestPromptConstants:
         assert len(prompts.PATCH_CORRECTION_SYSTEM) > 50
         assert "git apply" in prompts.PATCH_CORRECTION_SYSTEM
         assert "corrected" in prompts.PATCH_CORRECTION_SYSTEM.lower()
+
+    def test_patch_refresh_mentions_pyproject_migration(self) -> None:
+        """Test PATCH_REFRESH_SYSTEM mentions setup.cfg → pyproject.toml."""
+        assert "setup.cfg" in prompts.PATCH_REFRESH_SYSTEM
+        assert "pyproject.toml" in prompts.PATCH_REFRESH_SYSTEM
+
+
+class TestBuildPatchRefreshContext:
+    """Tests for build_patch_refresh_context function."""
+
+    def test_includes_missing_files_section(self) -> None:
+        """Test missing files are listed in the context."""
+        result = prompts.build_patch_refresh_context(
+            patch_name="fix.patch",
+            patch_content="diff content",
+            error_output="error",
+            affected_files={"pyproject.toml": "[project]\nname = test\n"},
+            pkg_name="pkg",
+            version="1.0",
+            missing_files=["setup.cfg"],
+        )
+
+        assert "NO LONGER EXIST" in result
+        assert "setup.cfg" in result
+        assert "[project]" in result
+
+    def test_no_missing_files_section_when_none(self) -> None:
+        """Test no missing files section when all files exist."""
+        result = prompts.build_patch_refresh_context(
+            patch_name="fix.patch",
+            patch_content="diff content",
+            error_output="error",
+            affected_files={"setup.cfg": "[metadata]\n"},
+            pkg_name="pkg",
+            version="1.0",
+        )
+
+        assert "NO LONGER EXIST" not in result
+
+    def test_no_missing_files_section_when_empty_list(self) -> None:
+        """Test no missing files section when empty list."""
+        result = prompts.build_patch_refresh_context(
+            patch_name="fix.patch",
+            patch_content="diff content",
+            error_output="error",
+            affected_files={},
+            pkg_name="pkg",
+            version="1.0",
+            missing_files=[],
+        )
+
+        assert "NO LONGER EXIST" not in result

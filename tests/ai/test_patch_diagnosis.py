@@ -1178,3 +1178,103 @@ class TestRefreshFailingPatch:
             )
 
         assert result.refreshed is False
+
+    @patch("packastack.ai.patch_diagnosis.call_ai")
+    def test_includes_pyproject_toml_when_setup_cfg_missing(
+        self, mock_call: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test includes pyproject.toml when patch targets missing setup.cfg."""
+        # Only pyproject.toml exists (setup.cfg was removed in migration)
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname = \"cinder\"\n"
+        )
+        patch_content = (
+            "--- a/setup.cfg\n+++ b/setup.cfg\n"
+            "@@ -1,2 +1,3 @@\n [metadata]\n name = cinder\n+version = 1.0\n"
+        )
+
+        mock_call.return_value = AIResponse(
+            success=True,
+            content="ACTION: NO_REFRESH\nEXPLANATION: Cannot refresh\n",
+        )
+
+        refresh_failing_patch(
+            patch_name="fix.patch",
+            patch_content=patch_content,
+            pq_output="error: setup.cfg does not exist",
+            pkg_repo=tmp_path,
+            pkg_name="cinder",
+            version="28.0.0",
+            cfg=self._cfg_with_key(),
+        )
+
+        # AI should receive pyproject.toml contents
+        user_msg = mock_call.call_args[0][1]
+        assert "[project]" in user_msg
+        assert 'name = "cinder"' in user_msg
+        # And be told that setup.cfg is missing
+        assert "setup.cfg" in user_msg
+        assert "NO LONGER EXIST" in user_msg
+
+    @patch("packastack.ai.patch_diagnosis.call_ai")
+    def test_includes_pyproject_toml_even_when_setup_cfg_exists(
+        self, mock_call: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test includes pyproject.toml alongside setup.cfg for migration awareness."""
+        (tmp_path / "setup.cfg").write_text("[metadata]\nname = test\n")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        patch_content = (
+            "--- a/setup.cfg\n+++ b/setup.cfg\n"
+            "@@ -1 +1 @@\n-old\n+new\n"
+        )
+
+        mock_call.return_value = AIResponse(
+            success=True,
+            content="ACTION: NO_REFRESH\nEXPLANATION: Cannot refresh\n",
+        )
+
+        refresh_failing_patch(
+            patch_name="fix.patch",
+            patch_content=patch_content,
+            pq_output="error",
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            cfg=self._cfg_with_key(),
+        )
+
+        # AI should receive BOTH setup.cfg and pyproject.toml
+        user_msg = mock_call.call_args[0][1]
+        assert "[metadata]" in user_msg
+        assert "[project]" in user_msg
+
+    @patch("packastack.ai.patch_diagnosis.call_ai")
+    def test_no_pyproject_when_patch_does_not_touch_setup(
+        self, mock_call: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test does not include pyproject.toml when patch doesn't touch setup files."""
+        (tmp_path / "requirements.txt").write_text("oslo.config>=1.0\n")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = \"test\"\n")
+        patch_content = (
+            "--- a/requirements.txt\n+++ b/requirements.txt\n"
+            "@@ -1 +1 @@\n-oslo.config>=1.0\n+oslo.config>=2.0\n"
+        )
+
+        mock_call.return_value = AIResponse(
+            success=True,
+            content="ACTION: NO_REFRESH\nEXPLANATION: Cannot refresh\n",
+        )
+
+        refresh_failing_patch(
+            patch_name="fix.patch",
+            patch_content=patch_content,
+            pq_output="error",
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            cfg=self._cfg_with_key(),
+        )
+
+        # AI should NOT receive pyproject.toml — patch doesn't touch setup files
+        user_msg = mock_call.call_args[0][1]
+        assert "[project]" not in user_msg

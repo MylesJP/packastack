@@ -126,6 +126,28 @@ that single hunk. Explain why in your EXPLANATION.
 Bug, etc.) from the original patch.
 - NEVER invent new changes that were not in the original patch.
 
+SETUP.CFG → PYPROJECT.TOML MIGRATION:
+Many OpenStack projects have migrated their packaging metadata from \
+setup.cfg (and setup.py) to pyproject.toml. The patch may target \
+setup.cfg but the content it modifies (e.g. entry_points, \
+dependencies) has moved to pyproject.toml. This can happen in two ways:
+1. setup.cfg was deleted entirely.
+2. setup.cfg still exists but is gutted (only [metadata]/[egg_info] \
+remain) — the sections the patch targets are now in pyproject.toml.
+In either case, if pyproject.toml is provided in the current source \
+files, retarget the affected hunks to pyproject.toml. For example:
+- A setup.cfg ``[entry_points]`` change becomes a \
+``[project.entry-points."<group>"]`` change in pyproject.toml.
+- A setup.cfg ``[options]`` dependency change becomes a \
+``[project]`` ``dependencies`` change in pyproject.toml.
+- A setup.cfg ``[metadata]`` change becomes a ``[project]`` change \
+in pyproject.toml.
+Drop the setup.cfg hunk entirely if its content is no longer in \
+setup.cfg, and add the equivalent change as a new hunk against \
+pyproject.toml.
+The logical intent of the patch MUST be preserved — only the target \
+file and syntax change.
+
 Respond in this exact format:
 
 DIAGNOSIS: <one-line summary of what changed in upstream that broke the patch>
@@ -227,6 +249,7 @@ def build_patch_refresh_context(
     affected_files: dict[str, str],
     pkg_name: str,
     version: str,
+    missing_files: list[str] | None = None,
 ) -> str:
     """Format context for an AI patch refresh request.
 
@@ -242,6 +265,8 @@ def build_patch_refresh_context(
             to their current contents in the source tree.
         pkg_name: Debian package name.
         version: Upstream version being imported.
+        missing_files: File paths the patch targets that no longer
+            exist in the source tree.
 
     Returns:
         Formatted user message string.
@@ -256,6 +281,15 @@ def build_patch_refresh_context(
         "== gbp pq import error output ==",
         error_output,
     ]
+
+    if missing_files:
+        parts.append("")
+        parts.append("== Files targeted by patch that NO LONGER EXIST ==")
+        for fpath in missing_files:
+            parts.append(f"  - {fpath}")
+        parts.append(
+            "(The patch hunks for these files need retargeting or dropping.)"
+        )
 
     if affected_files:
         parts.append("")

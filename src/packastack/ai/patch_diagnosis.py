@@ -473,11 +473,27 @@ def refresh_failing_patch(
     # Collect current contents of files the patch modifies
     affected_paths = _extract_affected_paths(patch_content)
     affected_files: dict[str, str] = {}
+    missing_files: list[str] = []
     for fpath in affected_paths:
         full = pkg_repo / fpath
         if full.is_file():
             with contextlib.suppress(OSError):
                 affected_files[fpath] = full.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+        else:
+            missing_files.append(fpath)
+
+    # Include pyproject.toml when the patch touches setup.cfg or setup.py.
+    # Many OpenStack projects have migrated metadata to pyproject.toml, so
+    # the AI needs to see it to retarget hunks — whether setup.cfg is
+    # missing entirely or just gutted (content moved but file kept).
+    _setup_files = {"setup.cfg", "setup.py"}
+    if any(f in _setup_files for f in affected_paths):
+        pyproject = pkg_repo / "pyproject.toml"
+        if pyproject.is_file() and "pyproject.toml" not in affected_files:
+            with contextlib.suppress(OSError):
+                affected_files["pyproject.toml"] = pyproject.read_text(
                     encoding="utf-8", errors="replace"
                 )
 
@@ -488,6 +504,7 @@ def refresh_failing_patch(
         affected_files=affected_files,
         pkg_name=pkg_name,
         version=version,
+        missing_files=missing_files or None,
     )
 
     response = call_ai(PATCH_REFRESH_SYSTEM, user_message, cfg)
