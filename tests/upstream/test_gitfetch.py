@@ -111,6 +111,41 @@ class TestGitFetcher:
         # Without username, cannot build SSH URL, falls back to HTTPS
         assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
 
+    def test_build_url_with_repo_name_override(self) -> None:
+        """Test URL uses overridden repo name when configured."""
+        fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
+        url = fetcher.build_url("trove")
+        assert url == f"{LAUNCHPAD_BASE_URL}/trove/+git/openstack-trove"
+
+    def test_build_url_ssh_with_repo_name_override(self) -> None:
+        """Test SSH URL uses overridden repo name."""
+        fetcher = GitFetcher(
+            launchpad_username="myuser",
+            repo_name_overrides={"trove": "openstack-trove"},
+        )
+        url = fetcher.build_url("trove")
+        assert url == (
+            "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev"
+            "/ubuntu/+source/trove/+git/openstack-trove"
+        )
+
+    def test_build_url_no_override_for_unknown_package(self) -> None:
+        """Test override mapping only affects listed packages."""
+        fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
+        url = fetcher.build_url("nova")
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+
+    def test_repo_name_method(self) -> None:
+        """Test _repo_name returns override or package name."""
+        fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
+        assert fetcher._repo_name("trove") == "openstack-trove"
+        assert fetcher._repo_name("nova") == "nova"
+
+    def test_default_empty_overrides(self) -> None:
+        """Test default empty overrides dict."""
+        fetcher = GitFetcher()
+        assert fetcher.repo_name_overrides == {}
+
 
 class TestFindBranchForSeries:
     """Tests for branch selection logic."""

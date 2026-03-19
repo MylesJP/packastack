@@ -98,6 +98,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ubuntu_archive": "http://archive.ubuntu.com/ubuntu",
         "ubuntu_openstack_git": "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source",
     },
+    # Launchpad git repo name overrides for packages whose LP git
+    # repository name differs from the source package name.
+    # Maps source-package-name → launchpad-git-repo-name.
+    "repo_name_overrides": {
+        "trove": "openstack-trove",
+    },
     "git": {
         "launchpad_username": None,  # Set to your Launchpad username for SSH push access
     },

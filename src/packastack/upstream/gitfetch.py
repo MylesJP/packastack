@@ -72,6 +72,7 @@ class GitFetcher:
         base_url: str = LAUNCHPAD_BASE_URL,
         lock_timeout: int = LOCK_TIMEOUT,
         launchpad_username: str | None = None,
+        repo_name_overrides: dict[str, str] | None = None,
     ) -> None:
         """Initialize the fetcher.
 
@@ -79,10 +80,29 @@ class GitFetcher:
             base_url: Base URL for git repositories.
             lock_timeout: Maximum seconds to wait for a lock.
             launchpad_username: Launchpad username for SSH push access.
+            repo_name_overrides: Mapping of source package name to
+                Launchpad git repository name, for packages where
+                the two differ (e.g. ``{"trove": "openstack-trove"}``).
         """
         self.base_url = base_url.rstrip("/")
         self.lock_timeout = lock_timeout
         self.launchpad_username = launchpad_username
+        self.repo_name_overrides = repo_name_overrides or {}
+
+    def _repo_name(self, package: str) -> str:
+        """Return the Launchpad git repository name for a package.
+
+        Most packages use the source package name as the git repo name.
+        Some (e.g. trove → openstack-trove) differ and are looked up
+        in :attr:`repo_name_overrides`.
+
+        Args:
+            package: Source package name.
+
+        Returns:
+            Launchpad git repository name.
+        """
+        return self.repo_name_overrides.get(package, package)
 
     def build_url(self, package: str, use_ssh: bool | None = None) -> str:
         """Build the git URL for a package.
@@ -97,9 +117,10 @@ class GitFetcher:
         if use_ssh is None:
             use_ssh = self.launchpad_username is not None
 
+        repo_name = self._repo_name(package)
         if use_ssh and self.launchpad_username:
-            return f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
-        return f"{self.base_url}/{package}/+git/{package}"
+            return f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{repo_name}"
+        return f"{self.base_url}/{package}/+git/{repo_name}"
 
     def _acquire_lock(self, lock_path: Path) -> int | None:
         """Acquire a file lock, waiting up to lock_timeout seconds.
@@ -283,7 +304,8 @@ class GitFetcher:
 
         # Convert HTTPS to SSH
         if "git.launchpad.net/~ubuntu-openstack-dev" in current_url:
-            ssh_url = f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{package}"
+            repo_name = self._repo_name(package)
+            ssh_url = f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{package}/+git/{repo_name}"
             origin.set_url(ssh_url)
 
     def _list_branches(self, repo_path: Path) -> list[str]:

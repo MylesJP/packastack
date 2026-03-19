@@ -737,7 +737,11 @@ def fetch_packaging_repo(
 
     # Clone packaging repo
     launchpad_username = ctx.cfg.get("git", {}).get("launchpad_username")
-    fetcher = GitFetcher(launchpad_username=launchpad_username)
+    repo_name_overrides = ctx.cfg.get("repo_name_overrides", {})
+    fetcher = GitFetcher(
+        launchpad_username=launchpad_username,
+        repo_name_overrides=repo_name_overrides,
+    )
     with activity_spinner("fetch", f"Cloning packaging repository: {ctx.pkg_name}"):
         fetch_result = fetcher.fetch_and_checkout(
             ctx.pkg_name,
