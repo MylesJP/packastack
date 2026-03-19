@@ -115,7 +115,7 @@ class TestGitFetcher:
         """Test URL uses overridden repo name when configured."""
         fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
         url = fetcher.build_url("trove")
-        assert url == f"{LAUNCHPAD_BASE_URL}/trove/+git/openstack-trove"
+        assert url == f"{LAUNCHPAD_BASE_URL}/openstack-trove/+git/openstack-trove"
 
     def test_build_url_ssh_with_repo_name_override(self) -> None:
         """Test SSH URL uses overridden repo name."""
@@ -126,7 +126,7 @@ class TestGitFetcher:
         url = fetcher.build_url("trove")
         assert url == (
             "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev"
-            "/ubuntu/+source/trove/+git/openstack-trove"
+            "/ubuntu/+source/openstack-trove/+git/openstack-trove"
         )
 
     def test_build_url_no_override_for_unknown_package(self) -> None:
