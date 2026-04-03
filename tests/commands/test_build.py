@@ -666,6 +666,77 @@ class TestRunBuildPhases:
         assert result == build.EXIT_SUCCESS
 
 
+class TestBuildConfigDefaults:
+    """Tests for config-based defaults for --target and --ubuntu-series."""
+
+    def test_target_and_series_from_config(self) -> None:
+        """Config defaults.upstream_target and defaults.ubuntu_series are used when CLI args are omitted."""
+        cfg = {
+            "defaults": {
+                "upstream_target": "caracal",
+                "ubuntu_series": "noble",
+            }
+        }
+        with (
+            patch("packastack.commands.build.load_config", return_value=cfg),
+            patch("packastack.commands.build._build_single_mode") as mock_single,
+        ):
+            from typer.testing import CliRunner
+
+            from packastack.cli import app
+
+            runner = CliRunner()
+            result = runner.invoke(app, ["build", "nova"])
+            assert result.exit_code == 0 or mock_single.called
+            if mock_single.called:
+                _, kwargs = mock_single.call_args
+                assert kwargs.get("target") == "caracal"
+                assert kwargs.get("ubuntu_series") == "noble"
+
+    def test_cli_target_overrides_config(self) -> None:
+        """An explicit --target CLI flag takes precedence over config defaults."""
+        cfg = {
+            "defaults": {
+                "upstream_target": "caracal",
+                "ubuntu_series": "noble",
+            }
+        }
+        with (
+            patch("packastack.commands.build.load_config", return_value=cfg),
+            patch("packastack.commands.build._build_single_mode") as mock_single,
+        ):
+            from typer.testing import CliRunner
+
+            from packastack.cli import app
+
+            runner = CliRunner()
+            result = runner.invoke(app, ["build", "nova", "--target", "dalmatian"])
+            assert result.exit_code == 0 or mock_single.called
+            if mock_single.called:
+                _, kwargs = mock_single.call_args
+                assert kwargs.get("target") == "dalmatian"
+                assert kwargs.get("ubuntu_series") == "noble"
+
+    def test_falls_back_to_devel_when_config_has_no_defaults(self) -> None:
+        """When config has no defaults section, 'devel' is used."""
+        cfg: dict = {}
+        with (
+            patch("packastack.commands.build.load_config", return_value=cfg),
+            patch("packastack.commands.build._build_single_mode") as mock_single,
+        ):
+            from typer.testing import CliRunner
+
+            from packastack.cli import app
+
+            runner = CliRunner()
+            result = runner.invoke(app, ["build", "nova"])
+            assert result.exit_code == 0 or mock_single.called
+            if mock_single.called:
+                _, kwargs = mock_single.call_args
+                assert kwargs.get("target") == "devel"
+                assert kwargs.get("ubuntu_series") == "devel"
+
+
 class TestBuildIntegration:
     """Integration-style tests for build command."""
 

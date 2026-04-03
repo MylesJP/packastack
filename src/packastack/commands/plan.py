@@ -426,6 +426,20 @@ def run_plan_for_package(
         if verbose_output:
             activity("policy", f"Snapshot eligibility: Skipped (build_type={request.build_type})")
 
+    # Fast path: skip dependency graph when build_deps=False.
+    # We only need to build the target package itself.
+    if not request.build_deps:
+        plan_result = PlanResult(
+            build_order=targets,
+            upload_order=targets,
+            mir_candidates={},
+            missing_packages={},
+            cycles=[],
+            plan_graph=None,
+        )
+        run.log_event({"event": "report.plan_result", "result": str(plan_result), "build_deps": False})
+        return plan_result, EXIT_SUCCESS
+
     # Phase: plan - Load Ubuntu package index
     pockets = cfg.get("defaults", {}).get("ubuntu_pockets", ["release", "updates", "security"])
     components = cfg.get("defaults", {}).get("ubuntu_components", ["main", "universe"])

@@ -341,6 +341,38 @@ class TestLoadProjectReleases:
         assert release is not None
         assert release.tarball_base == ""
 
+    def test_tarball_dir_parsed_when_repo_differs(self, releases_repo: Path) -> None:
+        """Test tarball_dir is extracted when repo name differs from deliverable."""
+        deliverables_dir = releases_repo / "deliverables" / "2024.2"
+        data = {
+            "team": "Glance",
+            "type": "library",
+            "repository-settings": {
+                "openstack/glance_store": {"tarball-base": "glance_store"},
+            },
+            "releases": [
+                {
+                    "version": "5.4.0",
+                    "projects": [
+                        {"repo": "openstack/glance_store", "hash": "abc123"}
+                    ],
+                },
+            ],
+            "release-model": "cycle-with-intermediary",
+        }
+        (deliverables_dir / "glance-store.yaml").write_text(yaml.dump(data))
+
+        release = load_project_releases(releases_repo, "2024.2", "glance-store")
+        assert release is not None
+        assert release.tarball_dir == "glance_store"
+        assert release.tarball_base == "glance_store"
+
+    def test_tarball_dir_empty_when_repo_matches(self, releases_repo: Path) -> None:
+        """Test tarball_dir is empty when repo name matches deliverable name."""
+        release = load_project_releases(releases_repo, "2024.2", "nova")
+        assert release is not None
+        assert release.tarball_dir == ""
+
 
 class TestIsSnapshotEligible:
     """Tests for is_snapshot_eligible function.

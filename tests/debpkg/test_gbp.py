@@ -712,6 +712,7 @@ class TestBuildSource:
             assert "gbp" in cmd
             assert "buildpackage" in cmd
             assert "-S" in cmd
+            assert "-d" in cmd
 
     def test_unsigned_by_default(self, tmp_path: Path) -> None:
         """Test that unsigned is True by default."""

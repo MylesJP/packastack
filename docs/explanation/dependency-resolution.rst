@@ -9,7 +9,9 @@ PackaStack first figures out what you meant. It peeks into your local repo; if a
 
 What gets built alongside
 -------------------------
-Build-deps are the only tagalongs PackaStack will auto-build, and only if ``--build-deps`` stays on (default). Missing build-deps get built first and published to your local repo so the main build can lean on them. Runtime deps are assumed to live in the archive or your repo—you own them if you want different versions. Cycles or gaps are shouted about during planning so you don’t waste sbuild minutes.
+Build-deps are the only tagalongs PackaStack will auto-build, and only if ``--build-deps`` is passed (default off). Missing build-deps get built first and published to your local repo so the main build can lean on them. Runtime deps are assumed to live in the archive or your repo—you own them if you want different versions. Cycles or gaps are shouted about during planning so you don’t waste sbuild minutes.
+
+When ``--build-deps`` is off (the default), PackaStack skips the dependency graph entirely—no index loading, no graph construction, no cycle detection. It resolves the target package and proceeds straight to building it.
 
 Upstream version floors are enforced by default. Use ``--min-version-policy report`` to keep older archive versions while still flagging them as "outdated", or ``--min-version-policy ignore`` to treat them as satisfied. Either way, the build writes a dependency satisfaction report (text + JSON) alongside other run artifacts when ``--dep-report`` is left on.
 

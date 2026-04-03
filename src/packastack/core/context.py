@@ -62,6 +62,7 @@ class PlanRequest:
         include_retired: --include-retired flag.
         skip_local: Skip local apt repo search.
         build_type: Optional resolved build type to skip snapshot checks for RELEASE.
+        build_deps: Whether to expand the plan to include dependencies.
     """
 
     package: str
@@ -72,6 +73,7 @@ class PlanRequest:
     include_retired: bool = False
     skip_local: bool = False
     build_type: str | None = None
+    build_deps: bool = True
 
 
 @dataclass(frozen=True)
@@ -155,6 +157,7 @@ class BuildRequest:
             offline=self.offline,
             include_retired=self.include_retired,
             skip_local=False,  # Build always checks local repo
+            build_deps=self.build_deps,
         )
 
 

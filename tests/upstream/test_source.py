@@ -134,6 +134,22 @@ class TestBuildTarballUrl:
         url = upstream.build_tarball_url("nova", "29.0.0", tarball_base="")
         assert url == "https://tarballs.opendev.org/openstack/nova/nova-29.0.0.tar.gz"
 
+    def test_tarball_dir_override(self) -> None:
+        """Test tarball_dir overrides directory when repo name differs from deliverable.
+
+        glance-store is the deliverable name but the actual repo and tarball
+        directory on tarballs.opendev.org is glance_store (with underscore).
+        """
+        url = upstream.build_tarball_url(
+            "glance-store", "5.4.0", tarball_dir="glance_store"
+        )
+        assert url == "https://tarballs.opendev.org/openstack/glance_store/glance_store-5.4.0.tar.gz"
+
+    def test_tarball_dir_empty_uses_project(self) -> None:
+        """Test empty tarball_dir falls back to project name."""
+        url = upstream.build_tarball_url("nova", "29.0.0", tarball_dir="")
+        assert url == "https://tarballs.opendev.org/openstack/nova/nova-29.0.0.tar.gz"
+
 
 class TestBuildSignatureUrl:
     """Tests for build_signature_url function."""
@@ -154,6 +170,7 @@ class TestSelectUpstreamSource:
             mock_proj = MagicMock()
             mock_proj.name = "nova"
             mock_proj.tarball_base = ""
+            mock_proj.tarball_dir = ""
             mock_release = MagicMock()
             mock_release.version = "29.0.0"
             mock_proj.get_latest_release.return_value = mock_release
@@ -177,6 +194,7 @@ class TestSelectUpstreamSource:
             mock_proj = MagicMock()
             mock_proj.name = "python-aodhclient"
             mock_proj.tarball_base = "aodhclient"
+            mock_proj.tarball_dir = ""
             mock_release = MagicMock()
             mock_release.version = "3.10.0"
             mock_proj.get_latest_release.return_value = mock_release

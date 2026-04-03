@@ -65,6 +65,7 @@ class ProjectRelease:
     branches: list[dict[str, Any]] = field(default_factory=list)
     type: str = ""  # service, library, other
     tarball_base: str = ""  # Override for tarball filename stem (e.g., "aodhclient")
+    tarball_dir: str = ""  # Actual repo name for tarball URL directory (e.g., "glance_store")
 
     def get_latest_version(self) -> str | None:
         """Get the latest release version."""
@@ -352,13 +353,20 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
                     diff_start=rel.get("diff-start", ""),
                 ))
 
-            # Extract tarball-base from repository-settings if present
+            # Extract tarball-base and repo name from repository-settings
             tarball_base = ""
+            tarball_dir = ""
             repo_settings = data.get("repository-settings", {})
-            for _repo_name, settings in repo_settings.items():
+            for repo_key, settings in repo_settings.items():
+                # repo_key is like "openstack/glance_store"
+                # Extract the repo name for the tarball URL directory
+                if "/" in repo_key:
+                    repo_name = repo_key.rsplit("/", 1)[1]
+                    if repo_name != yaml_file.stem:
+                        tarball_dir = repo_name
                 if isinstance(settings, dict) and "tarball-base" in settings:
                     tarball_base = settings["tarball-base"]
-                    break
+                break
 
             return ProjectRelease(
                 name=yaml_file.stem,
@@ -368,6 +376,7 @@ def load_project_releases(releases_repo: Path, series: str, project: str) -> Pro
                 branches=data.get("branches", []),
                 type=data.get("type", ""),
                 tarball_base=tarball_base,
+                tarball_dir=tarball_dir,
             )
     except Exception:
         return None

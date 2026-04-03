@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from packastack.ai.client import AIResponse
 from packastack.ai.patch_diagnosis import (
     AutoDropResult,
@@ -1107,6 +1109,15 @@ class TestAttemptMechanicalRefresh:
 class TestRefreshFailingPatch:
     """Tests for refresh_failing_patch function."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_tree_context(self) -> None:
+        """Mock collect_working_tree_context for all tests in this class."""
+        with patch(
+            "packastack.ai.build_diagnosis.collect_working_tree_context",
+            return_value="== File tree ==\nmocked tree listing",
+        ):
+            yield
+
     def _cfg_with_key(self) -> dict:
         return {"ai": {"api_key": "test-key", "model": "test", "max_tokens": 100, "timeout": 10}}
 
@@ -1526,3 +1537,30 @@ class TestRefreshFailingPatch:
         # AI should NOT receive pyproject.toml — patch doesn't touch setup files
         user_msg = mock_call.call_args[0][1]
         assert "[project]" not in user_msg
+
+    @patch("packastack.ai.patch_diagnosis.call_ai")
+    def test_includes_working_tree_context(
+        self, mock_call: MagicMock, tmp_path: Path
+    ) -> None:
+        """Test that the AI receives the full working tree context."""
+        patch_content = "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
+
+        mock_call.return_value = AIResponse(
+            success=True,
+            content="ACTION: NO_REFRESH\nEXPLANATION: Cannot refresh\n",
+        )
+
+        refresh_failing_patch(
+            patch_name="fix.patch",
+            patch_content=patch_content,
+            pq_output="error",
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            cfg=self._cfg_with_key(),
+        )
+
+        # The autouse fixture returns "== File tree ==\nmocked tree listing"
+        user_msg = mock_call.call_args[0][1]
+        assert "File tree" in user_msg
+        assert "mocked tree listing" in user_msg

@@ -13,7 +13,7 @@ By default you’ll see something like ``sbuild -d <series> --arch <arch> -c pac
 
 What happens inside the schroot
 -------------------------------
-APT updates against the mounted local repo, so anything you’ve already built is first in line. Build-deps are resolved from that repo plus the Ubuntu archive view; with ``--build-deps`` on (default), missing build-deps get built earlier and are waiting on the shelf. sbuild then runs the usual Debian playbook: unpack, build, run hooks/tests, package, sign/annotate.
+APT updates against the mounted local repo, so anything you’ve already built is first in line. Build-deps are resolved from that repo plus the Ubuntu archive view; with ``--build-deps``, missing build-deps get built earlier and are waiting on the shelf. sbuild then runs the usual Debian playbook: unpack, build, run hooks/tests, package, sign/annotate.
 
 How to read the output
 ----------------------
@@ -30,4 +30,4 @@ Flip ``--builder dpkg`` to skip schroot orchestration and run ``dpkg-buildpackag
 
 Troubleshooting reads
 ---------------------
-Nonzero exit code with no ``.deb``? Open ``sbuild.stderr.log`` and search for “E:” or “FATAL”. Missing build-deps? Check they’re actually in ``<workspace>/localrepo``; if not, rerun with ``--build-deps`` and make sure the plan includes them. Offline failures? Any network attempt in the logs means you’re missing a pre-seeded index or tarball—rerun online, then try again offline.
+Nonzero exit code with no ``.deb``? Open ``sbuild.stderr.log`` and search for “E:” or “FATAL”. Missing build-deps? Check they’re actually in ``<workspace>/localrepo``; if not, rerun with ``--build-deps`` (off by default) and make sure the plan includes them. Offline failures? Any network attempt in the logs means you’re missing a pre-seeded index or tarball—rerun online, then try again offline.

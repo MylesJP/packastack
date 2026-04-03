@@ -112,6 +112,9 @@ You are given:
 2. The ``gbp pq import`` error output showing which hunks failed
 3. The current contents of every file that the patch modifies, so you \
 can see exactly what the upstream source looks like now
+4. The full git tree listing and contents of all ``debian/`` files and \
+key upstream configuration files, so you have complete context about \
+the package structure
 
 CRITICAL RULES:
 - Be CONSERVATIVE: the refreshed patch must make the SAME logical \
@@ -250,12 +253,13 @@ def build_patch_refresh_context(
     pkg_name: str,
     version: str,
     missing_files: list[str] | None = None,
+    working_tree_context: str = "",
 ) -> str:
     """Format context for an AI patch refresh request.
 
-    Includes the original patch, the error output, and the current
-    contents of every file the patch modifies so the AI can produce
-    an accurate refreshed patch.
+    Includes the original patch, the error output, the current
+    contents of every file the patch modifies, and the full working
+    tree context so the AI can produce an accurate refreshed patch.
 
     Args:
         patch_name: Name of the failing patch file.
@@ -267,6 +271,9 @@ def build_patch_refresh_context(
         version: Upstream version being imported.
         missing_files: File paths the patch targets that no longer
             exist in the source tree.
+        working_tree_context: Optional formatted string containing the
+            git tree listing and file contents from
+            :func:`~packastack.ai.build_diagnosis.collect_working_tree_context`.
 
     Returns:
         Formatted user message string.
@@ -298,6 +305,10 @@ def build_patch_refresh_context(
             parts.append(f"--- {fpath} ---")
             parts.append(fcontent)
             parts.append("")
+
+    if working_tree_context:
+        parts.append("")
+        parts.append(working_tree_context)
 
     return "\n".join(parts)
 

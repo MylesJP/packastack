@@ -70,52 +70,52 @@ class TestGitFetcher:
         """Test URL building for a package."""
         fetcher = GitFetcher()
         url = fetcher.build_url("nova")
-        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova"
 
     def test_build_url_custom_base(self) -> None:
         """Test URL building with custom base."""
         fetcher = GitFetcher(base_url="https://git.example.com")
         url = fetcher.build_url("glance")
-        assert url == "https://git.example.com/glance/+git/glance"
+        assert url == "https://git.example.com/glance"
 
     def test_build_url_ssh_with_username(self) -> None:
         """Test SSH URL building when launchpad_username is set."""
         fetcher = GitFetcher(launchpad_username="myuser")
         url = fetcher.build_url("nova")
-        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
+        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
 
     def test_build_url_https_without_username(self) -> None:
         """Test HTTPS URL is used when no launchpad_username."""
         fetcher = GitFetcher()
         url = fetcher.build_url("nova")
-        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova"
         assert "https://" in url
 
     def test_build_url_explicit_https(self) -> None:
         """Test explicit HTTPS even with username configured."""
         fetcher = GitFetcher(launchpad_username="myuser")
         url = fetcher.build_url("nova", use_ssh=False)
-        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova"
         assert "https://" in url
 
     def test_build_url_explicit_ssh(self) -> None:
         """Test explicit SSH request with username."""
         fetcher = GitFetcher(launchpad_username="myuser")
         url = fetcher.build_url("nova", use_ssh=True)
-        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova/+git/nova"
+        assert url == "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
 
     def test_build_url_explicit_ssh_without_username(self) -> None:
         """Test explicit SSH request without username falls back to HTTPS."""
         fetcher = GitFetcher()
         url = fetcher.build_url("nova", use_ssh=True)
         # Without username, cannot build SSH URL, falls back to HTTPS
-        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova"
 
     def test_build_url_with_repo_name_override(self) -> None:
         """Test URL uses overridden repo name when configured."""
         fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
         url = fetcher.build_url("trove")
-        assert url == f"{LAUNCHPAD_BASE_URL}/openstack-trove/+git/openstack-trove"
+        assert url == f"{LAUNCHPAD_BASE_URL}/openstack-trove"
 
     def test_build_url_ssh_with_repo_name_override(self) -> None:
         """Test SSH URL uses overridden repo name."""
@@ -126,14 +126,14 @@ class TestGitFetcher:
         url = fetcher.build_url("trove")
         assert url == (
             "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev"
-            "/ubuntu/+source/openstack-trove/+git/openstack-trove"
+            "/ubuntu/+source/openstack-trove"
         )
 
     def test_build_url_no_override_for_unknown_package(self) -> None:
         """Test override mapping only affects listed packages."""
         fetcher = GitFetcher(repo_name_overrides={"trove": "openstack-trove"})
         url = fetcher.build_url("nova")
-        assert url == f"{LAUNCHPAD_BASE_URL}/nova/+git/nova"
+        assert url == f"{LAUNCHPAD_BASE_URL}/nova"
 
     def test_repo_name_method(self) -> None:
         """Test _repo_name returns override or package name."""

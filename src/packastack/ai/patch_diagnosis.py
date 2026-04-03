@@ -603,6 +603,13 @@ def refresh_failing_patch(
             refreshed=False, error="AI not available (no API key)"
         )
 
+    # Collect full working tree context (git tree, debian/, upstream configs)
+    from packastack.ai.build_diagnosis import collect_working_tree_context
+
+    ai_cfg = cfg.get("ai", {})
+    max_file_lines = ai_cfg.get("max_file_lines", 0)
+    tree_context = collect_working_tree_context(pkg_repo, max_file_lines)
+
     # Collect current contents of files the patch modifies
     affected_paths = _extract_affected_paths(patch_content)
     affected_files: dict[str, str] = {}
@@ -638,6 +645,7 @@ def refresh_failing_patch(
         pkg_name=pkg_name,
         version=version,
         missing_files=missing_files or None,
+        working_tree_context=tree_context,
     )
 
     response = call_ai(PATCH_REFRESH_SYSTEM, user_message, cfg)

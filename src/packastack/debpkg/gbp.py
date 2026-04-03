@@ -728,7 +728,9 @@ def build_source(
     if output_dir is None:
         output_dir = repo_path.parent
 
-    cmd = ["gbp", "buildpackage", "-S"]
+    # -d skips build-dependency checks — not needed for source-only builds
+    # since dependencies are resolved later by sbuild / Launchpad.
+    cmd = ["gbp", "buildpackage", "-S", "-d"]
     if unsigned:
         cmd.extend(["-us", "-uc"])
 

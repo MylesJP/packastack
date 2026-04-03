@@ -303,3 +303,32 @@ class TestBuildPatchRefreshContext:
         )
 
         assert "NO LONGER EXIST" not in result
+
+    def test_includes_working_tree_context(self) -> None:
+        """Test that working_tree_context is appended when provided."""
+        result = prompts.build_patch_refresh_context(
+            patch_name="fix.patch",
+            patch_content="diff content",
+            error_output="error",
+            affected_files={},
+            pkg_name="pkg",
+            version="1.0",
+            working_tree_context="== File tree ==\ndebian/rules\nsetup.py",
+        )
+
+        assert "File tree" in result
+        assert "setup.py" in result
+
+    def test_omits_tree_context_when_empty(self) -> None:
+        """Test that empty working_tree_context adds nothing."""
+        result = prompts.build_patch_refresh_context(
+            patch_name="fix.patch",
+            patch_content="diff content",
+            error_output="error",
+            affected_files={},
+            pkg_name="pkg",
+            version="1.0",
+            working_tree_context="",
+        )
+
+        assert "File tree" not in result

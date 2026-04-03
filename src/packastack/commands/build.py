@@ -331,7 +331,7 @@ def run_build_all(
     force: bool,
     offline: bool,
     dry_run: bool,
-    ppa_upload: bool = False,
+    ppa_upload: bool = True,
     build_deps: bool = False,
     archive_deps: bool = False,
 ) -> int:
@@ -412,8 +412,8 @@ def run_build_all(
 
 def build(
     package: str = typer.Argument("", help="Package name or OpenStack project to build (omit for --all)"),
-    target: str = typer.Option("devel", "-t", "--target", help="OpenStack series target"),
-    ubuntu_series: str = typer.Option("devel", "-u", "--ubuntu-series", help="Ubuntu series target"),
+    target: str | None = typer.Option(None, "-t", "--target", help="OpenStack series target (default: from config defaults.upstream_target, or 'devel')"),
+    ubuntu_series: str | None = typer.Option(None, "-u", "--ubuntu-series", help="Ubuntu series target (default: from config defaults.ubuntu_series, or 'devel')"),
     cloud_archive: str = typer.Option("", "-c", "--cloud-archive", help="Cloud archive pocket (e.g., caracal)"),
     build_type: str = typer.Option("auto", "--type", help="Build type: auto, release, snapshot"),
     force: bool = typer.Option(False, "-f", "--force", help="Proceed despite warnings"),
@@ -423,7 +423,7 @@ def build(
     upload: bool = typer.Option(False, "-U", "--upload", help="Print upload commands"),
     binary: bool = typer.Option(True, "-b/-B", "--binary/--no-binary", help="Build binary packages with sbuild (default: on)"),
     builder: str = typer.Option("sbuild", "-x", "--builder", help="Builder for binary packages: sbuild or dpkg"),
-    build_deps: bool = typer.Option(True, "-d/-D", "--build-deps/--no-build-deps", help="Auto-build missing dependencies"),
+    build_deps: bool = typer.Option(False, "-d/-D", "--build-deps/--no-build-deps", help="Auto-build missing dependencies (default: off)"),
     archive_deps: bool = typer.Option(
         False,
         "--archive-deps/--no-archive-deps",
@@ -469,7 +469,7 @@ def build(
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmations"),
     include_retired: bool = typer.Option(False, "--include-retired", help="Build retired upstream projects (default: refuse)"),
     skip_repo_regen: bool = typer.Option(False, "--skip-repo-regen", hidden=True, help="Skip local repo regeneration (internal use)"),
-    ppa_upload: bool = typer.Option(False, "--ppa-upload", help="Upload to configured PPA on success"),
+    ppa_upload: bool = typer.Option(True, "--ppa-upload/--no-ppa-upload", help="Upload to configured PPA on success (default: on)"),
     ai: bool = typer.Option(True, "--ai/--no-ai", help="AI-powered build failure diagnosis (default: on when API key set)"),
     # --all mode options
     all_packages: bool = typer.Option(False, "-a", "--all", help="Build all discovered packages in dependency order"),
@@ -521,6 +521,14 @@ def build(
       9 - Registry error
       10 - Retired project (skipped)
     """
+    # Apply config-file defaults for target/ubuntu-series when not specified on CLI.
+    _cfg = load_config()
+    _cfg_defaults = _cfg.get("defaults", {})
+    if target is None:
+        target = _cfg_defaults.get("upstream_target") or "devel"
+    if ubuntu_series is None:
+        ubuntu_series = _cfg_defaults.get("ubuntu_series") or "devel"
+
     # Check for special subset commands: "libraries", "clients", "rc", "rc1", etc.
     if package in ("libraries", "clients"):
         from packastack.commands.build_subset import SubsetType, run_subset_build
@@ -668,7 +676,7 @@ def _build_single_mode(
     yes: bool,
     include_retired: bool,
     skip_repo_regen: bool = False,
-    ppa_upload: bool = False,
+    ppa_upload: bool = True,
     ai: bool = True,
     resume_workspace: bool = False,
     resume_run_id: str = "",
@@ -947,28 +955,6 @@ def _run_build(
         paths=paths,
         verbose_output=verbose_for_plan,
     )
-
-    # When build_deps=False, explicit package builds must NOT expand to dependencies
-    # This prevents the parallel builder from endlessly recursing when subprocesses
-    # compute their own plans.
-    if not request.build_deps and plan_result.build_order:
-        # Filter the build order to include only the requested package
-        # The requested package name might be an alias (e.g. openstack-dashboard -> horizon),
-        # so we check if request.package is in the list, or just trust the topological sort's tail.
-        # But for exactness, we match the requested package if it exists in the build order.
-        target_in_plan = next((p for p in plan_result.build_order if p == request.package), None)
-
-        # If the requested name isn't exactly in the plan (aliasing), we assume the
-        # user wants to build the single package that resulted from the plan logic.
-        # Since we ran plan_for_package(request.package), the result should focus on it.
-        # We take the *last* element as it's topologically the target.
-        if not target_in_plan and plan_result.build_order:
-            target_in_plan = plan_result.build_order[-1]
-
-        if target_in_plan:
-            plan_result = replace(plan_result, build_order=[target_in_plan])
-            # Also clear the graph so parallel builder logic isn't triggered
-            plan_result = replace(plan_result, plan_graph=None)
 
     # Handle plan-only modes
     if request.validate_plan_only or request.plan_upload:
