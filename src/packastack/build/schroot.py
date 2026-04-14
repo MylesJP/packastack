@@ -29,6 +29,11 @@ from pathlib import Path
 
 from packastack.core.spinner import activity_spinner
 
+# Suffix used by sbuild-createchroot to name the schroot config.
+# Default sbuild suffix is "-sbuild"; we use a custom one to avoid
+# collisions with user-managed schroots.
+CHROOT_SUFFIX = "-packastack"
+
 # Fun messages to display while waiting for schroot creation
 SCHROOT_WAIT_MESSAGES = [
     "Smell that fresh coffee? Go get some - this will take a while",
@@ -99,6 +104,15 @@ def get_schroot_name(series: str, arch: str) -> str:
     return f"packastack-{series}-{arch}"
 
 
+def get_sbuild_chroot_name(series: str, arch: str) -> str:
+    """Return the chroot name that sbuild-createchroot registers.
+
+    sbuild-createchroot names its chroot config as
+    ``{series}-{arch}{CHROOT_SUFFIX}``.
+    """
+    return f"{series}-{arch}{CHROOT_SUFFIX}"
+
+
 def schroot_exists(name: str) -> bool:
     """Check if a schroot exists."""
     if shutil.which("schroot") is None:
@@ -146,6 +160,7 @@ def _create_schroot(
         "--arch",
         config.arch,
         "--chroot-mode=schroot",
+        f"--chroot-suffix={CHROOT_SUFFIX}",
         f"--alias={name}",
     ]
     if config.components:
@@ -189,6 +204,12 @@ def ensure_schroot(
 
     if schroot_exists(name):
         return SchrootResult(name=name, exists=True)
+
+    # Also check the sbuild-registered chroot name
+    # ({series}-{arch}{CHROOT_SUFFIX}) which sbuild-createchroot creates.
+    sbuild_name = get_sbuild_chroot_name(config.series, config.arch)
+    if schroot_exists(sbuild_name):
+        return SchrootResult(name=sbuild_name, exists=True)
 
     if offline:
         return SchrootResult(

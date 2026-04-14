@@ -624,7 +624,7 @@ def ensure_schroot_ready(
         - Logs events to run context
     """
     from packastack.build.errors import EXIT_CONFIG_ERROR, EXIT_TOOL_MISSING
-    from packastack.build.schroot import SchrootConfig, ensure_schroot, get_schroot_name
+    from packastack.build.schroot import SchrootConfig, ensure_schroot
     from packastack.target.arch import get_host_arch
 
     result = SchrootSetupResult()
@@ -634,9 +634,6 @@ def ensure_schroot_ready(
         result.skipped = True
         return PhaseResult.ok(), result
 
-    schroot_name = get_schroot_name(resolved_ubuntu, get_host_arch())
-    result.schroot_name = schroot_name
-
     schroot_config = SchrootConfig.from_lists(
         series=resolved_ubuntu,
         arch=get_host_arch(),
@@ -645,6 +642,9 @@ def ensure_schroot_ready(
     )
 
     schroot_result = ensure_schroot(config=schroot_config, offline=offline)
+    # Use the name returned by ensure_schroot — it may be the alias
+    # (packastack-*) or the sbuild-registered name ({series}-{arch}-packastack).
+    result.schroot_name = schroot_result.name
 
     if not schroot_result.exists:
         activity("plan", f"Schroot error: {schroot_result.error}")
