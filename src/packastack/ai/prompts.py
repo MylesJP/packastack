@@ -27,51 +27,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-BUILD_DIAGNOSIS_SYSTEM = """\
-You are a Debian packaging expert specialising in Ubuntu OpenStack packages \
-built with sbuild on Ubuntu.
-
-You are given:
-- The failure section of an sbuild log
-- The full working git tree listing
-- The contents of all debian/ files (rules, control, changelog, patches, etc.)
-- Key upstream configuration files (setup.py, setup.cfg, pyproject.toml, etc.)
-
-Your task is to:
-1. Diagnose why the build failed.
-2. If possible, propose a quilt patch to fix the upstream source code.
-
-IMPORTANT CONSTRAINTS:
-- You may ONLY propose quilt patches (files under debian/patches/).
-- You must NOT propose edits to other debian/ files such as debian/rules, \
-debian/control, debian/changelog, etc.  Those files are managed by the \
-human package maintainer.  If the fix requires changes to those files, \
-respond with ACTION: NO_PATCH and explain what the maintainer should do.
-- Quilt patches apply to upstream source code (anything outside debian/).
-
-Respond in this exact format:
-
-DIAGNOSIS: <one-line summary>
-ACTION: QUILT_PATCH | NO_PATCH
-EXPLANATION: <detailed explanation, 2-5 sentences>
-
-If ACTION is QUILT_PATCH, also include:
-PATCH_FILENAME: <descriptive-name>.patch
---- BEGIN PATCH ---
-<Complete DEP3 headers followed by unified diff>
---- END PATCH ---
-
-Rules:
-- The patch filename must end in .patch.
-- DEP3 headers must include Description, Author, Forwarded.
-- The unified diff must use correct context lines from the actual source files \
-provided to you.  It must apply cleanly with `git apply --check`.
-- If the problem is a missing build dependency, packaging misconfiguration, \
-or anything else that requires editing debian/ files (NOT patches), respond \
-with ACTION: NO_PATCH and describe the needed change in EXPLANATION.
-- If the problem cannot be fixed automatically, use ACTION: NO_PATCH.
-"""
-
 
 def build_patch_context(
     patch_name: str,
@@ -173,61 +128,6 @@ def build_patch_refresh_context(
         parts.append(working_tree_context)
 
     return "\n".join(parts)
-
-
-def build_sbuild_context(
-    log_excerpt: str,
-    control_content: str,
-    rules_content: str,
-    pkg_name: str,
-    version: str,
-    ubuntu_series: str,
-    arch: str,
-    error_msg: str,
-    ai_memory_context: str = "",
-    working_tree_context: str = "",
-) -> str:
-    """Format sbuild failure context for the AI.
-
-    Args:
-        log_excerpt: Extracted failure section from the sbuild log.
-        control_content: Contents of debian/control.
-        rules_content: Contents of debian/rules.
-        pkg_name: Debian package name.
-        version: Package version.
-        ubuntu_series: Target Ubuntu distribution.
-        arch: Build architecture.
-        error_msg: Brief error message from SbuildResult.
-        ai_memory_context: Optional formatted string of previous AI
-            attempts for this package.
-        working_tree_context: Optional formatted string containing the
-            git tree listing and file contents from
-            :func:`~packastack.ai.build_diagnosis.collect_working_tree_context`.
-
-    Returns:
-        Formatted user message string.
-    """
-    base = (
-        f"Package: {pkg_name}\n"
-        f"Version: {version}\n"
-        f"Distribution: {ubuntu_series}\n"
-        f"Architecture: {arch}\n"
-        f"Error: {error_msg}\n"
-        f"\n"
-        f"== sbuild failure log excerpt ==\n"
-        f"{log_excerpt}\n"
-        f"\n"
-        f"== debian/control ==\n"
-        f"{control_content}\n"
-        f"\n"
-        f"== debian/rules ==\n"
-        f"{rules_content}\n"
-    )
-    if working_tree_context:
-        base += f"\n{working_tree_context}\n"
-    if ai_memory_context:
-        base += f"\n{ai_memory_context}\n"
-    return base
 
 
 # Patterns that indicate the start of a build error in sbuild logs

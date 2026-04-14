@@ -52,98 +52,6 @@ class TestBuildPatchContext:
         assert "error" in result
 
 
-class TestBuildSbuildContext:
-    """Tests for build_sbuild_context function."""
-
-    def test_includes_all_fields(self) -> None:
-        """Test that context includes all provided fields."""
-        result = prompts.build_sbuild_context(
-            log_excerpt="make: *** [build] Error 2",
-            control_content="Build-Depends: python3-all",
-            rules_content="#!/usr/bin/make -f",
-            pkg_name="aodh",
-            version="19.0.0-0ubuntu1",
-            ubuntu_series="plucky",
-            arch="amd64",
-            error_msg="Build failed",
-        )
-        assert "aodh" in result
-        assert "19.0.0-0ubuntu1" in result
-        assert "plucky" in result
-        assert "amd64" in result
-        assert "Build failed" in result
-        assert "make: ***" in result
-        assert "Build-Depends" in result
-        assert "make -f" in result
-
-    def test_empty_log(self) -> None:
-        """Test with empty log excerpt."""
-        result = prompts.build_sbuild_context("", "ctrl", "rules", "p", "1", "n", "amd64", "err")
-        assert "debian/control" in result
-
-    def test_includes_ai_memory_context(self) -> None:
-        """Test that ai_memory_context is appended when provided."""
-        result = prompts.build_sbuild_context(
-            log_excerpt="error output",
-            control_content="ctrl",
-            rules_content="rules",
-            pkg_name="nova",
-            version="30.0.0",
-            ubuntu_series="plucky",
-            arch="amd64",
-            error_msg="Build failed",
-            ai_memory_context="== Previous AI attempts ==\nAttempt 1: fix.patch failed",
-        )
-        assert "Previous AI attempts" in result
-        assert "fix.patch failed" in result
-
-    def test_omits_memory_when_empty(self) -> None:
-        """Test that empty ai_memory_context adds nothing."""
-        result = prompts.build_sbuild_context(
-            log_excerpt="error",
-            control_content="ctrl",
-            rules_content="rules",
-            pkg_name="nova",
-            version="1.0",
-            ubuntu_series="noble",
-            arch="amd64",
-            error_msg="err",
-            ai_memory_context="",
-        )
-        assert "Previous" not in result
-
-    def test_includes_working_tree_context(self) -> None:
-        """Test that working_tree_context is appended when provided."""
-        result = prompts.build_sbuild_context(
-            log_excerpt="error output",
-            control_content="ctrl",
-            rules_content="rules",
-            pkg_name="nova",
-            version="30.0.0",
-            ubuntu_series="plucky",
-            arch="amd64",
-            error_msg="Build failed",
-            working_tree_context="== File tree ==\ndebian/rules\nsetup.py",
-        )
-        assert "File tree" in result
-        assert "setup.py" in result
-
-    def test_omits_tree_context_when_empty(self) -> None:
-        """Test that empty working_tree_context adds nothing."""
-        result = prompts.build_sbuild_context(
-            log_excerpt="error",
-            control_content="ctrl",
-            rules_content="rules",
-            pkg_name="nova",
-            version="1.0",
-            ubuntu_series="noble",
-            arch="amd64",
-            error_msg="err",
-            working_tree_context="",
-        )
-        assert "File tree" not in result
-
-
 class TestExtractSbuildFailureSection:
     """Tests for extract_sbuild_failure_section function."""
 
@@ -227,19 +135,6 @@ class TestExtractSbuildFailureSection:
         assert "line 1999:" in result
         assert "error: something broke" in result
         assert "truncated" not in result
-
-
-class TestPromptConstants:
-    """Tests for prompt constant strings remaining in prompts.py."""
-
-    def test_build_system_prompt_is_nonempty(self) -> None:
-        """Test BUILD_DIAGNOSIS_SYSTEM is defined."""
-        assert len(prompts.BUILD_DIAGNOSIS_SYSTEM) > 50
-        assert "QUILT_PATCH" in prompts.BUILD_DIAGNOSIS_SYSTEM
-        assert "NO_PATCH" in prompts.BUILD_DIAGNOSIS_SYSTEM
-        assert "DEP3" in prompts.BUILD_DIAGNOSIS_SYSTEM
-        # AI must not be allowed to propose debian/ file edits
-        assert "ACTION: DEBIAN_EDIT" not in prompts.BUILD_DIAGNOSIS_SYSTEM
 
 
 class TestBuildPatchRefreshContext:
