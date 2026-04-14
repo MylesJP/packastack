@@ -102,6 +102,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # repository name differs from the source package name.
     # Maps source-package-name → launchpad-git-repo-name.
     "repo_name_overrides": {
+        "tap-as-a-service": "neutron-taas",
         "trove": "openstack-trove",
     },
     "git": {
