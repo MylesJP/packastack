@@ -59,12 +59,47 @@ class TestLoadPackagedSkills:
         assert "pyproject.toml" in skill.system_prompt
         assert skill.output_contract == "patch"
 
-    def test_list_skills_includes_patch_skills(self) -> None:
-        """All three patch skills are discoverable."""
+    def test_python_compat_loads_with_triggers(self) -> None:
+        """python-compat skill loads with log-pattern triggers and patch contract."""
+        skill = load_skill("python-compat")
+        assert skill.output_contract == "patch"
+        patterns = skill.metadata.get("triggers", {}).get("log_patterns", [])
+        assert isinstance(patterns, list)
+        # Each pattern must be a valid regex the triggers module can compile.
+        joined = "\n".join(patterns)
+        assert "distutils" in joined
+        assert "ast" in joined
+        assert "asyncio" in joined
+        assert "collections" in joined
+
+    def test_library_sync_advisor_loads_with_triggers(self) -> None:
+        """library-sync-advisor skill loads with guidance contract and triggers."""
+        skill = load_skill("library-sync-advisor")
+        assert skill.output_contract == "guidance"
+        patterns = skill.metadata.get("triggers", {}).get("log_patterns", [])
+        assert isinstance(patterns, list)
+        joined = "\n".join(patterns)
+        assert "oslo_" in joined
+        assert "client" in joined
+        assert "stevedore" in joined
+        assert "keystoneauth1" in joined
+        # Skill is diagnostic-only — must not ask for a patch.
+        assert "NOT" in skill.system_prompt or "not" in skill.system_prompt
+        assert "sync" in skill.system_prompt.lower()
+
+    def test_list_skills_includes_all_installed(self) -> None:
+        """Every packaged skill is discoverable."""
         names = list_skills()
-        assert "patch-diagnosis" in names
-        assert "patch-correction" in names
-        assert "patch-refresh" in names
+        for expected in (
+            "build-doctor",
+            "build-patch",
+            "library-sync-advisor",
+            "patch-correction",
+            "patch-diagnosis",
+            "patch-refresh",
+            "python-compat",
+        ):
+            assert expected in names, expected
         # Results are sorted for stable UX
         assert names == sorted(names)
 
