@@ -175,10 +175,10 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
     if config.arch:
         cmd.extend(["--arch", config.arch])
 
-    # Chroot name (if specified, otherwise sbuild uses default)
-    # Note: Only use -c if no distribution is specified, as -c overrides
-    # the distribution name in .changes files causing lintian errors
-    if config.chroot_name and not config.distribution:
+    # Chroot name — use -c to select the specific chroot.
+    # When -d is also given, sbuild uses -d for the distribution label
+    # in .changes files and -c to pick which schroot to enter.
+    if config.chroot_name:
         cmd.extend(["-c", config.chroot_name])
 
     # Local repo setup via chroot-setup-commands

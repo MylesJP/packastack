@@ -188,17 +188,19 @@ class TestBuildSbuildCommand:
         assert "-c" in cmd
         assert "noble-amd64-sbuild" in cmd
 
-    def test_chroot_name_skipped_when_distribution_set(self, tmp_path: Path) -> None:
-        """Test that -c is omitted when distribution is also set."""
+    def test_chroot_name_used_alongside_distribution(self, tmp_path: Path) -> None:
+        """Test that -c is passed alongside -d when both are set."""
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path,
             distribution="noble",
-            chroot_name="noble-amd64-sbuild",
+            chroot_name="noble-amd64-packastack",
         )
         cmd = build_sbuild_command(config)
-        assert "-c" not in cmd
+        assert "-c" in cmd
+        assert "noble-amd64-packastack" in cmd
         assert "-d" in cmd
+        assert "noble" in cmd
 
     def test_with_local_repo(self, tmp_path: Path) -> None:
         """Test command with local repo setup."""
