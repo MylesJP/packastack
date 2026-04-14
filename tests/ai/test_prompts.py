@@ -230,12 +230,7 @@ class TestExtractSbuildFailureSection:
 
 
 class TestPromptConstants:
-    """Tests for prompt constant strings."""
-
-    def test_patch_system_prompt_is_nonempty(self) -> None:
-        """Test PATCH_DIAGNOSIS_SYSTEM is defined."""
-        assert len(prompts.PATCH_DIAGNOSIS_SYSTEM) > 50
-        assert "CAN_DROP" in prompts.PATCH_DIAGNOSIS_SYSTEM
+    """Tests for prompt constant strings remaining in prompts.py."""
 
     def test_build_system_prompt_is_nonempty(self) -> None:
         """Test BUILD_DIAGNOSIS_SYSTEM is defined."""
@@ -245,17 +240,6 @@ class TestPromptConstants:
         assert "DEP3" in prompts.BUILD_DIAGNOSIS_SYSTEM
         # AI must not be allowed to propose debian/ file edits
         assert "ACTION: DEBIAN_EDIT" not in prompts.BUILD_DIAGNOSIS_SYSTEM
-
-    def test_patch_correction_prompt_is_nonempty(self) -> None:
-        """Test PATCH_CORRECTION_SYSTEM is defined."""
-        assert len(prompts.PATCH_CORRECTION_SYSTEM) > 50
-        assert "git apply" in prompts.PATCH_CORRECTION_SYSTEM
-        assert "corrected" in prompts.PATCH_CORRECTION_SYSTEM.lower()
-
-    def test_patch_refresh_mentions_pyproject_migration(self) -> None:
-        """Test PATCH_REFRESH_SYSTEM mentions setup.cfg → pyproject.toml."""
-        assert "setup.cfg" in prompts.PATCH_REFRESH_SYSTEM
-        assert "pyproject.toml" in prompts.PATCH_REFRESH_SYSTEM
 
 
 class TestBuildPatchRefreshContext:

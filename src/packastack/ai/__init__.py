@@ -31,6 +31,13 @@ from packastack.ai.patch_diagnosis import (
     diagnose_patch_failure,
     refresh_failing_patch,
 )
+from packastack.ai.skills import (
+    Skill,
+    SkillFormatError,
+    SkillNotFoundError,
+    list_skills,
+    load_skill,
+)
 
 __all__ = [
     "AIMemory",
@@ -39,6 +46,9 @@ __all__ = [
     "PatchDiagnosisResult",
     "PatchRefreshResult",
     "PatchValidationResult",
+    "Skill",
+    "SkillFormatError",
+    "SkillNotFoundError",
     "apply_ai_fix",
     "apply_debian_edits",
     "attempt_mechanical_refresh",
@@ -49,7 +59,9 @@ __all__ = [
     "diagnose_patch_failure",
     "find_latest_memory",
     "is_ai_available",
+    "list_skills",
     "load_memory",
+    "load_skill",
     "refresh_failing_patch",
     "save_memory",
     "validate_patch",

@@ -33,10 +33,10 @@ from typing import TYPE_CHECKING, Any
 from packastack.ai.client import AIResponse, call_ai, is_ai_available
 from packastack.ai.prompts import (
     BUILD_DIAGNOSIS_SYSTEM,
-    PATCH_CORRECTION_SYSTEM,
     build_sbuild_context,
     extract_sbuild_failure_section,
 )
+from packastack.ai.skills import load_skill
 
 if TYPE_CHECKING:
     from packastack.build.sbuild import SbuildResult
@@ -504,7 +504,7 @@ def _request_patch_correction(
         "Please produce a corrected patch that applies cleanly.\n"
     )
 
-    response = call_ai(PATCH_CORRECTION_SYSTEM, user_message, cfg)
+    response = call_ai(load_skill("patch-correction").system_prompt, user_message, cfg)
     if not response.success:
         return None
     return _parse_build_response(response)

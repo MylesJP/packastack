@@ -32,11 +32,10 @@ from typing import TYPE_CHECKING, Any
 
 from packastack.ai.client import AIResponse, call_ai, is_ai_available
 from packastack.ai.prompts import (
-    PATCH_DIAGNOSIS_SYSTEM,
-    PATCH_REFRESH_SYSTEM,
     build_patch_context,
     build_patch_refresh_context,
 )
+from packastack.ai.skills import load_skill
 
 if TYPE_CHECKING:
     from packastack.debpkg.gbp import PatchHealthReport
@@ -125,7 +124,7 @@ def diagnose_patch_failure(
         ubuntu_series=ubuntu_series,
     )
 
-    response = call_ai(PATCH_DIAGNOSIS_SYSTEM, user_message, cfg)
+    response = call_ai(load_skill("patch-diagnosis").system_prompt, user_message, cfg)
 
     if not response.success:
         return PatchDiagnosisResult(
@@ -648,7 +647,7 @@ def refresh_failing_patch(
         working_tree_context=tree_context,
     )
 
-    response = call_ai(PATCH_REFRESH_SYSTEM, user_message, cfg)
+    response = call_ai(load_skill("patch-refresh").system_prompt, user_message, cfg)
 
     if not response.success:
         return PatchRefreshResult(
@@ -668,7 +667,7 @@ def refresh_failing_patch(
         return result
 
     # Attempt correction rounds
-    from packastack.ai.prompts import PATCH_CORRECTION_SYSTEM
+    correction_prompt = load_skill("patch-correction").system_prompt
 
     current_content = result.patch_content
     for _ in range(max_correction_attempts):
@@ -678,7 +677,7 @@ def refresh_failing_patch(
             f"== Your patch ==\n{current_content}\n\n"
             "Please produce a corrected patch that applies cleanly.\n"
         )
-        correction_resp = call_ai(PATCH_CORRECTION_SYSTEM, correction_msg, cfg)
+        correction_resp = call_ai(correction_prompt, correction_msg, cfg)
         if not correction_resp.success:
             break
         corrected = _parse_refresh_response(correction_resp, result.patch_name)

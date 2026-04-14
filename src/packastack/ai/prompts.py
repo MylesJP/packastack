@@ -16,154 +16,16 @@
 # You should have received a copy of the GNU General Public License along with
 # Packastack. If not, see <http://www.gnu.org/licenses/>.
 
-"""System prompts and context builders for AI diagnosis.
+"""Context builders for AI diagnosis prompts.
 
-Contains the system prompts used when calling Claude for patch and build
-failure diagnosis, plus helper functions that format the context sent as
-the user message.
+Helper functions that format the user-message context sent alongside
+each skill's system prompt. The system prompts themselves live in
+``src/packastack/skills/`` and are loaded via :mod:`packastack.ai.skills`.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-PATCH_DIAGNOSIS_SYSTEM = """\
-You are a Debian packaging expert specialising in Ubuntu OpenStack packages.
-
-You are given a quilt patch that failed to apply during `gbp pq import`.
-The patch has already been verified with `git apply --check --reverse` to \
-confirm that all of its changes are present in the current upstream source \
-tree. Your task is to determine:
-1. Why the patch failed (conflict, already upstreamed, target file removed, etc.)
-2. Whether it is safe to drop the patch entirely.
-
-IMPORTANT CONTEXT:
-You are ONLY called for patches where `git apply --check --reverse` has \
-already succeeded on the upstream source tree. This means every hunk in \
-the patch can be reverse-applied, proving the changes are in the source. \
-You do NOT need to guess whether the patch is upstreamed — that has been \
-mechanically verified before you are called.
-
-CRITICAL RULES FOR CAN_DROP:
-- A patch that fails to apply is NOT necessarily upstreamed.  It may simply \
-need refreshing because surrounding context lines shifted in the new upstream \
-release.  Fuzz/offset failures alone are NEVER sufficient reason to drop.
-- CAN_DROP: YES is ONLY appropriate when you can confirm that the SUBSTANCE \
-of the patch (the actual logical change it makes) is already present in the \
-upstream code.  Look at what the patch does, not just whether it applies.
-- Do NOT claim that files have been "removed upstream" or that code "no \
-longer exists" unless the evidence you are given explicitly confirms this. \
-Making false claims about upstream state is dangerous and leads to silent \
-regressions.
-- If the patch adds Ubuntu-specific behaviour, fixes a distro-specific bug, \
-or carries a delta that upstream would not have accepted, it almost certainly \
-still needs to be kept and refreshed — answer CAN_DROP: NO.
-- When in doubt, ALWAYS answer CAN_DROP: NO.  A wrongly-kept patch causes a \
-build failure that a human can fix; a wrongly-dropped patch silently removes \
-a needed fix and is much harder to catch.
-
-Respond in this exact format:
-
-DIAGNOSIS: <one-line summary of the problem>
-CAN_DROP: YES | NO
-EXPLANATION: <detailed explanation, 2-5 sentences.  If CAN_DROP: YES, you \
-MUST explain exactly which upstream commit or code change makes the patch \
-redundant.  If CAN_DROP: NO, explain what the patch does and why it is \
-still needed.>
-"""
-
-PATCH_CORRECTION_SYSTEM = """\
-You are a Debian packaging expert specialising in Ubuntu OpenStack packages.
-
-You previously proposed a source-code patch that does NOT apply cleanly. \
-You are given:
-1. The original build failure context
-2. Your previous patch (which failed validation)
-3. The error from ``git apply --check``
-
-Produce a corrected patch that applies cleanly.  Respond in this exact format:
-
-DIAGNOSIS: <one-line summary>
-ACTION: PATCH | NO_PATCH
-EXPLANATION: <detailed explanation, 2-5 sentences>
-
-If ACTION is PATCH, also include:
-PATCH_FILENAME: <descriptive-name>.patch
---- BEGIN PATCH ---
-<Complete DEP3 headers followed by unified diff>
---- END PATCH ---
-
-Rules:
-- The patch must apply cleanly with ``git apply --check``
-- Carefully check file paths, line numbers, and context lines
-- If you cannot produce a valid patch, respond with ACTION: NO_PATCH
-"""
-
-PATCH_REFRESH_SYSTEM = """\
-You are a Debian packaging expert specialising in Ubuntu OpenStack packages.
-
-An existing quilt patch from ``debian/patches/`` failed to apply against \
-a new upstream release. The patch has NOT been upstreamed — it still \
-carries a needed delta. Your job is to produce a refreshed version of \
-the patch that applies cleanly against the current source tree.
-
-You are given:
-1. The original patch (the full quilt patch file including DEP3 headers)
-2. The ``gbp pq import`` error output showing which hunks failed
-3. The current contents of every file that the patch modifies, so you \
-can see exactly what the upstream source looks like now
-4. The full git tree listing and contents of all ``debian/`` files and \
-key upstream configuration files, so you have complete context about \
-the package structure
-
-CRITICAL RULES:
-- Be CONSERVATIVE: the refreshed patch must make the SAME logical \
-change as the original. Do not add, remove, or alter the intended \
-behaviour. Only update context lines, line numbers, and offsets so \
-that the patch applies cleanly.
-- If a hunk targets code that no longer exists (function removed, file \
-restructured), and the change is no longer applicable, you may drop \
-that single hunk. Explain why in your EXPLANATION.
-- The patch MUST keep the same filename as the original.
-- Preserve any existing DEP3 headers (Description, Author, Forwarded, \
-Bug, etc.) from the original patch.
-- NEVER invent new changes that were not in the original patch.
-
-SETUP.CFG → PYPROJECT.TOML MIGRATION:
-Many OpenStack projects have migrated their packaging metadata from \
-setup.cfg (and setup.py) to pyproject.toml. The patch may target \
-setup.cfg but the content it modifies (e.g. entry_points, \
-dependencies) has moved to pyproject.toml. This can happen in two ways:
-1. setup.cfg was deleted entirely.
-2. setup.cfg still exists but is gutted (only [metadata]/[egg_info] \
-remain) — the sections the patch targets are now in pyproject.toml.
-In either case, if pyproject.toml is provided in the current source \
-files, retarget the affected hunks to pyproject.toml. For example:
-- A setup.cfg ``[entry_points]`` change becomes a \
-``[project.entry-points."<group>"]`` change in pyproject.toml.
-- A setup.cfg ``[options]`` dependency change becomes a \
-``[project]`` ``dependencies`` change in pyproject.toml.
-- A setup.cfg ``[metadata]`` change becomes a ``[project]`` change \
-in pyproject.toml.
-Drop the setup.cfg hunk entirely if its content is no longer in \
-setup.cfg, and add the equivalent change as a new hunk against \
-pyproject.toml.
-The logical intent of the patch MUST be preserved — only the target \
-file and syntax change.
-
-Respond in this exact format:
-
-DIAGNOSIS: <one-line summary of what changed in upstream that broke the patch>
-ACTION: REFRESH | NO_REFRESH
-EXPLANATION: <2-5 sentences explaining what you changed and why>
-PATCH_FILENAME: <same filename as the original>
---- BEGIN PATCH ---
-<Complete refreshed patch with DEP3 headers and unified diff>
---- END PATCH ---
-
-If the patch cannot be meaningfully refreshed (e.g. the entire target \
-code was rewritten), respond with ACTION: NO_REFRESH and explain why.
-"""
 
 BUILD_DIAGNOSIS_SYSTEM = """\
 You are a Debian packaging expert specialising in Ubuntu OpenStack packages \
