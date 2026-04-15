@@ -89,10 +89,12 @@ With SSH configured, PackaStack uses URLs like:
 
 Existing repositories cloned via HTTPS are automatically upgraded to SSH on their next fetch when you add a ``launchpad_username``.
 
-AI-Powered Build Diagnosis
---------------------------
+AI-Powered Build Diagnosis (build-doctor)
+-----------------------------------------
 
-PackaStack can use any AI model exposed via an OpenAI-compatible ``/v1/chat/completions`` endpoint to diagnose build failures and propose patches.  When a build fails and an API key is configured, PackaStack sends the failure context to the model, which either proposes a patch (with DEP3 headers) or provides a text explanation.
+PackaStack ships an AI-assisted triage system called **build-doctor**.  When a build fails and an API key is configured, build-doctor routes the failure to a specialist skill that either produces a validated patch (with DEP3 headers) or provides a text explanation.  The dispatcher uses any AI model exposed via an OpenAI-compatible ``/v1/chat/completions`` endpoint.
+
+See :doc:`../explanation/ai-skills` for the architecture and :doc:`../howto/add-an-ai-skill` for how to add your own specialist.
 
 AI features are **opt-in** — they activate automatically when an API key is set and are completely non-blocking: if the API call fails, the normal failure output is shown.
 
@@ -143,8 +145,25 @@ The ``ai`` section controls which model endpoint PackaStack uses:
    * - ``timeout``
      - HTTP request timeout in seconds
      - ``120``
+   * - ``router_min_confidence``
+     - Minimum router confidence (``0.0``–``1.0``) to accept the primary specialist pick.  Below this, build-doctor walks the router's fallback list and finally drops to ``build-patch``.
+     - ``0.5``
+   * - ``max_log_lines``
+     - Maximum lines of sbuild log to include in context.  ``0`` means no limit.
+     - ``0``
 
 The ``base_url`` can also be set via the ``PACKASTACK_AI_BASE_URL`` environment variable.
+
+Loading skills from a custom directory
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Skills live under ``src/packastack/skills/<name>/SKILL.md`` inside the installed package.  To iterate on a skill without reinstalling, point ``PACKASTACK_SKILLS_DIR`` at an alternate directory:
+
+.. code-block:: bash
+
+   export PACKASTACK_SKILLS_DIR=/path/to/my-skills
+
+The override directory must contain one subfolder per skill, each with its own ``SKILL.md``.  When unset, PackaStack uses the skills shipped in the wheel.
 
 Provider examples
 ^^^^^^^^^^^^^^^^^

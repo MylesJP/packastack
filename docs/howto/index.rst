@@ -13,3 +13,4 @@ Practical spells for everyday PackaStack life. Each guide tackles a single itchâ
    debug-missing-packages
    inspect-state
    safe-cleanup
+   add-an-ai-skill
