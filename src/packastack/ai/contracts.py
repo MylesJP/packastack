@@ -32,7 +32,7 @@ Supported contracts:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -66,10 +66,30 @@ class DiagnosisPayload:
 
 @dataclass
 class DispatchPayload:
-    """Payload for ``output_contract: dispatch`` (router output)."""
+    """Payload for ``output_contract: dispatch`` (router output).
+
+    Attributes:
+        skill: Name of the specialist the router picked.
+        reason: One-sentence justification.
+        confidence: Router's self-reported confidence in ``[0.0, 1.0]``.
+            Defaults to ``0.0`` when the router did not report one —
+            callers that enforce a threshold should treat that as low
+            confidence.
+        evidence: Verbatim log lines the router cited.  Useful for the
+            audit report; not used for control flow.
+        fallback_skills: Ordered alternates to try if the primary is
+            disabled, unknown, or produces an unusable result.
+        extra_files_needed: Files the router thinks it would need to
+            decide.  Non-empty means "I cannot commit yet" — callers
+            should treat this as a soft fail and extend context.
+    """
 
     skill: str
     reason: str
+    confidence: float = 0.0
+    evidence: list[str] = field(default_factory=list)
+    fallback_skills: list[str] = field(default_factory=list)
+    extra_files_needed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -171,17 +191,82 @@ def parse_diagnosis(content: str) -> DiagnosisPayload:
     )
 
 
+def _parse_confidence(value: str) -> float:
+    """Parse a ``CONFIDENCE:`` header value into a float in ``[0.0, 1.0]``.
+
+    Accepts ``0.85``, ``85%``, or ``0.85 (high)`` style inputs.  Values
+    with a trailing ``%`` are divided by 100; other out-of-range values
+    are clamped.  Returns ``0.0`` when the value cannot be parsed —
+    downstream callers treat missing/invalid confidence as low, never
+    high.
+    """
+    if not value.strip():
+        return 0.0
+    first = value.strip().split()[0]
+    is_percent = first.endswith("%")
+    cleaned = first.rstrip("%")
+    try:
+        number = float(cleaned)
+    except ValueError:
+        return 0.0
+    if is_percent:
+        number = number / 100.0
+    if number < 0.0:
+        return 0.0
+    if number > 1.0:
+        return 1.0
+    return number
+
+
 def parse_dispatch(content: str) -> DispatchPayload:
-    """Parse a ``dispatch`` contract response (router output)."""
+    """Parse a ``dispatch`` contract response (router output).
+
+    Recognised headers (each on its own line):
+
+    * ``SKILL:`` — primary specialist (required).
+    * ``REASON:`` — one-sentence justification.
+    * ``CONFIDENCE:`` — ``0.0``..``1.0`` float (or percent).
+    * ``EVIDENCE:`` — one log line per occurrence; may appear multiple
+      times or be omitted entirely.
+    * ``FALLBACK:`` — alternate specialist name; may repeat.
+    * ``EXTRA_FILES:`` — file the router wants to see; may repeat.
+    """
     skill = ""
     reason = ""
+    confidence = 0.0
+    evidence: list[str] = []
+    fallbacks: list[str] = []
+    extra_files: list[str] = []
+
     for line in content.splitlines():
         stripped = line.strip()
         if stripped.startswith("SKILL:"):
             skill = _header_value(stripped)
         elif stripped.startswith("REASON:"):
             reason = _header_value(stripped)
-    return DispatchPayload(skill=skill, reason=reason)
+        elif stripped.startswith("CONFIDENCE:"):
+            confidence = _parse_confidence(_header_value(stripped))
+        elif stripped.startswith("EVIDENCE:"):
+            value = _header_value(stripped)
+            if value:
+                evidence.append(value)
+        elif stripped.startswith("FALLBACK:"):
+            value = _header_value(stripped)
+            if value:
+                fallbacks.append(value)
+        elif stripped.startswith("EXTRA_FILES:"):
+            value = _header_value(stripped)
+            if value:
+                extra_files.append(value)
+
+    return DispatchPayload(
+        skill=skill,
+        reason=reason,
+        confidence=confidence,
+        evidence=evidence,
+        fallback_skills=fallbacks,
+        extra_files_needed=extra_files,
+    )
 
 
 def parse_guidance(content: str) -> GuidancePayload:

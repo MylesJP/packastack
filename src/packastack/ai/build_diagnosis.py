@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 _ROUTER_SKILL = "build-doctor"
 _FALLBACK_SKILL = "build-patch"
+_DEFAULT_MIN_CONFIDENCE = 0.5
 
 
 @dataclass
@@ -417,20 +418,40 @@ def _select_specialist(
 ) -> str:
     """Choose which specialist skill should handle this failure.
 
-    Tries a cheap regex trigger match first (no AI call); falls back to
-    the :data:`_ROUTER_SKILL` classifier; and finally drops to
-    :data:`_FALLBACK_SKILL` if the router is unavailable or malformed.
+    Resolution order:
+
+    1. Cheap regex trigger match against specialist frontmatter (no AI).
+    2. Router skill with confidence threshold — the router's primary
+       pick must both exist in the registry and report a confidence at
+       or above :data:`_DEFAULT_MIN_CONFIDENCE` (overridable via
+       ``cfg['ai']['router_min_confidence']``).
+    3. Router's declared fallbacks, tried in order.
+    4. :data:`_FALLBACK_SKILL` as the safe default.
     """
     specialists = _specialist_skills()
     triggered = match_triggers(specialists, log_excerpt)
     if triggered:
         return triggered
 
+    known = {s.name for s in specialists}
+    min_confidence = float(
+        cfg.get("ai", {}).get("router_min_confidence", _DEFAULT_MIN_CONFIDENCE)
+    )
+
     router = run_skill(_ROUTER_SKILL, inputs, cfg)
     if router.success and isinstance(router.parsed, DispatchPayload):
-        picked = router.parsed.skill.strip()
-        if picked and any(s.name == picked for s in specialists):
+        dispatch = router.parsed
+        picked = dispatch.skill.strip()
+        if (
+            picked
+            and picked in known
+            and dispatch.confidence >= min_confidence
+        ):
             return picked
+        for alt in dispatch.fallback_skills:
+            alt_name = alt.strip()
+            if alt_name and alt_name in known:
+                return alt_name
     return _FALLBACK_SKILL
 
 

@@ -279,7 +279,11 @@ class TestDiagnoseBuildFailure:
                 return SkillResult(
                     success=True,
                     contract="dispatch",
-                    parsed=DispatchPayload(skill="build-patch", reason="fallback"),
+                    parsed=DispatchPayload(
+                        skill="build-patch",
+                        reason="fallback",
+                        confidence=0.9,
+                    ),
                 )
             return SkillResult(
                 success=True,
@@ -400,6 +404,167 @@ class TestDiagnoseBuildFailure:
         called = [c.args[0] for c in mock_run.call_args_list]
         assert called == ["build-doctor", "build-patch"]
         assert result.explanation == "fallback"
+
+    @patch("packastack.ai.build_diagnosis.run_skill")
+    @patch("packastack.ai.build_diagnosis.match_triggers")
+    def test_router_low_confidence_uses_fallback_list(
+        self, mock_triggers: Any, mock_run: Any, tmp_path: Path
+    ) -> None:
+        """Low router confidence skips the primary and tries fallback skills."""
+        log = tmp_path / "build.log"
+        log.write_text("error: ambiguous\n")
+        mock_triggers.return_value = None
+
+        def fake_run(name: str, *_args: Any, **_kwargs: Any) -> SkillResult:
+            if name == "build-doctor":
+                return SkillResult(
+                    success=True,
+                    contract="dispatch",
+                    parsed=DispatchPayload(
+                        skill="python-compat",
+                        reason="maybe python",
+                        confidence=0.2,
+                        fallback_skills=["build-patch"],
+                    ),
+                )
+            return SkillResult(
+                success=True,
+                contract="patch",
+                parsed=PatchPayload(
+                    action="NO_PATCH",
+                    patch_filename="",
+                    patch_content="",
+                    diagnosis="",
+                    explanation="ran fallback",
+                ),
+            )
+
+        mock_run.side_effect = fake_run
+        sbuild = MockSbuildResult(
+            primary_log_path=log, validation_message="Build failed"
+        )
+        result = diagnose_build_failure(
+            sbuild_result=sbuild,
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            ubuntu_series="noble",
+            arch="amd64",
+            cfg=self._cfg_with_key(),
+        )
+        called = [c.args[0] for c in mock_run.call_args_list]
+        assert called == ["build-doctor", "build-patch"]
+        assert result.explanation == "ran fallback"
+
+    @patch("packastack.ai.build_diagnosis.run_skill")
+    @patch("packastack.ai.build_diagnosis.match_triggers")
+    def test_router_low_confidence_falls_through_to_default(
+        self, mock_triggers: Any, mock_run: Any, tmp_path: Path
+    ) -> None:
+        """Low confidence + no usable fallback list uses the default fallback."""
+        log = tmp_path / "build.log"
+        log.write_text("error: ambiguous\n")
+        mock_triggers.return_value = None
+
+        def fake_run(name: str, *_args: Any, **_kwargs: Any) -> SkillResult:
+            if name == "build-doctor":
+                return SkillResult(
+                    success=True,
+                    contract="dispatch",
+                    parsed=DispatchPayload(
+                        skill="python-compat",
+                        reason="maybe",
+                        confidence=0.1,
+                        fallback_skills=["not-installed-either"],
+                    ),
+                )
+            return SkillResult(
+                success=True,
+                contract="patch",
+                parsed=PatchPayload(
+                    action="NO_PATCH",
+                    patch_filename="",
+                    patch_content="",
+                    diagnosis="",
+                    explanation="default fallback",
+                ),
+            )
+
+        mock_run.side_effect = fake_run
+        sbuild = MockSbuildResult(
+            primary_log_path=log, validation_message="Build failed"
+        )
+        result = diagnose_build_failure(
+            sbuild_result=sbuild,
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            ubuntu_series="noble",
+            arch="amd64",
+            cfg=self._cfg_with_key(),
+        )
+        called = [c.args[0] for c in mock_run.call_args_list]
+        assert called == ["build-doctor", "build-patch"]
+        assert result.explanation == "default fallback"
+
+    @patch("packastack.ai.build_diagnosis.run_skill")
+    @patch("packastack.ai.build_diagnosis.match_triggers")
+    def test_custom_confidence_threshold(
+        self, mock_triggers: Any, mock_run: Any, tmp_path: Path
+    ) -> None:
+        """cfg['ai']['router_min_confidence'] overrides the default threshold."""
+        log = tmp_path / "build.log"
+        log.write_text("error: something\n")
+        mock_triggers.return_value = None
+
+        def fake_run(name: str, *_args: Any, **_kwargs: Any) -> SkillResult:
+            if name == "build-doctor":
+                return SkillResult(
+                    success=True,
+                    contract="dispatch",
+                    parsed=DispatchPayload(
+                        skill="python-compat",
+                        reason="confident enough under lower bar",
+                        confidence=0.3,
+                    ),
+                )
+            return SkillResult(
+                success=True,
+                contract="patch",
+                parsed=PatchPayload(
+                    action="NO_PATCH",
+                    patch_filename="",
+                    patch_content="",
+                    diagnosis="",
+                    explanation="specialist",
+                ),
+            )
+
+        mock_run.side_effect = fake_run
+        cfg = {
+            "ai": {
+                "api_key": "test-key",
+                "model": "test",
+                "max_tokens": 100,
+                "timeout": 10,
+                "router_min_confidence": 0.2,
+            }
+        }
+        sbuild = MockSbuildResult(
+            primary_log_path=log, validation_message="Build failed"
+        )
+        diagnose_build_failure(
+            sbuild_result=sbuild,
+            pkg_repo=tmp_path,
+            pkg_name="pkg",
+            version="1.0",
+            ubuntu_series="noble",
+            arch="amd64",
+            cfg=cfg,
+        )
+        called = [c.args[0] for c in mock_run.call_args_list]
+        # Threshold lowered to 0.2 — router's 0.3 now wins directly.
+        assert called == ["build-doctor", "python-compat"]
 
     @patch("packastack.ai.build_diagnosis.run_skill")
     @patch("packastack.ai.build_diagnosis.match_triggers")

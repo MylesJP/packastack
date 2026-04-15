@@ -116,6 +116,10 @@ class TestParseDispatch:
         payload = parse_dispatch("SKILL: python-compat\nREASON: distutils removed\n")
         assert payload.skill == "python-compat"
         assert payload.reason == "distutils removed"
+        assert payload.confidence == 0.0
+        assert payload.evidence == []
+        assert payload.fallback_skills == []
+        assert payload.extra_files_needed == []
 
     def test_missing_skill(self) -> None:
         payload = parse_dispatch("REASON: nothing to pick\n")
@@ -127,6 +131,100 @@ class TestParseDispatch:
         )
         assert payload.skill == "a"
         assert payload.reason == "because"
+
+    def test_parses_confidence_float(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: 0.85\n"
+        )
+        assert payload.confidence == 0.85
+
+    def test_parses_confidence_percent(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: 85%\n"
+        )
+        assert payload.confidence == 0.85
+
+    def test_parses_confidence_bare_integer_clamps(self) -> None:
+        """A bare ``85`` (no %) is treated as out-of-range and clamped."""
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: 85\n"
+        )
+        assert payload.confidence == 1.0
+
+    def test_parses_confidence_with_trailing_note(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: 0.9 (high)\n"
+        )
+        assert payload.confidence == 0.9
+
+    def test_invalid_confidence_becomes_zero(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: high\n"
+        )
+        assert payload.confidence == 0.0
+
+    def test_empty_confidence_becomes_zero(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE:\n"
+        )
+        assert payload.confidence == 0.0
+
+    def test_negative_confidence_clamped_to_zero(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: -0.4\n"
+        )
+        assert payload.confidence == 0.0
+
+    def test_confidence_above_one_is_clamped(self) -> None:
+        """A 1.5 fraction (not percent) is clamped to 1.0, not divided."""
+        payload = parse_dispatch(
+            "SKILL: build-patch\nREASON: ok\nCONFIDENCE: 1.5\n"
+        )
+        assert payload.confidence == 1.0
+
+    def test_parses_multiple_evidence_lines(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: python-compat\n"
+            "EVIDENCE: ModuleNotFoundError: No module named 'distutils'\n"
+            "EVIDENCE: at /tmp/setup.py:12\n"
+            "REASON: python bump\n"
+        )
+        assert payload.evidence == [
+            "ModuleNotFoundError: No module named 'distutils'",
+            "at /tmp/setup.py:12",
+        ]
+
+    def test_skips_empty_evidence_values(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nEVIDENCE:\nEVIDENCE: real line\n"
+        )
+        assert payload.evidence == ["real line"]
+
+    def test_parses_fallback_skills(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: python-compat\n"
+            "FALLBACK: build-patch\n"
+            "FALLBACK: library-sync-advisor\n"
+        )
+        assert payload.fallback_skills == ["build-patch", "library-sync-advisor"]
+
+    def test_parses_extra_files_needed(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\n"
+            "EXTRA_FILES: debian/patches/series\n"
+            "EXTRA_FILES: setup.cfg\n"
+        )
+        assert payload.extra_files_needed == [
+            "debian/patches/series",
+            "setup.cfg",
+        ]
+
+    def test_skips_empty_fallback_and_extra(self) -> None:
+        payload = parse_dispatch(
+            "SKILL: build-patch\nFALLBACK:\nEXTRA_FILES:\n"
+        )
+        assert payload.fallback_skills == []
+        assert payload.extra_files_needed == []
 
 
 class TestParseGuidance:
