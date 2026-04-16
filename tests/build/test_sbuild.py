@@ -25,7 +25,6 @@ from unittest.mock import MagicMock, patch
 
 from packastack.build.collector import CollectionResult
 from packastack.build.sbuild import (
-    CHROOT_REPO_MOUNT,
     CHROOT_SOURCES_LIST,
     SbuildConfig,
     SbuildResult,
@@ -99,34 +98,24 @@ class TestSbuildConfig:
 class TestGenerateChrootSetupCommands:
     """Tests for generate_chroot_setup_commands function."""
 
-    def test_generates_mount_command(self, tmp_path: Path) -> None:
-        """Test that mount command is generated."""
-        cmds = generate_chroot_setup_commands(tmp_path)
-        mount_cmd = [c for c in cmds if "mount --bind" in c]
-        assert len(mount_cmd) == 1
-        assert str(tmp_path) in mount_cmd[0]
-        assert CHROOT_REPO_MOUNT in mount_cmd[0]
-
-    def test_generates_mkdir_command(self, tmp_path: Path) -> None:
-        """Test that mkdir command is generated."""
-        cmds = generate_chroot_setup_commands(tmp_path)
-        mkdir_cmd = [c for c in cmds if c.startswith("mkdir")]
-        assert len(mkdir_cmd) == 1
-        assert CHROOT_REPO_MOUNT in mkdir_cmd[0]
-
-    def test_generates_sources_list_command(self, tmp_path: Path) -> None:
+    def test_generates_sources_list_command(self) -> None:
         """Test that sources list command is generated."""
-        cmds = generate_chroot_setup_commands(tmp_path)
+        cmds = generate_chroot_setup_commands()
         sources_cmd = [c for c in cmds if "echo" in c and "deb" in c]
         assert len(sources_cmd) == 1
         assert "[trusted=yes]" in sources_cmd[0]
         assert CHROOT_SOURCES_LIST in sources_cmd[0]
 
-    def test_generates_apt_update_command(self, tmp_path: Path) -> None:
+    def test_generates_apt_update_command(self) -> None:
         """Test that apt-get update command is generated."""
-        cmds = generate_chroot_setup_commands(tmp_path)
+        cmds = generate_chroot_setup_commands()
         update_cmd = [c for c in cmds if "apt-get update" in c]
         assert len(update_cmd) == 1
+
+    def test_no_mount_commands(self) -> None:
+        """Mount is handled by schroot fstab, not chroot-setup-commands."""
+        cmds = generate_chroot_setup_commands()
+        assert not any("mount" in c for c in cmds)
 
 
 class TestGenerateChrootCleanupCommands:
@@ -139,12 +128,10 @@ class TestGenerateChrootCleanupCommands:
         assert len(rm_cmd) == 1
         assert CHROOT_SOURCES_LIST in rm_cmd[0]
 
-    def test_generates_umount_command(self) -> None:
-        """Test that umount command is generated."""
+    def test_no_umount_command(self) -> None:
+        """Unmount is handled by schroot session teardown."""
         cmds = generate_chroot_cleanup_commands()
-        umount_cmd = [c for c in cmds if "umount" in c]
-        assert len(umount_cmd) == 1
-        assert CHROOT_REPO_MOUNT in umount_cmd[0]
+        assert not any("umount" in c for c in cmds)
 
 
 class TestBuildSbuildCommand:
@@ -203,7 +190,49 @@ class TestBuildSbuildCommand:
         assert "noble" in cmd
 
     def test_with_local_repo(self, tmp_path: Path) -> None:
-        """Test command with local repo setup."""
+        """Test command with local repo setup when fstab is configured."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="noble",
+            local_repo_root=repo,
+            chroot_name="noble-amd64-packastack",
+        )
+        with patch("packastack.build.sbuild.configure_repo_mount", return_value=True):
+            cmd = build_sbuild_command(config)
+        assert "--chroot-setup-commands" in cmd
+        assert "--finished-build-commands" in cmd
+        # No mount commands — bind-mount is via schroot fstab
+        setup_args = []
+        for i, arg in enumerate(cmd):
+            if arg == "--chroot-setup-commands" and i + 1 < len(cmd):
+                setup_args.append(cmd[i + 1])
+        assert not any("mount" in s for s in setup_args)
+
+    def test_local_repo_skipped_when_fstab_fails(self, tmp_path: Path) -> None:
+        """When configure_repo_mount fails, local repo commands are omitted."""
+        from packastack.build.schroot import RepoMountError
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="noble",
+            local_repo_root=repo,
+            chroot_name="noble-amd64-packastack",
+        )
+        with patch(
+            "packastack.build.sbuild.configure_repo_mount",
+            side_effect=RepoMountError("no config"),
+        ):
+            cmd = build_sbuild_command(config)
+        assert "--chroot-setup-commands" not in cmd
+
+    def test_local_repo_skipped_when_no_chroot_name(self, tmp_path: Path) -> None:
+        """Without a chroot_name, local repo setup is skipped."""
         repo = tmp_path / "repo"
         repo.mkdir()
         config = SbuildConfig(
@@ -213,8 +242,7 @@ class TestBuildSbuildCommand:
             local_repo_root=repo,
         )
         cmd = build_sbuild_command(config)
-        assert "--chroot-setup-commands" in cmd
-        assert "--finished-build-commands" in cmd
+        assert "--chroot-setup-commands" not in cmd
 
     def test_with_extra_args(self, tmp_path: Path) -> None:
         """Test command with extra arguments."""

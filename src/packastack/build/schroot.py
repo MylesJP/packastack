@@ -242,3 +242,166 @@ def ensure_schroot(
         return SchrootResult(name=name, exists=False, error=err)
 
     return SchrootResult(name=name, exists=True, created=True)
+
+
+# ---------------------------------------------------------------------------
+# Schroot fstab configuration for local APT repository bind-mount
+# ---------------------------------------------------------------------------
+
+REPO_FSTAB_MARKER = "# PackaStack local apt repo"
+_CHROOT_CONF_DIR = Path("/etc/schroot/chroot.d")
+
+
+class RepoMountError(Exception):
+    """Raised when configuring the schroot repo mount fails."""
+
+    pass  # pragma: no cover
+
+
+def _find_schroot_config(chroot_name: str) -> Path | None:
+    """Locate the schroot config file that defines *chroot_name*.
+
+    Scans ``/etc/schroot/chroot.d/`` for a file whose INI section header
+    matches ``[chroot_name]`` or whose ``aliases=`` line includes it.
+    """
+    if not _CHROOT_CONF_DIR.is_dir():
+        return None
+    for candidate in _CHROOT_CONF_DIR.iterdir():
+        if not candidate.is_file():
+            continue
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if f"[{chroot_name}]" in text:
+            return candidate
+        for line in text.splitlines():
+            if line.strip().startswith("aliases=") and chroot_name in line:
+                return candidate
+    return None
+
+
+def _get_profile_fstab_path(config_text: str) -> Path:
+    """Return the fstab path implied by a schroot config block.
+
+    Checks ``setup.fstab=`` first, then falls back to the ``profile=``
+    directory's ``fstab`` file, and finally the sbuild default.
+    """
+    for line in config_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("setup.fstab="):
+            return Path(stripped.split("=", 1)[1].strip())
+        if stripped.startswith("profile="):
+            profile = stripped.split("=", 1)[1].strip()
+            return Path(f"/etc/schroot/{profile}/fstab")
+    return Path("/etc/schroot/sbuild/fstab")
+
+
+def _fstab_has_repo_mount(fstab_path: Path, repo_path: str) -> bool:
+    """Return True if *fstab_path* already bind-mounts *repo_path*."""
+    if not fstab_path.is_file():
+        return False
+    try:
+        return repo_path in fstab_path.read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return False
+
+
+def _sudo_write_file(path: Path, content: str) -> None:
+    """Write *content* to *path* via ``sudo tee``."""
+    subprocess.run(
+        ["sudo", "tee", str(path)],
+        input=content.encode("utf-8"),
+        stdout=subprocess.DEVNULL,
+        check=True,
+    )
+
+
+def _sudo_set_fstab_key(config_path: Path, fstab_path: Path) -> None:
+    """Set ``setup.fstab=`` in an existing schroot config file."""
+    text = config_path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+
+    key = f"setup.fstab={fstab_path}"
+    for i, line in enumerate(lines):
+        if line.strip().startswith("setup.fstab="):
+            lines[i] = key
+            _sudo_write_file(config_path, "\n".join(lines) + "\n")
+            return
+
+    for i, line in enumerate(lines):
+        if line.strip().startswith("profile="):
+            lines.insert(i + 1, key)
+            _sudo_write_file(config_path, "\n".join(lines) + "\n")
+            return
+
+    lines.append(key)
+    _sudo_write_file(config_path, "\n".join(lines) + "\n")
+
+
+def configure_repo_mount(
+    chroot_name: str,
+    local_repo_root: Path,
+    chroot_mount: str = "/srv/packastack-apt",
+) -> bool:
+    """Ensure the schroot's fstab bind-mounts the local APT repository.
+
+    If the schroot's fstab already contains the correct bind-mount entry
+    this is a no-op.  Otherwise a custom fstab is written (extending the
+    profile's base fstab) and the schroot config is updated to reference it.
+
+    Requires sudo when the fstab needs to be created or updated.
+
+    Args:
+        chroot_name: Name (or alias) of the schroot.
+        local_repo_root: Host path to the PackaStack local APT repository.
+        chroot_mount: Mount point inside the chroot.
+
+    Returns:
+        True if the fstab is (now) correctly configured.
+
+    Raises:
+        RepoMountError: When the schroot config cannot be found or the
+            fstab cannot be written.
+    """
+    config_path = _find_schroot_config(chroot_name)
+    if config_path is None:
+        raise RepoMountError(
+            f"Cannot find schroot config for '{chroot_name}' "
+            f"in {_CHROOT_CONF_DIR}"
+        )
+
+    repo_path = str(local_repo_root.resolve())
+    config_text = config_path.read_text(encoding="utf-8", errors="replace")
+
+    base_fstab = _get_profile_fstab_path(config_text)
+    custom_fstab = Path(f"/etc/schroot/packastack-{chroot_name}.fstab")
+
+    if _fstab_has_repo_mount(custom_fstab, repo_path):
+        return True
+
+    try:
+        base_content = base_fstab.read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError as exc:
+        raise RepoMountError(
+            f"Cannot read base fstab {base_fstab}: {exc}"
+        ) from exc
+
+    mount_line = f"{repo_path} {chroot_mount} none ro,bind 0 0"
+    custom_content = (
+        f"{base_content.rstrip()}\n{REPO_FSTAB_MARKER}\n{mount_line}\n"
+    )
+
+    try:
+        _sudo_write_file(custom_fstab, custom_content)
+        _sudo_set_fstab_key(config_path, custom_fstab)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        raise RepoMountError(
+            f"Failed to write fstab or update schroot config: {exc}"
+        ) from exc
+
+    return True

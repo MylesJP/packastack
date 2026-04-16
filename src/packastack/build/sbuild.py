@@ -35,6 +35,7 @@ This module also handles:
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import time
@@ -51,6 +52,9 @@ from packastack.build.collector import (
     create_primary_log_symlink,
 )
 from packastack.build.sbuildrc import discover_candidate_directories
+from packastack.build.schroot import RepoMountError, configure_repo_mount
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -108,47 +112,41 @@ def is_sbuild_available() -> bool:
     return shutil.which("sbuild") is not None
 
 
-def generate_chroot_setup_commands(local_repo_root: Path) -> list[str]:
-    """Generate chroot setup commands for sbuild.
+def generate_chroot_setup_commands() -> list[str]:
+    """Generate chroot setup commands for the local APT repository.
 
-    These commands:
-    1. Create mount point directory
-    2. Bind-mount the host's local repo into the chroot
-    3. Write apt sources list entry for the local repo
-    4. Run apt-get update to refresh package lists
-
-    Args:
-        local_repo_root: Host path to the PackaStack local APT repository.
+    These commands run inside the chroot *after* schroot has processed
+    its fstab (which bind-mounts the host repo at ``CHROOT_REPO_MOUNT``).
+    They only need to write an apt sources entry and refresh the index.
 
     Returns:
         List of shell commands to run in the chroot during setup.
     """
-    repo_path = str(local_repo_root.resolve())
-
-    commands = [
-        f"mkdir -p {CHROOT_REPO_MOUNT}",
-        f"mount --bind {repo_path} {CHROOT_REPO_MOUNT}",
-        f"mount -o remount,ro,bind {CHROOT_REPO_MOUNT}",
-        f'echo "deb [trusted=yes] file:{CHROOT_REPO_MOUNT} local main" > {CHROOT_SOURCES_LIST}',
-        "apt-get update -o Dir::Etc::sourcelist=" + CHROOT_SOURCES_LIST + " -o Dir::Etc::sourceparts=-",
+    return [
+        (
+            f'echo "deb [trusted=yes] file:{CHROOT_REPO_MOUNT} local main"'
+            f" > {CHROOT_SOURCES_LIST}"
+        ),
+        (
+            "apt-get update"
+            f" -o Dir::Etc::sourcelist={CHROOT_SOURCES_LIST}"
+            " -o Dir::Etc::sourceparts=-"
+        ),
     ]
-
-    return commands
 
 
 def generate_chroot_cleanup_commands() -> list[str]:
     """Generate chroot cleanup commands for sbuild.
 
-    These commands:
-    1. Remove the apt sources list entry
-    2. Unmount the bind-mounted repo
+    Removes the apt sources list entry added during setup.  The
+    bind-mount itself is managed by schroot's fstab and unmounted
+    automatically when the session ends.
 
     Returns:
         List of shell commands to run in the chroot during cleanup.
     """
     return [
         f"rm -f {CHROOT_SOURCES_LIST}",
-        f"umount {CHROOT_REPO_MOUNT} || true",
     ]
 
 
@@ -181,17 +179,25 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
     if config.chroot_name:
         cmd.extend(["-c", config.chroot_name])
 
-    # Local repo setup via chroot-setup-commands
-    # First ensure the repo has valid indexes (even if empty)
+    # Local repo setup — ensure indexes exist, configure schroot fstab
+    # for the bind-mount, and add apt source commands to the chroot.
     if config.local_repo_root and config.local_repo_root.exists():
         ensure_repo_initialized(config.local_repo_root, config.arch)
-        setup_cmds = generate_chroot_setup_commands(config.local_repo_root)
-        for setup_cmd in setup_cmds:
-            cmd.extend(["--chroot-setup-commands", setup_cmd])
 
-        cleanup_cmds = generate_chroot_cleanup_commands()
-        for cleanup_cmd in cleanup_cmds:
-            cmd.extend(["--finished-build-commands", cleanup_cmd])
+        repo_ready = False
+        if config.chroot_name:
+            try:
+                repo_ready = configure_repo_mount(
+                    config.chroot_name, config.local_repo_root
+                )
+            except RepoMountError as exc:
+                log.warning("Could not configure repo mount: %s", exc)
+
+        if repo_ready:
+            for setup_cmd in generate_chroot_setup_commands():
+                cmd.extend(["--chroot-setup-commands", setup_cmd])
+            for cleanup_cmd in generate_chroot_cleanup_commands():
+                cmd.extend(["--finished-build-commands", cleanup_cmd])
 
     # Extra arguments
     cmd.extend(config.extra_args)
