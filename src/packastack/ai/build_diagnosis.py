@@ -31,15 +31,24 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from packastack.ai.client import AIResponse, call_ai, is_ai_available
-from packastack.ai.prompts import (
-    BUILD_DIAGNOSIS_SYSTEM,
-    PATCH_CORRECTION_SYSTEM,
-    build_sbuild_context,
-    extract_sbuild_failure_section,
+from packastack.ai.collectors import CollectorInputs
+from packastack.ai.contracts import (
+    DispatchPayload,
+    GuidancePayload,
+    PatchPayload,
+    SkillResult,
 )
+from packastack.ai.prompts import extract_sbuild_failure_section
+from packastack.ai.runner import _specialist_skills, run_skill
+from packastack.ai.skills import load_skill
+from packastack.ai.triggers import match_triggers
 
 if TYPE_CHECKING:
     from packastack.build.sbuild import SbuildResult
+
+_ROUTER_SKILL = "build-doctor"
+_FALLBACK_SKILL = "build-patch"
+_DEFAULT_MIN_CONFIDENCE = 0.5
 
 
 @dataclass
@@ -364,18 +373,15 @@ def diagnose_build_failure(
             diagnosed=False, error="AI not available (no API key)"
         )
 
-    # Configurable truncation limits (0 = unlimited)
-    ai_cfg = cfg.get("ai", {})
-    max_log_lines = ai_cfg.get("max_log_lines", 0)
-    max_file_lines = ai_cfg.get("max_file_lines", 0)
-
-    # Extract failure section from sbuild log
+    # Extract failure section from sbuild log — we need this both for
+    # cheap trigger-matching and to bail out early if no log exists.
+    max_log_lines = cfg.get("ai", {}).get("max_log_lines", 0)
     log_excerpt = ""
-    for log_path in [
+    for log_path in (
         sbuild_result.primary_log_path,
         sbuild_result.stderr_log_path,
         sbuild_result.stdout_log_path,
-    ]:
+    ):
         if log_path and log_path.exists():
             log_excerpt = extract_sbuild_failure_section(
                 log_path, max_lines=max_log_lines
@@ -388,39 +394,95 @@ def diagnose_build_failure(
             diagnosed=False, error="No build log available for analysis"
         )
 
-    # Read debian packaging files for context
-    control_content = _read_file_safe(
-        pkg_repo / "debian" / "control", max_lines=max_file_lines
-    )
-    rules_content = _read_file_safe(
-        pkg_repo / "debian" / "rules", max_lines=max_file_lines
-    )
-
-    # Collect full working tree context
-    tree_context = collect_working_tree_context(pkg_repo, max_file_lines)
-
-    user_message = build_sbuild_context(
-        log_excerpt=log_excerpt,
-        control_content=control_content,
-        rules_content=rules_content,
+    inputs = CollectorInputs(
+        pkg_repo=pkg_repo,
         pkg_name=pkg_name,
         version=version,
         ubuntu_series=ubuntu_series,
         arch=arch,
-        error_msg=sbuild_result.validation_message,
+        cfg=cfg,
+        sbuild_result=sbuild_result,
         ai_memory_context=ai_memory_context,
-        working_tree_context=tree_context,
+        error_msg=sbuild_result.validation_message,
     )
 
-    response = call_ai(BUILD_DIAGNOSIS_SYSTEM, user_message, cfg)
+    specialist_name = _select_specialist(log_excerpt, inputs, cfg)
+    specialist_result = run_skill(specialist_name, inputs, cfg)
+    return _skill_result_to_diagnosis(specialist_result)
 
-    if not response.success:
+
+def _select_specialist(
+    log_excerpt: str,
+    inputs: CollectorInputs,
+    cfg: dict[str, Any],
+) -> str:
+    """Choose which specialist skill should handle this failure.
+
+    Resolution order:
+
+    1. Cheap regex trigger match against specialist frontmatter (no AI).
+    2. Router skill with confidence threshold — the router's primary
+       pick must both exist in the registry and report a confidence at
+       or above :data:`_DEFAULT_MIN_CONFIDENCE` (overridable via
+       ``cfg['ai']['router_min_confidence']``).
+    3. Router's declared fallbacks, tried in order.
+    4. :data:`_FALLBACK_SKILL` as the safe default.
+    """
+    specialists = _specialist_skills()
+    triggered = match_triggers(specialists, log_excerpt)
+    if triggered:
+        return triggered
+
+    known = {s.name for s in specialists}
+    min_confidence = float(
+        cfg.get("ai", {}).get("router_min_confidence", _DEFAULT_MIN_CONFIDENCE)
+    )
+
+    router = run_skill(_ROUTER_SKILL, inputs, cfg)
+    if router.success and isinstance(router.parsed, DispatchPayload):
+        dispatch = router.parsed
+        picked = dispatch.skill.strip()
+        if (
+            picked
+            and picked in known
+            and dispatch.confidence >= min_confidence
+        ):
+            return picked
+        for alt in dispatch.fallback_skills:
+            alt_name = alt.strip()
+            if alt_name and alt_name in known:
+                return alt_name
+    return _FALLBACK_SKILL
+
+
+def _skill_result_to_diagnosis(result: SkillResult) -> BuildDiagnosisResult:
+    """Adapt a :class:`SkillResult` into the legacy :class:`BuildDiagnosisResult`."""
+    if not result.success:
+        return BuildDiagnosisResult(diagnosed=False, error=result.error)
+
+    payload = result.parsed
+    if isinstance(payload, PatchPayload):
+        diagnosis = BuildDiagnosisResult(
+            diagnosed=True,
+            needs_patch=payload.has_patch,
+            patch_filename=payload.patch_filename,
+            patch_content=payload.patch_content,
+            explanation=payload.explanation,
+        )
+        return diagnosis
+
+    if isinstance(payload, GuidancePayload):
         return BuildDiagnosisResult(
-            diagnosed=False,
-            error=f"AI call failed: {response.error}",
+            diagnosed=True,
+            explanation=payload.explanation,
         )
 
-    return _parse_build_response(response)
+    # Any other payload type (diagnosis, dispatch) routed through to a
+    # specialist shouldn't reach here, but handle it defensively.
+    return BuildDiagnosisResult(
+        diagnosed=True,
+        explanation=getattr(payload, "explanation", "") or result.raw[:500],
+    )
 
 
 @dataclass
@@ -504,7 +566,7 @@ def _request_patch_correction(
         "Please produce a corrected patch that applies cleanly.\n"
     )
 
-    response = call_ai(PATCH_CORRECTION_SYSTEM, user_message, cfg)
+    response = call_ai(load_skill("patch-correction").system_prompt, user_message, cfg)
     if not response.success:
         return None
     return _parse_build_response(response)

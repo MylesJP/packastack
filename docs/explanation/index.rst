@@ -13,6 +13,7 @@ Implemented vs planned: everything here reflects current behavior unless explici
 	building-packages
 	dependency-resolution
 	architecture
+	ai-skills
 	design-tradeoffs
 	reproducibility
 	testing-philosophy

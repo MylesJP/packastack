@@ -59,6 +59,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/packastack"]
+artifacts = ["src/packastack/skills/**/*.md"]
 
 [tool.ruff]
 src = ["src", "tests"]
