@@ -29,7 +29,7 @@ import fcntl
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 import git
 
@@ -122,35 +122,41 @@ class GitFetcher:
             return f"ssh://{self.launchpad_username}@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/{repo_name}"
         return f"{self.base_url}/{repo_name}"
 
-    def _acquire_lock(self, lock_path: Path) -> int | None:
+    def _acquire_lock(self, lock_path: Path) -> IO[str] | None:
         """Acquire a file lock, waiting up to lock_timeout seconds.
+
+        The returned file object must stay open for the lock to be held;
+        closing it releases the flock.
 
         Args:
             lock_path: Path to the lock file.
 
         Returns:
-            File descriptor if lock acquired, None if timeout.
+            Open file object holding the lock, or None on timeout.
         """
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fd = lock_path.open("w")
+        lock_file = lock_path.open("w")
         start = time.monotonic()
 
         while True:
             try:
-                fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return fd.fileno()
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return lock_file
             except BlockingIOError:
                 if time.monotonic() - start > self.lock_timeout:
-                    fd.close()
+                    lock_file.close()
                     return None
                 time.sleep(0.5)
 
-    def _release_lock(self, lock_path: Path) -> None:
-        """Release a file lock by removing the lock file.
+    def _release_lock(self, lock_file: IO[str], lock_path: Path) -> None:
+        """Release a file lock and remove the lock file.
 
         Args:
+            lock_file: Open file object returned by _acquire_lock.
             lock_path: Path to the lock file.
         """
+        with contextlib.suppress(OSError):
+            lock_file.close()
         with contextlib.suppress(OSError):
             lock_path.unlink(missing_ok=True)
 
@@ -228,8 +234,8 @@ class GitFetcher:
             return result
 
         # Acquire lock
-        fd = self._acquire_lock(lock_path)
-        if fd is None:
+        lock_file = self._acquire_lock(lock_path)
+        if lock_file is None:
             result.error = f"Timeout waiting for lock on {package}"
             result.was_locked = True
             return result
@@ -258,9 +264,6 @@ class GitFetcher:
                         kwargs["depth"] = depth
                     git.Repo.clone_from(url, pkg_path, **kwargs)
                     result.cloned = True
-                    # Convert to SSH remote if username is configured
-                    repo = git.Repo(pkg_path)
-                    self._ensure_ssh_remote(repo, package)
                 except git.GitCommandError as e:
                     result.error = f"Clone failed: {e}"
                     return result
@@ -277,7 +280,7 @@ class GitFetcher:
                     result.error = f"Checkout failed: {e}"
 
         finally:
-            self._release_lock(lock_path)
+            self._release_lock(lock_file, lock_path)
 
         return result
 

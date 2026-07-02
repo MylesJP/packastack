@@ -260,8 +260,22 @@ class RunContext:
         exc: BaseException | None,
         tb: object,
     ) -> bool | None:
-        status = "success"
-        if exc is not None:
+        if exc is None:
+            # Preserve a more specific status a command already recorded
+            # (e.g. "partial_failure", "skipped") via write_summary().
+            status = self.summary.get("status", "success")
+        elif isinstance(exc, SystemExit):
+            # Commands exit via sys.exit() after writing their own summary;
+            # don't clobber the recorded status/error with the bare exit code.
+            code = exc.code
+            if code in (0, None):
+                status = self.summary.get("status", "success")
+            else:
+                status = self.summary.get("status", "failed")
+                self.summary.setdefault("error", f"exited with code {code}")
+                if isinstance(code, int):
+                    self.summary.setdefault("exit_code", code)
+        else:
             status = "failed"
             self.summary["error"] = str(exc)
 

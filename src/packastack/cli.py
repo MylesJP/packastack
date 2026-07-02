@@ -46,3 +46,7 @@ app.command(name="init")(init)
 app.command(name="plan")(plan)
 app.command(name="refresh")(refresh)
 app.command(name="search")(search)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()
