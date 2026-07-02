@@ -138,7 +138,7 @@ The ``ai`` section controls which model endpoint PackaStack uses:
      - ``https://openrouter.ai/api/v1``
    * - ``model``
      - Model identifier (browse at https://openrouter.ai/models)
-     - ``anthropic/claude-sonnet-4-5-20250929``
+     - ``anthropic/claude-sonnet-4.5``
    * - ``max_tokens``
      - Maximum response tokens
      - ``8192``

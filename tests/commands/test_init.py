@@ -91,6 +91,29 @@ class TestCreateUbuntuArchiveFiles:
         assert "mirror" in config_data
         assert "last_refresh" in config_data
 
+    def test_uses_configured_mirror(self, temp_home: Path) -> None:
+        ubuntu_cache = temp_home / "ubuntu-archive"
+        ubuntu_cache.mkdir(parents=True)
+
+        init_cmd._create_ubuntu_archive_files(ubuntu_cache, mirror="http://mirror.example.com/ubuntu")
+
+        config_data = json.loads((ubuntu_cache / "config.json").read_text())
+        assert config_data["mirror"] == "http://mirror.example.com/ubuntu"
+
+    def test_preserves_existing_files(self, temp_home: Path) -> None:
+        """Re-running init must not clobber recorded state (idempotency)."""
+        ubuntu_cache = temp_home / "ubuntu-archive"
+        ubuntu_cache.mkdir(parents=True)
+
+        existing_config = {"mirror": "http://custom.example.com/ubuntu", "last_refresh": "2026-01-01T00:00:00Z"}
+        (ubuntu_cache / "config.json").write_text(json.dumps(existing_config))
+        (ubuntu_cache / "README.txt").write_text("custom readme\n")
+
+        init_cmd._create_ubuntu_archive_files(ubuntu_cache)
+
+        assert json.loads((ubuntu_cache / "config.json").read_text()) == existing_config
+        assert (ubuntu_cache / "README.txt").read_text() == "custom readme\n"
+
 
 class TestInitCommand:
     """Tests for init command."""
@@ -139,7 +162,7 @@ class TestInitCommand:
         run_dirs = list(staging_dir.iterdir())
         assert len(run_dirs) == 1
 
-        summary_file = run_dirs[0] / "summary.json"
+        summary_file = run_dirs[0] / "logs" / "summary.json"
         assert summary_file.exists()
         summary = json.loads(summary_file.read_text())
         assert summary["status"] == "success"
@@ -172,6 +195,44 @@ class TestInitCommand:
 
         assert exc_info.value.code == 0
 
+    def test_records_tools_available(self, temp_home: Path, non_tty_stdout: None) -> None:
+        from packastack.build.tools import ToolCheck
+
+        with mock.patch("git.Repo.clone_from"):
+            with mock.patch("subprocess.run") as mock_subprocess:
+                mock_subprocess.return_value = mock.Mock(stdout="resolute\n", returncode=0)
+                with mock.patch(
+                    "packastack.build.tools.check_required_tools",
+                    return_value=ToolCheck(tools={}, missing=[]),
+                ):
+                    with pytest.raises(SystemExit):
+                        init_cmd.init(prime=False)
+
+        staging_dir = temp_home / ".cache" / "packastack" / "build" / ".runs"
+        run_dirs = list(staging_dir.iterdir())
+        summary = json.loads((run_dirs[0] / "logs" / "summary.json").read_text())
+        assert "tools_available" in summary["steps_completed"]
+
+    def test_warns_on_missing_tools(self, temp_home: Path, non_tty_stdout: None) -> None:
+        from packastack.build.tools import ToolCheck
+
+        with mock.patch("git.Repo.clone_from"):
+            with mock.patch("subprocess.run") as mock_subprocess:
+                mock_subprocess.return_value = mock.Mock(stdout="resolute\n", returncode=0)
+                with mock.patch(
+                    "packastack.build.tools.check_required_tools",
+                    return_value=ToolCheck(tools={"gbp": None}, missing=["gbp", "sbuild"]),
+                ):
+                    with pytest.raises(SystemExit) as exc_info:
+                        init_cmd.init(prime=False)
+
+        # Missing tools must not fail init, only warn
+        assert exc_info.value.code == 0
+        staging_dir = temp_home / ".cache" / "packastack" / "build" / ".runs"
+        run_dirs = list(staging_dir.iterdir())
+        summary = json.loads((run_dirs[0] / "logs" / "summary.json").read_text())
+        assert "tools_available" not in summary["steps_completed"]
+
     def test_resolves_devel_series(
         self, temp_home: Path, non_tty_stdout: None
     ) -> None:
@@ -184,5 +245,5 @@ class TestInitCommand:
         # Check that series was resolved in summary
         staging_dir = temp_home / ".cache" / "packastack" / "build" / ".runs"
         run_dirs = list(staging_dir.iterdir())
-        summary = json.loads((run_dirs[0] / "summary.json").read_text())
+        summary = json.loads((run_dirs[0] / "logs" / "summary.json").read_text())
         assert summary["devel_series"] == "resolute"

@@ -13,7 +13,7 @@ Say hello and let PackaStack set the table:
 
 What it does
 ------------
-Behind the curtain, init quietly writes a default ``~/.config/packastack/config.yaml`` (only if you don’t already have one), creates cache directories under ``~/.cache/packastack`` (including ``runs`` and ``ubuntu-archive``), clones or updates ``https://opendev.org/openstack/releases``, drops a couple of metadata breadcrumbs (``README.txt`` and ``config.json``) into ``ubuntu-archive``, and notes the current Ubuntu development series so later commands know which way is north.
+Behind the curtain, init quietly writes a default ``~/.config/packastack/config.yaml`` (only if you don’t already have one), creates cache directories under ``~/.cache/packastack`` (including ``runs`` and ``ubuntu-archive``), clones or updates ``https://opendev.org/openstack/releases``, drops a couple of metadata breadcrumbs (``README.txt`` and ``config.json``, only if missing) into ``ubuntu-archive``, notes the current Ubuntu development series so later commands know which way is north, and checks that the external build tools (git, gbp, dch, dpkg-source, sbuild, gpg) are installed — warning with install hints for any that are missing.
 
 Optional priming
 ----------------

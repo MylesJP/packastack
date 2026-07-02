@@ -128,7 +128,7 @@ def call_ai(
         return AIResponse(success=False, error="No API key configured")
 
     ai_cfg = cfg.get("ai", {})
-    model = ai_cfg.get("model", "anthropic/claude-sonnet-4-5-20250929")
+    model = ai_cfg.get("model", "anthropic/claude-sonnet-4.5")
     max_tokens = ai_cfg.get("max_tokens", 8192)
     timeout = ai_cfg.get("timeout", 120)
     base_url = get_base_url(cfg)

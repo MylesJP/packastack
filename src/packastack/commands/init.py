@@ -136,8 +136,12 @@ def _clone_or_update_project_config(path: Path, run: RunContextType, phase: str 
                 raise
 
 
-def _create_ubuntu_archive_files(ubuntu_cache: Path) -> None:
-    """Create README.txt and config.json in ubuntu-archive cache."""
+def _create_ubuntu_archive_files(ubuntu_cache: Path, mirror: str | None = None) -> None:
+    """Create README.txt and config.json in ubuntu-archive cache.
+
+    Idempotent: existing files are left untouched so re-running init does
+    not reset a recorded last_refresh or a customized mirror.
+    """
     readme_path = ubuntu_cache / "README.txt"
     config_path = ubuntu_cache / "config.json"
 
@@ -160,15 +164,17 @@ The Packages.meta.json files contain metadata about each cached index:
   - sha256: SHA-256 checksum
   - size: File size in bytes
 
-Use `packastack refresh ubuntu-archive` to update these indexes.
+Use `packastack refresh` to update these indexes.
 """
-    readme_path.write_text(readme_content)
+    if not readme_path.exists():
+        readme_path.write_text(readme_content)
 
-    config_data = {
-        "mirror": "http://archive.ubuntu.com/ubuntu",
-        "last_refresh": None,
-    }
-    config_path.write_text(json.dumps(config_data, indent=2))
+    if not config_path.exists():
+        config_data = {
+            "mirror": mirror or "http://archive.ubuntu.com/ubuntu",
+            "last_refresh": None,
+        }
+        config_path.write_text(json.dumps(config_data, indent=2))
 
 
 def init(
@@ -233,7 +239,8 @@ def init(
         # Step 6: Create ubuntu-archive README and config
         ubuntu_cache = paths["ubuntu_archive_cache"]
         with activity_spinner("init", "Creating ubuntu-archive metadata"):
-            _create_ubuntu_archive_files(ubuntu_cache)
+            configured_mirror = cfg.get("mirrors", {}).get("ubuntu_archive")
+            _create_ubuntu_archive_files(ubuntu_cache, mirror=configured_mirror)
             steps_completed.append("ubuntu_archive_files_created")
             run.log_event({"event": "ubuntu_archive.files_created"})
 
@@ -244,7 +251,20 @@ def init(
             steps_completed.append("series_resolved")
         activity("init", f"Development series: {devel_series}")
 
-        # Step 8: Optionally prime minimal metadata
+        # Step 8: Pre-flight check for external build tools (warning only)
+        from packastack.build.tools import INSTALL_INSTRUCTIONS, check_required_tools
+
+        tool_check = check_required_tools(need_sbuild=True, need_gpg=True)
+        if tool_check.missing:
+            for tool in tool_check.missing:
+                hint = INSTALL_INSTRUCTIONS.get(tool, f"Install {tool}")
+                activity("init", f"Warning: build tool '{tool}' not found ({hint})")
+            run.log_event({"event": "tools.missing", "tools": tool_check.missing})
+        else:
+            steps_completed.append("tools_available")
+            run.log_event({"event": "tools.available"})
+
+        # Step 9: Optionally prime minimal metadata
         if prime:  # pragma: no cover - integration test path
             activity("init", "Priming minimal Ubuntu archive metadata")
             run.log_event({"event": "prime.start"})

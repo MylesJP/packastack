@@ -49,7 +49,7 @@ _CONFIG_HEADER = """\
 #   Anthropic via OpenRouter (default):
 #     export PACKASTACK_AI_API_KEY="sk-or-..."
 #     # base_url: https://openrouter.ai/api/v1  (default, no change needed)
-#     # model: anthropic/claude-sonnet-4-5-20250929
+#     # model: anthropic/claude-sonnet-4.5
 #     # Browse models at: https://openrouter.ai/models
 #
 #   OpenAI (direct):
@@ -124,7 +124,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ai": {
         "api_key": None,  # Fallback; env vars take precedence (see client.py)
         "base_url": "https://openrouter.ai/api/v1",  # Any OpenAI-compatible endpoint
-        "model": "anthropic/claude-sonnet-4-5-20250929",  # Get from openrouter.ai/models
+        "model": "anthropic/claude-sonnet-4.5",  # Get from openrouter.ai/models
         "max_tokens": 8192,
         "timeout": 120,
     },
