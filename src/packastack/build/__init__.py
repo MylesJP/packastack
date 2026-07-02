@@ -47,9 +47,7 @@ from packastack.build.errors import (
 
 # Git helpers
 from packastack.build.git_helpers import (
-    GitCommitError,
     ensure_no_merge_paths,
-    extract_upstream_version,
     get_git_author_env,
     git_commit,
     maybe_disable_gpg_sign,
@@ -59,7 +57,6 @@ from packastack.build.git_helpers import (
 
 # Local repo helpers
 from packastack.build.localrepo_helpers import (
-    _refresh_local_repo_indexes,
     refresh_local_repo_indexes,
 )
 
@@ -105,11 +102,6 @@ from packastack.build.single_build import (
 
 # Tarball acquisition
 from packastack.build.tarball import (
-    # Backwards compatibility aliases
-    _download_github_release_tarball,
-    _download_pypi_tarball,
-    _fetch_release_tarball,
-    _run_uscan,
     download_github_release_tarball,
     download_pypi_tarball,
     fetch_release_tarball,

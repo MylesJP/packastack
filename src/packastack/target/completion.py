@@ -84,10 +84,12 @@ def generate_completion_index(
 
                 # Deliverable (if governed)
                 deliverable_name = None
-                if config.release_source.type.value == "openstack_releases":
-                    if config.release_source.deliverable:
-                        deliverable_name = config.release_source.deliverable
-                        deliverables.add(deliverable_name)
+                if (
+                    config.release_source.type.value == "openstack_releases"
+                    and config.release_source.deliverable
+                ):
+                    deliverable_name = config.release_source.deliverable
+                    deliverables.add(deliverable_name)
 
                 # Aliases
                 for alias in config.common_names or []:
@@ -153,7 +155,7 @@ def save_completion_index(index: dict[str, Any], path: Path | None = None) -> No
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(path, "w") as f:
+    with path.open("w") as f:
         json.dump(index, f, indent=2)
 
 
@@ -173,7 +175,7 @@ def load_completion_index(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(path) as f:
+        with path.open() as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None

@@ -532,7 +532,7 @@ class TestSatisfies:
         assert localrepo.satisfies(repo_root, "test", "<< 2.0") is False
 
 
-class TestGetSourceVersions:
+class TestGetSourceVersionsBasic:
     """Tests for get_source_versions function."""
 
     def test_no_dsc_files(self, tmp_path: Path) -> None:
@@ -822,7 +822,7 @@ class TestRegenerateIndexesEdgeCases:
         assert result.package_count == 1
 
 
-class TestSatisfiesEdgeCases:
+class TestSatisfiesVersionComparison:
     """Additional edge case tests for satisfies function."""
 
     def test_implicit_exact_match(self, tmp_path: Path) -> None:

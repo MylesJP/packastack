@@ -29,6 +29,7 @@ XML output to discover available upstream versions without downloading.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import subprocess
@@ -1072,10 +1073,8 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     # Read current content (if any) so we only return True when content changes
     existing_content = ""
     if signing_key_path.exists():
-        try:
+        with contextlib.suppress(OSError):
             existing_content = signing_key_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            pass
 
     # 1. Try local fallback key file first
     series_lower = series.lower()

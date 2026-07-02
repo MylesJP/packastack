@@ -103,7 +103,7 @@ class TestTargetExprParsing:
 
     def test_parse_invalid_characters(self) -> None:
         """Test parsing with invalid characters."""
-        with pytest.raises(ValueError, match="only.*allowed"):
+        with pytest.raises(ValueError, match=r"only.*allowed"):
             parse_target_expr("glance@ubuntu")
 
 

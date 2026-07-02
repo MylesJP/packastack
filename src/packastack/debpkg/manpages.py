@@ -214,12 +214,12 @@ override_dh_installman:
                 in_override = True
             elif in_override and not line.startswith("\t") and line.strip():
                 # End of override, insert before next target
-                if not added and not any("sphinx-build -b man" in l for l in new_lines):
+                if not added and not any("sphinx-build -b man" in nl for nl in new_lines):
                     new_lines.insert(-1, f"\tPYTHONPATH=. sphinx-build -b man {doc_source_dir} debian/man")
                     modified = True
                     added = True
                 in_override = False
-        if in_override and not added and not any("sphinx-build -b man" in l for l in new_lines):
+        if in_override and not added and not any("sphinx-build -b man" in nl for nl in new_lines):
             new_lines.append(f"\tPYTHONPATH=. sphinx-build -b man {doc_source_dir} debian/man")
             modified = True
         lines = new_lines

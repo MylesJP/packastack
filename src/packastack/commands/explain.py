@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -25,6 +25,9 @@ from packastack.target.resolution import TargetResolver, parse_target_expr
 from packastack.target.series import resolve_series
 from packastack.upstream.registry import UpstreamsRegistry
 from packastack.upstream.releases import get_current_development_series, is_snapshot_eligible
+
+if TYPE_CHECKING:
+    from packastack.debpkg.control import ParsedDependency
 
 EXIT_CONFIG_ERROR = 1
 

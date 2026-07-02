@@ -309,10 +309,13 @@ def find_source_dir(cache_dir: Path) -> Path | None:
         Path to the source directory, or None if not found.
     """
     for item in cache_dir.iterdir():
-        if item.is_dir() and item.name != "__pycache__":
-            # Check if it looks like a Python source directory
-            if (item / "requirements.txt").exists() or (item / "pyproject.toml").exists():
-                return item
+        # Check if it looks like a Python source directory
+        if (
+            item.is_dir()
+            and item.name != "__pycache__"
+            and ((item / "requirements.txt").exists() or (item / "pyproject.toml").exists())
+        ):
+            return item
     return None
 
 

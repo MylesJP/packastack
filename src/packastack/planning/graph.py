@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from packastack.logs.plan_graph import PlanGraph
 
 
 @dataclass

@@ -700,8 +700,11 @@ def select_build_type(
                 watch_info.uscan_attempted = True
 
         # Run uscan if not cached and check_upstream is enabled
-        if uscan_result is None and watch_config.check_upstream:
-            if watch_result.mode != DetectedWatchMode.UNKNOWN:
+        if (
+            uscan_result is None
+            and watch_config.check_upstream
+            and watch_result.mode != DetectedWatchMode.UNKNOWN
+        ):
                 uscan_result = run_uscan_dehs(
                     packaging_repo,
                     timeout_seconds=watch_config.timeout_seconds,

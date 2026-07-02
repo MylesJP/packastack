@@ -96,7 +96,7 @@ def _parse_ubuntu_csv(csv_path: Path) -> Iterator[UbuntuRelease]:
     if not csv_path.exists():
         return
 
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with csv_path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             version = row.get("version", "")

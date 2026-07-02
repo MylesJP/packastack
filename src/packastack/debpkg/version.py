@@ -191,18 +191,14 @@ def version_satisfies_constraint(version: str, constraint: str) -> bool:
     op, constraint_version = match.groups()
     cmp = compare_versions(version, constraint_version)
 
-    if op == ">=":
-        return cmp >= 0
-    elif op == "<=":
-        return cmp <= 0
-    elif op == ">>":
-        return cmp > 0
-    elif op == "<<":
-        return cmp < 0
-    elif op == "=":
-        return cmp == 0
-
-    return False
+    checks = {
+        ">=": cmp >= 0,
+        "<=": cmp <= 0,
+        ">>": cmp > 0,
+        "<<": cmp < 0,
+        "=": cmp == 0,
+    }
+    return checks.get(op, False)
 
 
 def versions_equal_upstream(v1: str, v2: str) -> bool:

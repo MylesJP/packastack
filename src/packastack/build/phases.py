@@ -49,7 +49,9 @@ from packastack.upstream.retirement import (
 )
 
 if TYPE_CHECKING:
+    from packastack.apt.packages import PackageIndex
     from packastack.core.run import RunContext as RunContextType
+    from packastack.planning.type_selection import BuildType
     from packastack.upstream.registry import ResolvedUpstream, UpstreamsRegistry
 
 
@@ -475,7 +477,6 @@ def load_package_indexes(
         - Logs events to run context
     """
     from packastack.apt.packages import (
-        PackageIndex,
         load_cloud_archive_index,
         load_local_repo_index,
         load_package_index,

@@ -138,7 +138,7 @@ def load_project_config(project_config_path: Path) -> ProjectConfigData:
         return ProjectConfigData(load_error=f"File not found: {projects_yaml}")
 
     try:
-        with open(projects_yaml) as f:
+        with projects_yaml.open() as f:
             data = yaml.safe_load(f) or []
     except yaml.YAMLError as e:
         return ProjectConfigData(load_error=f"YAML parse error: {e}")

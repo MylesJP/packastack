@@ -31,6 +31,7 @@ explicit entries.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.resources
 from dataclasses import dataclass, field
 from enum import Enum
@@ -288,10 +289,9 @@ def _parse_tarball_config(data: dict[str, Any]) -> TarballConfig:
     prefer_list = data.get("prefer", ["official"])
     methods = []
     for method in prefer_list:
-        try:
+        # Skip unknown methods
+        with contextlib.suppress(ValueError):
             methods.append(TarballMethod(method))
-        except ValueError:
-            pass  # Skip unknown methods
     if not methods:
         methods = [TarballMethod.OFFICIAL]
     return TarballConfig(prefer=methods)
@@ -386,7 +386,7 @@ def load_registry(
         raise RegistryError(f"Canonical registry not found: {canonical_path}")
 
     try:
-        with open(canonical_path) as f:
+        with canonical_path.open() as f:
             base_data = yaml.safe_load(f) or {}
     except yaml.YAMLError as e:
         raise RegistryError(f"Failed to parse canonical registry: {e}") from e
@@ -408,7 +408,7 @@ def load_registry(
 
     if override_path.exists():
         try:
-            with open(override_path) as f:
+            with override_path.open() as f:
                 override_data = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
             warnings.append(f"Failed to parse override registry: {e}")

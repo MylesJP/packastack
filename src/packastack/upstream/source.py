@@ -254,9 +254,8 @@ def download_file(url: str, dest: Path, timeout: int = 300) -> tuple[bool, str]:
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         # Download with timeout
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            with dest.open("wb") as f:
-                shutil.copyfileobj(response, f)
+        with urllib.request.urlopen(url, timeout=timeout) as response, dest.open("wb") as f:
+            shutil.copyfileobj(response, f)
 
         return True, ""
     except Exception as e:

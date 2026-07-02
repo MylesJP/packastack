@@ -247,7 +247,7 @@ def load_openstack_packages(
     for yaml_file in deliverables_dir.glob("*.yaml"):
         project = yaml_file.stem
         try:
-            with open(yaml_file) as f:
+            with yaml_file.open() as f:
                 data = yaml.safe_load(f)
             if not data:
                 continue

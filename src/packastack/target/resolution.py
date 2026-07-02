@@ -446,10 +446,13 @@ class TargetResolver:
                 continue
 
             # Tier 3: Exact deliverable (if governed)
-            if identity.governed_by_openstack and identity.deliverable_name:
-                if identity.deliverable_name.lower() == ident_lower:
-                    matches.append(identity)
-                    continue
+            if (
+                identity.governed_by_openstack
+                and identity.deliverable_name
+                and identity.deliverable_name.lower() == ident_lower
+            ):
+                matches.append(identity)
+                continue
 
             # Tier 4: Exact alias
             if any(alias.lower() == ident_lower for alias in identity.aliases):

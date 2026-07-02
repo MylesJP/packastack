@@ -327,7 +327,7 @@ def refresh(
                 from packastack.upstream.pkg_scripts import refresh_managed_packages
 
                 cache_root = paths["cache_root"]
-                packages, errors = refresh_managed_packages(cache_root, run=run)
+                packages, _errors = refresh_managed_packages(cache_root, run=run)
                 if packages:
                     activity("refresh", f"Updated managed packages list ({len(packages)} packages)")
             except Exception as e:  # pragma: no cover

@@ -719,16 +719,14 @@ def get_available_versions(repo_root: Path, package_name: str) -> list[str]:
                     current_ver = line.split(":", 1)[1].strip()
                 elif line == "":
                     # End of stanza
-                    if current_pkg == package_name and current_ver:
-                        if current_ver not in versions:
-                            versions.append(current_ver)
+                    if current_pkg == package_name and current_ver and current_ver not in versions:
+                        versions.append(current_ver)
                     current_pkg = ""
                     current_ver = ""
 
             # Handle last stanza
-            if current_pkg == package_name and current_ver:
-                if current_ver not in versions:
-                    versions.append(current_ver)
+            if current_pkg == package_name and current_ver and current_ver not in versions:
+                versions.append(current_ver)
 
     # Sort versions using debian version comparison
     with contextlib.suppress(Exception):

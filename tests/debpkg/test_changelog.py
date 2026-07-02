@@ -256,7 +256,7 @@ class TestIncrementUpstreamVersion:
         assert ver == "v29.1.0"
 
 
-class TestGetCurrentVersion:
+class TestGetCurrentVersionBasic:
     """Tests for get_current_version function."""
 
     def test_file_not_exists(self, tmp_path: Path) -> None:

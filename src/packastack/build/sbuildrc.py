@@ -115,7 +115,7 @@ def parse_sbuildrc_content(content: str, source_name: str = "") -> SbuildPaths:
             var_value = match.group(2)
 
             # Expand environment variables and ~ in path
-            expanded = os.path.expandvars(os.path.expanduser(var_value))
+            expanded = os.path.expandvars(str(Path(var_value).expanduser()))
 
             if var_name == "build_dir":
                 result.build_dir = Path(expanded)

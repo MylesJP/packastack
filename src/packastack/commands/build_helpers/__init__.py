@@ -46,11 +46,8 @@ from packastack.build.errors import (
     phase_warning,
 )
 from packastack.build.git_helpers import (
-    GitCommitError,
     ensure_no_merge_paths,
-    extract_upstream_version,
     get_git_author_env,
-    git_commit,
     maybe_disable_gpg_sign,
     maybe_enable_sphinxdoc,
     no_gpg_sign_enabled,
@@ -62,11 +59,6 @@ from packastack.build.phases import (
     resolve_upstream_registry,
 )
 from packastack.build.tarball import (
-    # Backwards compatibility aliases
-    _download_github_release_tarball,
-    _download_pypi_tarball,
-    _fetch_release_tarball,
-    _run_uscan,
     download_github_release_tarball,
     download_pypi_tarball,
     fetch_release_tarball,

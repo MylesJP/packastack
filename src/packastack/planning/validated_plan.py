@@ -863,11 +863,8 @@ def validate_dependencies_recursive(
 
     # Initialize queue with initial packages
     for pkg in initial_packages:
-        # Infer project name from package name
-        if pkg.startswith("python-"):
-            project = pkg[7:]  # Remove python- prefix
-        else:
-            project = pkg
+        # Infer project name from package name (strip python- prefix)
+        project = pkg[7:] if pkg.startswith("python-") else pkg
         queue.append((pkg, project, 0))
 
     while queue:
@@ -957,7 +954,7 @@ def validate_dependencies_recursive(
     # Topological sort for build order
     # Simple Kahn's algorithm
     in_degree: dict[str, int] = dict.fromkeys(processed, 0)
-    for pkg, deps in result.dependency_edges.items():
+    for deps in result.dependency_edges.values():
         for dep in deps:
             if dep in in_degree:
                 in_degree[dep] = in_degree.get(dep, 0)

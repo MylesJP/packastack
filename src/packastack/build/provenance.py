@@ -171,7 +171,7 @@ def write_provenance(
     # Convert to dict, handling nested dataclasses
     data = _to_dict(provenance)
 
-    with open(provenance_path, "w") as f:
+    with provenance_path.open("w") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
     return provenance_path
@@ -202,7 +202,7 @@ def load_provenance(provenance_path: Path) -> BuildProvenance:
         FileNotFoundError: If provenance file doesn't exist.
         yaml.YAMLError: If file can't be parsed.
     """
-    with open(provenance_path) as f:
+    with provenance_path.open() as f:
         data = yaml.safe_load(f)
 
     return _from_dict(data)

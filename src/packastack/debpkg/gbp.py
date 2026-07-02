@@ -24,6 +24,7 @@ and optional binary building via sbuild.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -278,14 +279,13 @@ def ensure_upstream_branch(
     # Get list of all branches (local and remote)
     local_branches = [ref.name for ref in repo.heads]
     remote_branches = []
-    try:
+    # No origin remote raises AttributeError/IndexError
+    with contextlib.suppress(AttributeError, IndexError):
         remote_branches = [
             ref.name.replace("origin/", "")
             for ref in repo.remotes.origin.refs
             if ref.name != "origin/HEAD"
         ]
-    except (AttributeError, IndexError):
-        pass  # No origin remote
 
     # Check if upstream branch already exists
     if upstream_branch in local_branches:

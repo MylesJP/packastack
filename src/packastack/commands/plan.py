@@ -25,6 +25,7 @@ detects missing packages and MIR candidates, and produces plan outputs.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import re
 import sys
 from dataclasses import dataclass
@@ -88,6 +89,7 @@ from packastack.upstream.releases import (
 from packastack.upstream.retirement import RetirementChecker, RetirementStatus
 
 if TYPE_CHECKING:
+    from packastack.core.context import PlanRequest
     from packastack.core.run import RunContext as RunContextType
 
 # Exit codes per spec
@@ -489,11 +491,9 @@ def run_plan_for_package(
     # Apply Ubuntu source-name fallbacks for resolved targets so that
     # planning uses the canonical source package names available in the
     # Ubuntu archive (helps for library packages like stevedore).
-    try:
+    # Non-fatal: fallback helper should not break planning
+    with contextlib.suppress(Exception):
         apply_ubuntu_source_fallbacks(ubuntu_index, resolved_targets, run)
-    except Exception:
-        # Non-fatal: fallback helper should not break planning
-        pass
 
     # If fallbacks adjusted resolved_targets, reflect that in the
     # targets list used for graph building and reporting.
@@ -720,10 +720,9 @@ def _resolve_package_targets(
                 or name.startswith(f"{common_name}-")
                 or name.startswith(f"python3-{common_name}")
             )
-            if is_name_match and (pkg_dir / "debian" / "control").exists():
-                    if name not in seen:
-                        seen.add(name)
-                        results.append(ResolvedTarget(source_package=name, upstream_project=common_name, resolution_source="local"))
+            if is_name_match and (pkg_dir / "debian" / "control").exists() and name not in seen:
+                seen.add(name)
+                results.append(ResolvedTarget(source_package=name, upstream_project=common_name, resolution_source="local"))
 
 
     # Create resolver
@@ -1374,20 +1373,6 @@ def _plan_all_packages(
             "packages": len(ubuntu_index.packages),
             "sources": len(ubuntu_index.sources),
         })
-
-    # Apply Ubuntu source fallbacks for any previously resolved targets
-    try:
-        from packastack.apt.packages import apply_ubuntu_source_fallbacks
-
-        apply_ubuntu_source_fallbacks(ubuntu_index, resolved_targets, run)
-        # Refresh the targets list used for graph building
-        try:
-            target_names = [t.source_package for t in resolved_targets]
-            run.log_event({"event": "resolve.targets_adjusted", "targets": target_names})
-        except Exception:
-            pass
-    except Exception:
-        pass
 
     activity("plan", f"Loaded {len(ubuntu_index.packages)} packages from Ubuntu index")
 
