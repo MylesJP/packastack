@@ -2,20 +2,77 @@
 
 Packastack is a small CLI tool to assist with building OpenStack packages for Ubuntu.
 
-Commands implemented in this phase:
+## Requirements
 
-- `packastack init` — initialize configuration and cache directories, clone OpenStack releases, and optionally prime Ubuntu archive metadata.
-- `packastack refresh ubuntu-archive` — fetch and cache Packages.gz indexes from an Ubuntu archive mirror, respecting TTL and offline mode.
-- `packastack build <package>` — build a package and its dependencies.
+Packastack targets an **Ubuntu host** and drives the standard Debian packaging toolchain. Install the system packages before first use:
+
+```bash
+sudo apt install git git-buildpackage devscripts dpkg-dev sbuild schroot gnupg
+sudo sbuild-adduser $USER   # then log out/in (or `newgrp sbuild`) for group membership to apply
+```
+
+`git`, `gbp`, `dch`, and `dpkg-source` are required for source builds; `sbuild`/`schroot` are needed for binary builds (the default) and `gnupg` for signature verification. Missing tools are reported with install hints when you run a build.
+
+Python 3.12+ and [uv](https://docs.astral.sh/uv/) are used for the Python side:
+
+```bash
+sudo snap install astral-uv --classic   # or see uv's install docs
+```
+
+## Installation
+
+```bash
+git clone https://github.com/MylesJP/packastack.git
+cd packastack
+uv sync
+```
+
+Run the CLI through uv from the repo checkout:
+
+```bash
+uv run packastack --help
+```
+
+Or install it as a tool so `packastack` is on your PATH:
+
+```bash
+uv tool install .
+packastack --help
+```
+
+## First use
+
+```bash
+# 1. One-time setup: writes ~/.config/packastack/config.yaml, creates caches
+#    under ~/.cache/packastack, and clones the OpenStack releases metadata.
+packastack init            # add --prime to also fetch Ubuntu archive indexes now
+
+# 2. Refresh Ubuntu archive package indexes (also refreshed on demand by builds).
+packastack refresh
+
+# 3. Build a package. Schroots are created automatically on first build
+#    (requires sudo). The host architecture is used.
+packastack build nova --ubuntu-series noble
+```
+
+Build artifacts and logs land under `~/.cache/packastack/build/<package>/<build-id>/`, and built packages are published to the local APT repository at `~/.cache/packastack/apt-repo`.
 
 Resume an interrupted build by reusing a previous workspace:
 
 ```bash
-uv run packastack build cinder --resume                          # latest build
-uv run packastack build cinder --resume-build 20260210-143022    # specific build
+packastack build cinder --resume                          # latest build
+packastack build cinder --resume-build 20260210-143022    # specific build
 ```
 
-See `pyproject.toml` for development dependencies and test configuration.
+## Commands
+
+- `packastack init` — initialize configuration and cache directories, clone OpenStack releases, and optionally prime Ubuntu archive metadata (`--prime`).
+- `packastack refresh` — fetch and cache Packages.gz indexes from an Ubuntu archive mirror, respecting TTL and offline mode.
+- `packastack build <package>` — build a package (and optionally its dependencies with `--build-deps`, or everything with `--all`).
+- `packastack plan <package>` — show the validated build plan without building.
+- `packastack search` / `packastack explain` / `packastack clean` — inspect and manage local state.
+
+See `packastack <command> --help` for full flags, `pyproject.toml` for development dependencies and test configuration, and [docs/](docs/) for the full documentation.
 
 ## AI-Powered Build Diagnosis (build-doctor)
 
