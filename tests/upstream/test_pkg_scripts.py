@@ -124,7 +124,7 @@ class TestFetchManagedPackages:
             return mock_response
 
         with patch("urllib.request.urlopen", side_effect=mock_urlopen):
-            packages, errors = fetch_managed_packages()
+            packages, _errors = fetch_managed_packages()
 
         # nova should only appear once
         assert packages.count("nova") == 1
@@ -305,3 +305,43 @@ class TestRefreshManagedPackages:
         mock_run.log_event.assert_called()
         events = [call[0][0] for call in mock_run.log_event.call_args_list]
         assert any(e.get("event") == "pkg_scripts.saved" for e in events)
+
+
+class TestRefreshManagedPackagesErrorPaths:
+    """Error/edge paths for the refresh_managed_packages entry point."""
+
+    def test_offline_logs_to_run_context(self, tmp_path: Path) -> None:
+        save_managed_packages(["nova", "cinder"], tmp_path)
+
+        run = MagicMock()
+        packages, errors = refresh_managed_packages(tmp_path, run=run, offline=True)
+
+        assert sorted(packages) == ["cinder", "nova"]
+        assert errors == []
+        run.log_event.assert_called()
+
+    def test_fetch_errors_are_logged(self, tmp_path: Path) -> None:
+        run = MagicMock()
+        with patch(
+            "packastack.upstream.pkg_scripts.fetch_managed_packages",
+            return_value=([], ["boom"]),
+        ):
+            packages, errors = refresh_managed_packages(tmp_path, run=run)
+
+        assert packages == []
+        assert errors == ["boom"]
+
+    def test_empty_response_warns(self, tmp_path: Path) -> None:
+        with patch(
+            "packastack.upstream.pkg_scripts.fetch_managed_packages",
+            return_value=([], []),
+        ):
+            packages, errors = refresh_managed_packages(tmp_path)
+
+        assert packages == []
+        assert errors == []
+
+    def test_get_managed_packages_path(self, tmp_path: Path) -> None:
+        from packastack.upstream.pkg_scripts import get_managed_packages_path
+
+        assert get_managed_packages_path(tmp_path) == tmp_path / MANAGED_PACKAGES_FILENAME

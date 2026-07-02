@@ -640,3 +640,57 @@ class TestFetchPackageWithBranch:
 
         assert result.error is not None
         assert "Checkout failed" in result.error
+
+
+class TestEnsureSshRemote:
+    """Tests for _ensure_ssh_remote URL conversion."""
+
+    def _repo_with_url(self, url: str) -> MagicMock:
+        repo = MagicMock()
+        repo.remotes.origin.urls = iter([url])
+        return repo
+
+    def test_converts_https_launchpad_url(self) -> None:
+        fetcher = GitFetcher(launchpad_username="myuser")
+        repo = self._repo_with_url(
+            "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
+        )
+
+        fetcher._ensure_ssh_remote(repo, "nova")
+
+        repo.remotes.origin.set_url.assert_called_once_with(
+            "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
+        )
+
+    def test_uses_repo_name_override(self) -> None:
+        fetcher = GitFetcher(
+            launchpad_username="myuser",
+            repo_name_overrides={"trove": "openstack-trove"},
+        )
+        repo = self._repo_with_url(
+            "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/openstack-trove"
+        )
+
+        fetcher._ensure_ssh_remote(repo, "trove")
+
+        repo.remotes.origin.set_url.assert_called_once_with(
+            "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/openstack-trove"
+        )
+
+    def test_skips_when_already_ssh(self) -> None:
+        fetcher = GitFetcher(launchpad_username="myuser")
+        repo = self._repo_with_url(
+            "ssh://myuser@git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source/nova"
+        )
+
+        fetcher._ensure_ssh_remote(repo, "nova")
+
+        repo.remotes.origin.set_url.assert_not_called()
+
+    def test_skips_non_launchpad_url(self) -> None:
+        fetcher = GitFetcher(launchpad_username="myuser")
+        repo = self._repo_with_url("https://example.com/nova.git")
+
+        fetcher._ensure_ssh_remote(repo, "nova")
+
+        repo.remotes.origin.set_url.assert_not_called()

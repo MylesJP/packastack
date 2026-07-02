@@ -355,3 +355,35 @@ class TestGetLtsCodenameForMode:
         csv_path.write_text("version,codename,series,created,release,eol,eol-server\n")
         result = get_lts_codename_for_mode(is_cloud_archive=False, csv_path=csv_path)
         assert result == ""
+
+
+class TestIsSupportedEdgeCases:
+    """Edge cases for UbuntuRelease.is_supported and date parsing."""
+
+    def test_unreleased_is_not_supported(self) -> None:
+        rel = UbuntuRelease(version="99.04", codename="zzz", series="zzz", is_lts=False, release_date=None)
+        assert rel.is_supported is False
+
+    def test_released_without_eol_is_supported(self) -> None:
+        rel = UbuntuRelease(
+            version="24.10", codename="oracular", series="oracular", is_lts=False,
+            release_date=date(2024, 10, 10), eol_date=None,
+        )
+        assert rel.is_supported is True
+
+    def test_non_lts_past_eol_not_supported(self) -> None:
+        rel = UbuntuRelease(
+            version="23.10", codename="mantic", series="mantic", is_lts=False,
+            release_date=date(2023, 10, 12), eol_date=date(2024, 7, 11),
+        )
+        assert rel.is_supported is False
+
+    def test_parse_date_invalid_month(self, tmp_path: Path) -> None:
+        from packastack.target.distro_info import _parse_date
+
+        assert _parse_date("2024-13-45") is None
+
+    def test_parse_date_wrong_shape(self) -> None:
+        from packastack.target.distro_info import _parse_date
+
+        assert _parse_date("notadate") is None

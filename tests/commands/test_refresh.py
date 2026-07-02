@@ -325,7 +325,7 @@ class TestRefreshCommand:
         run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()] if runs_dir.exists() else []
         assert len(run_dirs) == 1
 
-        summary = json.loads((run_dirs[0] / "summary.json").read_text())
+        summary = json.loads((run_dirs[0] / "logs" / "summary.json").read_text())
         assert summary["status"] == "success"
         assert summary["series"] == "noble"
 

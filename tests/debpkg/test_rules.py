@@ -310,3 +310,63 @@ override_dh_sphinxdoc:
         with patch.object(Path, "read_text", side_effect=OSError("Permission denied")):
             result = has_override(rules, "dh_sphinxdoc")
         assert result is False
+
+
+class TestAddDoctreeCleanupEdgeCases:
+    """Edge cases: override blocks at EOF and write failures."""
+
+    def test_sphinxdoc_override_at_eof(self, tmp_path: Path) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@\n\noverride_dh_sphinxdoc:")
+
+        assert add_doctree_cleanup(rules) is True
+        assert ".doctrees" in rules.read_text()
+
+    def test_sphinxdoc_write_failure(self, tmp_path: Path, monkeypatch) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@\n\noverride_dh_sphinxdoc:\n\tdh_sphinxdoc\n")
+
+        def raise_oserror(self, *args, **kwargs):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(Path, "write_text", raise_oserror)
+        assert add_doctree_cleanup(rules) is False
+
+    def test_installdocs_override_at_eof(self, tmp_path: Path) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@\n\noverride_dh_installdocs:")
+
+        assert add_doctree_cleanup(rules) is True
+        assert ".doctrees" in rules.read_text()
+
+    def test_installdocs_write_failure(self, tmp_path: Path, monkeypatch) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@\n\noverride_dh_installdocs:\n\tdh_installdocs\n")
+
+        def raise_oserror(self, *args, **kwargs):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(Path, "write_text", raise_oserror)
+        assert add_doctree_cleanup(rules) is False
+
+    def test_new_override_write_failure(self, tmp_path: Path, monkeypatch) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@\n")
+
+        def raise_oserror(self, *args, **kwargs):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(Path, "write_text", raise_oserror)
+        assert add_doctree_cleanup(rules) is False
+
+
+class TestEnsureSphinxdocAddonWriteFailure:
+    def test_write_failure_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        rules = tmp_path / "rules"
+        rules.write_text("%:\n\tdh $@ --with python3\n")
+
+        def raise_oserror(self, *args, **kwargs):
+            raise OSError("read-only")
+
+        monkeypatch.setattr(Path, "write_text", raise_oserror)
+        assert ensure_sphinxdoc_addon(rules) is False
