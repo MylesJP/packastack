@@ -72,6 +72,23 @@ packastack build cinder --resume-build 20260210-143022    # specific build
 - `packastack plan <package>` — show the validated build plan without building.
 - `packastack clean` — inspect and manage local cache state.
 
+### Subset builds
+
+Three special package names build an entire class of managed packages in one command. Each discovers all packages, classifies them from the OpenStack releases metadata, and builds the matching set in dependency order using the same infrastructure as `build --all` (including `--parallel`, `--keep-going`, and `--dry-run`):
+
+- `packastack build libraries` — all library packages: Oslo and other shared libraries **plus** the Python client libraries.
+- `packastack build clients` — only the Python client libraries (`python-novaclient`, `python-glanceclient`, and friends).
+- `packastack build services` — only the core services (nova, glance, neutron, cinder, keystone, ...).
+
+A typical release workflow builds `libraries` first so the local APT repo can satisfy service build-dependencies, then `services`:
+
+```bash
+packastack build libraries --ubuntu-series noble
+packastack build services --ubuntu-series noble
+```
+
+Use `--dry-run` to list what a subset would build without building it. Related: `packastack build rc` (or `rc1`, `rc2`, ...) builds all packages with a matching release-candidate release.
+
 See `packastack <command> --help` for full flags, `pyproject.toml` for development dependencies and test configuration, and [docs/](docs/) for the full documentation.
 
 ## AI-Powered Build Diagnosis (build-doctor)
