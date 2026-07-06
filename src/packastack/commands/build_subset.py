@@ -16,11 +16,12 @@
 # You should have received a copy of the GNU General Public License along with
 # Packastack. If not, see <http://www.gnu.org/licenses/>.
 
-"""Implementation of subset build commands (libraries and clients).
+"""Implementation of subset build commands (libraries, clients, and services).
 
 Provides functionality for building specific subsets of OpenStack packages:
 - `packastack build libraries`: Build oslo libraries and other library packages
 - `packastack build clients`: Build Python client packages
+- `packastack build services`: Build core service packages (nova, glance, etc.)
 """
 
 from __future__ import annotations
@@ -62,6 +63,7 @@ class SubsetType(str, Enum):
 
     LIBRARIES = "libraries"
     CLIENTS = "clients"
+    SERVICES = "services"
 
 
 def _update_openstack_repos(
@@ -139,7 +141,7 @@ def _filter_packages_by_subset(
 
     Args:
         packages: List of package names to filter.
-        subset_type: Type of subset (libraries or clients).
+        subset_type: Type of subset (libraries, clients, or services).
         releases_repo: Path to openstack/releases repository.
         openstack_target: OpenStack series target.
 
@@ -172,6 +174,12 @@ def _filter_packages_by_subset(
         ):
             # Include CLIENT_LIBRARY (python-*client packages)
             filtered.append(package)
+        elif (
+            subset_type == SubsetType.SERVICES
+            and kind == DeliverableKind.SERVICE
+        ):
+            # Include SERVICE (core services like nova, glance)
+            filtered.append(package)
 
     return filtered
 
@@ -191,13 +199,13 @@ def run_subset_build(
     dry_run: bool,
     ppa_upload: bool = False,
 ) -> int:
-    """Run a subset build (libraries or clients) and return exit code.
+    """Run a subset build (libraries, clients, or services) and return exit code.
 
     This function discovers all packages, filters them by subset type,
     and builds them using the build-all infrastructure.
 
     Args:
-        subset_type: Type of subset to build (libraries or clients).
+        subset_type: Type of subset to build (libraries, clients, or services).
         target: OpenStack series target (e.g., "devel", "caracal").
         ubuntu_series: Ubuntu series target (e.g., "noble").
         cloud_archive: Cloud archive pocket (e.g., "caracal").
@@ -485,6 +493,61 @@ def build_clients(
     """
     exit_code = run_subset_build(
         subset_type=SubsetType.CLIENTS,
+        target=target,
+        ubuntu_series=ubuntu_series,
+        cloud_archive=cloud_archive,
+        build_type=build_type,
+        binary=binary,
+        keep_going=keep_going,
+        max_failures=max_failures,
+        parallel=parallel,
+        force=force,
+        offline=offline,
+        dry_run=dry_run,
+        ppa_upload=ppa_upload,
+    )
+    sys.exit(exit_code)
+
+
+def build_services(
+    target: str = "devel",
+    ubuntu_series: str = "devel",
+    cloud_archive: str = "",
+    build_type: str = "release",
+    binary: bool = True,
+    keep_going: bool = True,
+    max_failures: int = 0,
+    parallel: int = 0,
+    force: bool = False,
+    offline: bool = False,
+    dry_run: bool = False,
+    ppa_upload: bool = False,
+) -> None:
+    """Build all OpenStack core service packages.
+
+    Discovers and builds all packages that are classified as services
+    (DeliverableKind.SERVICE) in the OpenStack releases metadata.
+    These are packages like nova, glance, neutron, etc.
+
+    Before building, updates the openstack/releases and openstack/project-config
+    repositories to ensure we have the latest package metadata.
+
+    Args:
+        target: OpenStack series target (e.g., "devel", "caracal").
+        ubuntu_series: Ubuntu series target (e.g., "noble").
+        cloud_archive: Cloud archive pocket (e.g., "caracal").
+        build_type: Build type: auto, release, snapshot.
+        binary: Whether to build binary packages.
+        keep_going: Continue on failure.
+        max_failures: Stop after N failures (0=unlimited).
+        parallel: Number of parallel workers (0=auto).
+        force: Proceed despite warnings.
+        offline: Run in offline mode (skip repo updates).
+        dry_run: Show plan without building.
+        ppa_upload: Upload to PPA on success.
+    """
+    exit_code = run_subset_build(
+        subset_type=SubsetType.SERVICES,
         target=target,
         ubuntu_series=ubuntu_series,
         cloud_archive=cloud_archive,

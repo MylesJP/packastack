@@ -48,7 +48,7 @@ This repository contains two files that define which packages the team manages:
 - ``current-projects``: Core OpenStack services (nova, neutron, keystone, etc.)
 - ``dependencies``: Python libraries and clients (oslo.*, python-*client, etc.)
 
-These lists are fetched during ``packastack init`` and ``packastack refresh``, then cached locally at ``~/.cache/packastack/managed-packages.txt``. When building with ``build --all``, ``build libraries``, or ``build clients``, only packages in this list are built—everything else discovered from Launchpad or openstack/releases is skipped.
+These lists are fetched during ``packastack init`` and ``packastack refresh``, then cached locally at ``~/.cache/packastack/managed-packages.txt``. When building with ``build --all``, ``build libraries``, ``build clients``, or ``build services``, only packages in this list are built—everything else discovered from Launchpad or openstack/releases is skipped.
 
 To update the managed packages list manually, run:
 

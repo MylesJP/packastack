@@ -51,10 +51,11 @@ Builds an OpenStack package end-to-end: validates the plan, fetches sources, app
 
 **Subset builds**
 
-Two special package names trigger subset build modes:
+Three special package names trigger subset build modes:
 
 - ``packastack build libraries`` — Build all Oslo and other library packages (``DeliverableKind.LIBRARY`` and ``DeliverableKind.CLIENT_LIBRARY``).
 - ``packastack build clients`` — Build all Python client packages (``DeliverableKind.CLIENT_LIBRARY`` only).
+- ``packastack build services`` — Build all core service packages such as nova and glance (``DeliverableKind.SERVICE`` only).
 
 Before building a subset, PackaStack automatically updates the ``openstack/releases`` and ``openstack/project-config`` repositories by running ``git pull`` to ensure the latest package metadata is available. Use ``--offline`` to skip the repository updates.
 

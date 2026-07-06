@@ -505,6 +505,7 @@ def build(
     Special subset commands:
       `packastack build libraries` - Build all Oslo and other library packages
       `packastack build clients` - Build all Python client packages
+      `packastack build services` - Build all core service packages
       `packastack build rc1` - Build all packages with an RC1 release
       `packastack build rc` - Build all packages with any RC release
 
@@ -529,13 +530,12 @@ def build(
     if ubuntu_series is None:
         ubuntu_series = _cfg_defaults.get("ubuntu_series") or "devel"
 
-    # Check for special subset commands: "libraries", "clients", "rc", "rc1", etc.
-    if package in ("libraries", "clients"):
+    # Check for special subset commands: "libraries", "clients", "services", "rc", "rc1", etc.
+    if package in ("libraries", "clients", "services"):
         from packastack.commands.build_subset import SubsetType, run_subset_build
 
-        subset_type = SubsetType.LIBRARIES if package == "libraries" else SubsetType.CLIENTS
         exit_code = run_subset_build(
-            subset_type=subset_type,
+            subset_type=SubsetType(package),
             target=target,
             ubuntu_series=ubuntu_series,
             cloud_archive=cloud_archive,

@@ -34,6 +34,10 @@ class TestSubsetType:
         """Test CLIENTS enum value."""
         assert SubsetType.CLIENTS.value == "clients"
 
+    def test_services_value(self) -> None:
+        """Test SERVICES enum value."""
+        assert SubsetType.SERVICES.value == "services"
+
 
 class TestUpdateOpenstackRepos:
     """Tests for _update_openstack_repos function."""
@@ -255,6 +259,48 @@ class TestFilterPackagesBySubset:
         assert "python-novaclient" in result
         assert "python-oslo.config" not in result
         assert "nova" not in result
+
+    def test_filters_services(self, tmp_path: Path) -> None:
+        """Should filter packages to include only services."""
+        releases_repo = tmp_path / "releases"
+        releases_repo.mkdir()
+
+        packages = ["python-oslo.config", "nova", "python-novaclient"]
+
+        with patch(
+            "packastack.commands.build_subset.load_openstack_packages"
+        ) as mock_load_pkgs, patch(
+            "packastack.commands.build_subset.load_project_releases"
+        ) as mock_load_rel, patch(
+            "packastack.commands.build_subset.infer_deliverable_kind"
+        ) as mock_infer:
+            mock_load_pkgs.return_value = {
+                "python-oslo.config": "oslo.config",
+                "nova": "nova",
+                "python-novaclient": "python-novaclient",
+            }
+            mock_load_rel.return_value = None
+
+            def infer_side_effect(project, pkg, deliverable):
+                if "oslo" in pkg:
+                    return DeliverableKind.LIBRARY, "heuristic"
+                if "client" in pkg:
+                    return DeliverableKind.CLIENT_LIBRARY, "heuristic"
+                return DeliverableKind.SERVICE, "heuristic"
+
+            mock_infer.side_effect = infer_side_effect
+
+            result = _filter_packages_by_subset(
+                packages=packages,
+                subset_type=SubsetType.SERVICES,
+                releases_repo=releases_repo,
+                openstack_target="devel",
+            )
+
+        # Should include only SERVICE
+        assert "nova" in result
+        assert "python-oslo.config" not in result
+        assert "python-novaclient" not in result
 
     def test_returns_empty_for_no_matches(self, tmp_path: Path) -> None:
         """Should return empty list when no packages match."""
@@ -915,3 +961,112 @@ class TestBuildClientsFunction:
 
         assert len(calls) == 1
         assert calls[0]["ppa_upload"] is True
+
+
+class TestBuildServicesFunction:
+    """Tests for build_services function."""
+
+    def test_calls_run_subset_build_with_services(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should call run_subset_build with SERVICES type."""
+        from packastack.commands import build_subset as build_subset_module
+
+        calls: list[dict] = []
+
+        def fake_run_subset_build(**kwargs: object) -> int:
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            build_subset_module, "run_subset_build", fake_run_subset_build
+        )
+
+        # Mock sys.exit to prevent actual exit
+        exits: list[int] = []
+        monkeypatch.setattr("sys.exit", lambda code: exits.append(code))
+
+        build_subset_module.build_services(
+            target="dalmatian",
+            ubuntu_series="noble",
+            dry_run=True,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["subset_type"] == SubsetType.SERVICES
+        assert calls[0]["target"] == "dalmatian"
+        assert calls[0]["ubuntu_series"] == "noble"
+        assert exits == [0]
+
+    def test_passes_ppa_upload_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should pass ppa_upload flag to run_subset_build."""
+        from packastack.commands import build_subset as build_subset_module
+
+        calls: list[dict] = []
+
+        def fake_run_subset_build(**kwargs: object) -> int:
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            build_subset_module, "run_subset_build", fake_run_subset_build
+        )
+
+        exits: list[int] = []
+        monkeypatch.setattr("sys.exit", lambda code: exits.append(code))
+
+        build_subset_module.build_services(
+            target="dalmatian",
+            ubuntu_series="noble",
+            dry_run=True,
+            ppa_upload=True,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["ppa_upload"] is True
+
+
+class TestBuildCommandSubsetDispatch:
+    """Tests that `packastack build <subset>` dispatches to run_subset_build."""
+
+    @pytest.mark.parametrize(
+        ("package", "expected_type"),
+        [
+            ("libraries", SubsetType.LIBRARIES),
+            ("clients", SubsetType.CLIENTS),
+            ("services", SubsetType.SERVICES),
+        ],
+    )
+    def test_subset_package_names_dispatch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        package: str,
+        expected_type: SubsetType,
+    ) -> None:
+        """Each subset package name should route to run_subset_build."""
+        from typer.testing import CliRunner
+
+        from packastack.cli import app
+
+        calls: list[dict] = []
+
+        def fake_run_subset_build(**kwargs: object) -> int:
+            calls.append(kwargs)
+            return 0
+
+        monkeypatch.setattr(
+            "packastack.commands.build_subset.run_subset_build",
+            fake_run_subset_build,
+        )
+        monkeypatch.setattr(
+            "packastack.commands.build.load_config", lambda: {}
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["build", package])
+
+        assert result.exit_code == 0
+        assert len(calls) == 1
+        assert calls[0]["subset_type"] == expected_type
