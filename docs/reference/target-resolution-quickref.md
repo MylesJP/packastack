@@ -7,7 +7,6 @@
 # Build a specific package
 packastack build glance
 packastack plan nova
-packastack explain keystone
 ```
 
 ### Prefix Match (Shell-Safe)
@@ -19,9 +18,6 @@ packastack build ^glance --all-matches
 
 ### Contains Match
 ```bash
-# Find all client packages
-packastack search ~client
-
 # Build all packages containing "oslo"
 packastack build ~oslo --all-matches
 ```
@@ -38,25 +34,6 @@ packastack build canonical:gnocchixyz/gnocchi
 packastack build deliverable:glance
 ```
 
-## Search Examples
-
-```bash
-# Search for a target
-packastack search glance
-
-# Prefix search
-packastack search ^python-
-
-# Search in specific scope
-packastack search canonical:openstack/ --scope canonical
-
-# JSON output for scripting
-packastack search ~client --format json
-
-# Refresh completion cache
-packastack search glance --refresh-cache
-```
-
 ## Shell Completion
 
 ```bash
@@ -69,9 +46,7 @@ packastack completion fish > ~/.config/fish/completions/packastack.fish  # Fish
 source ~/.bashrc  # or restart terminal
 
 # Use tab completion
-packastack build gla<TAB>        # Completes to glance
-packastack build source:<TAB>    # Shows source packages
-packastack build canonical:<TAB> # Shows canonical IDs
+packastack bu<TAB>  # Completes command names
 ```
 
 ## Target Expression Syntax
@@ -152,6 +127,3 @@ $ packastack build source:glance
 ## Flags
 
 - `--all-matches`: Build/plan all matched targets (for prefix/contains)
-- `--format json`: JSON output (search command)
-- `--scope <scope>`: Restrict search scope
-- `--refresh-cache`: Update completion cache

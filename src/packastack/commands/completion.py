@@ -62,7 +62,7 @@ _packastack_complete() {
     _init_completion || return
 
     # Get completions from packastack itself
-    COMPREPLY=( $(compgen -W "build plan search explain init refresh clean completion" -- "$cur") )
+    COMPREPLY=( $(compgen -W "build plan init refresh clean completion" -- "$cur") )
 }
 
 complete -F _packastack_complete packastack
@@ -81,8 +81,6 @@ _packastack() {
     commands=(
         'build:Build packages'
         'plan:Generate build plan'
-        'search:Search for targets'
-        'explain:Explain target resolution'
         'init:Initialize workspace'
         'refresh:Refresh schroots'
         'clean:Clean build artifacts'
@@ -99,7 +97,7 @@ _packastack() {
             ;;
         args)
             case $words[1] in
-                build|plan|search|explain)
+                build|plan)
                     # Add target completion here
                     ;;
             esac
@@ -119,8 +117,6 @@ def _fish_completion() -> str:
 # Main commands
 complete -c packastack -f -n __fish_use_subcommand -a build -d 'Build packages'
 complete -c packastack -f -n __fish_use_subcommand -a plan -d 'Generate build plan'
-complete -c packastack -f -n __fish_use_subcommand -a search -d 'Search for targets'
-complete -c packastack -f -n __fish_use_subcommand -a explain -d 'Explain target resolution'
 complete -c packastack -f -n __fish_use_subcommand -a init -d 'Initialize workspace'
 complete -c packastack -f -n __fish_use_subcommand -a refresh -d 'Refresh schroots'
 complete -c packastack -f -n __fish_use_subcommand -a clean -d 'Clean build artifacts'

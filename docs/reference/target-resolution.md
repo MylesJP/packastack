@@ -183,32 +183,6 @@ $ packastack plan ~client --all-matches
 
 Without `--all-matches`, prefix/contains matches are **ambiguous** and require selection.
 
-## Search Command
-
-Discover targets without building:
-
-```bash
-# Search for targets
-$ packastack search glance
-
-# Prefix search
-$ packastack search ^glance
-
-# Scoped search
-$ packastack search canonical:gnocchixyz/gnocchi
-
-# JSON output
-$ packastack search ~client --format json
-```
-
-Output shows:
-- Source package name
-- Canonical upstream ID
-- Deliverable name (if governed)
-- Kind (service, library, client, plugin)
-- Governance status
-- Origin (upstreams.yaml, openstack/releases, etc.)
-
 ## Tab Completion
 
 ### Setup
@@ -228,24 +202,7 @@ $ packastack completion fish > ~/.config/fish/completions/packastack.fish
 
 ### Usage
 
-Tab completion suggests:
-
-- **Scopes** (`source:`, `canonical:`, etc.)
-- **Source packages** from local cache
-- **Canonical IDs** from registry
-- **Deliverables** for governed projects
-
-Completion is **fast** (<50ms) and **offline** (no network).
-
-### Cache Refresh
-
-Update completion cache after adding new projects:
-
-```bash
-$ packastack search glance --refresh-cache
-```
-
-Cache location: `~/.cache/packastack/completion/index.json`
+Tab completion suggests command names and is **offline** (no network).
 
 ## Provenance and Reporting
 
@@ -286,7 +243,7 @@ Reports include:
 $ packastack build glance
 
 # Prefix for exploration
-$ packastack search ^python-oslo
+$ packastack plan ^python-oslo --all-matches
 
 # Scoped for precision
 $ packastack build canonical:gnocchixyz/gnocchi
@@ -365,7 +322,7 @@ Use --all-matches to build all, or specify one:
 
 Suggestions:
   - Check spelling
-  - Use search: packastack search ~nonexistent
+  - Try a contains match: packastack plan ~nonexistent
   - Add to upstreams.yaml if non-OpenStack project
 ```
 
@@ -397,7 +354,6 @@ Only [A-Za-z0-9._+-/] allowed in identifiers
 
 ### Performance
 
-- **Completion**: <50ms typical (local cache)
 - **Resolution**: <100ms typical (in-memory registry)
 - **No network access** required for resolution
 

@@ -70,7 +70,7 @@ packastack build cinder --resume-build 20260210-143022    # specific build
 - `packastack refresh` — fetch and cache Packages.gz indexes from an Ubuntu archive mirror, respecting TTL and offline mode.
 - `packastack build <package>` — build a package (and optionally its dependencies with `--build-deps`, or everything with `--all`).
 - `packastack plan <package>` — show the validated build plan without building.
-- `packastack search` / `packastack explain` / `packastack clean` — inspect and manage local state.
+- `packastack clean` — inspect and manage local cache state.
 
 See `packastack <command> --help` for full flags, `pyproject.toml` for development dependencies and test configuration, and [docs/](docs/) for the full documentation.
 

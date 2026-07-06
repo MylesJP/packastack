@@ -44,7 +44,6 @@ from packastack.core.paths import resolve_paths
 from packastack.core.run import RunContext, activity
 from packastack.core.spinner import activity_spinner
 from packastack.debpkg.control import ParsedDependency
-from packastack.logs.explain import write_plan_dependency_summary
 from packastack.logs.plan_graph import (
     PlanGraph,
     render_ascii,
@@ -53,6 +52,7 @@ from packastack.logs.plan_graph import (
     render_waves,
     write_plan_graph_reports,
 )
+from packastack.logs.plan_reports import write_plan_dependency_summary
 from packastack.logs.type_selection import (
     render_compact_summary,
     render_console_table,
