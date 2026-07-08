@@ -1032,6 +1032,32 @@ def cache_uscan_result(
     )
 
 
+def _find_static_signing_key_for_series(releases_repo: Path, series: str) -> str | None:
+    """Find an OpenStack release signing key export for a series."""
+
+    source_dir = releases_repo / "doc" / "source"
+    series_lower = series.lower()
+    key_dirs = [
+        source_dir / "static",
+        source_dir / "_static",
+    ]
+
+    for key_dir in key_dirs:
+        if not key_dir.exists():
+            continue
+        for key_file in sorted(key_dir.glob("0x*.txt")):
+            try:
+                content = key_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for match in re.finditer(r"OpenStack Infra \(([^)]*?) Cycle\)", content, re.IGNORECASE):
+                cycle = match.group(1).lower()
+                if series_lower in cycle:
+                    return content
+
+    return None
+
+
 def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snapshot: bool = False) -> bool:
     """Update or remove debian/upstream/signing-key.asc based on build type.
 
@@ -1065,7 +1091,8 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
     #   1. Local fallback key file (~/openstack-signing-keys/<series>-signing-key.asc)
     #      This file is maintained externally and typically includes rotated subkeys
     #      that may not yet be reflected in the openstack-releases repository.
-    #   2. Key from the openstack-releases repo (_static/<keyid>.txt)
+    #   2. Key exports from the openstack-releases repo (static/0x*.txt)
+    #   3. Legacy key ID lookup from openstack-releases index.rst
     #      This is the static export shipped with the releases repo.
 
     signing_key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1089,7 +1116,17 @@ def update_signing_key(pkg_repo: Path, releases_repo: Path, series: str, is_snap
         except OSError:
             pass  # Fall through to openstack-releases lookup
 
-    # 2. Fall back to openstack-releases repo
+    # 2. Fall back to the static key exports in openstack-releases. The source
+    # tree uses a Sphinx directive in index.rst, so the per-cycle mapping lives
+    # inside the exported key files themselves.
+    key_content = _find_static_signing_key_for_series(releases_repo, series)
+    if key_content is not None:
+        if key_content == existing_content:
+            return False
+        signing_key_path.write_text(key_content, encoding="utf-8")
+        return True
+
+    # 3. Fall back to the older explicit index.rst key ID format
     index_path = releases_repo / "doc" / "source" / "index.rst"
     if not index_path.exists():
         return False

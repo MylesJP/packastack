@@ -819,6 +819,59 @@ class TestUpdateSigningKey:
         assert signing_key.exists()
         assert "releases-repo-key" in signing_key.read_text()
 
+    def test_release_uses_static_cycle_key_from_releases_repo(self, tmp_path: Path, monkeypatch) -> None:
+        """Release builds use static key exports from openstack-releases."""
+        pkg_repo = tmp_path / "pkg"
+        (pkg_repo / "debian").mkdir(parents=True)
+
+        releases_repo = tmp_path / "openstack-releases"
+        source_dir = releases_repo / "doc" / "source"
+        static_dir = source_dir / "static"
+        static_dir.mkdir(parents=True)
+        (source_dir / "index.rst").write_text(".. signingkeys::\n")
+        (static_dir / "0x30566c450e41d7c91e442dfb231f942f608ddeff.txt").write_text(
+            "pub   ed25519/0x231F942F608DDEFF 2026-02-19 [SC]\n"
+            "uid                              OpenStack Infra (2026.2/Hibiscus Cycle) <infra-root@openstack.org>\n"
+            "-----BEGIN PGP PUBLIC KEY BLOCK-----\n"
+            "hibiscus-key\n"
+            "-----END PGP PUBLIC KEY BLOCK-----\n"
+        )
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "hibiscus", is_snapshot=False)
+
+        assert result is True
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        assert signing_key.exists()
+        assert "Hibiscus Cycle" in signing_key.read_text()
+        assert "hibiscus-key" in signing_key.read_text()
+
+    def test_release_static_cycle_key_unchanged_returns_false(self, tmp_path: Path, monkeypatch) -> None:
+        """Returns False when the static cycle key already matches."""
+        pkg_repo = tmp_path / "pkg"
+        signing_key = pkg_repo / "debian" / "upstream" / "signing-key.asc"
+        signing_key.parent.mkdir(parents=True)
+
+        key_content = (
+            "pub   ed25519/0x231F942F608DDEFF 2026-02-19 [SC]\n"
+            "uid                              OpenStack Infra (2026.2/Hibiscus Cycle) <infra-root@openstack.org>\n"
+            "-----BEGIN PGP PUBLIC KEY BLOCK-----\n"
+            "same-hibiscus-key\n"
+            "-----END PGP PUBLIC KEY BLOCK-----\n"
+        )
+        signing_key.write_text(key_content)
+
+        releases_repo = tmp_path / "openstack-releases"
+        static_dir = releases_repo / "doc" / "source" / "static"
+        static_dir.mkdir(parents=True)
+        (static_dir.parent / "index.rst").write_text(".. signingkeys::\n")
+        (static_dir / "0x30566c450e41d7c91e442dfb231f942f608ddeff.txt").write_text(key_content)
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+        result = watch.update_signing_key(pkg_repo, releases_repo, "hibiscus", is_snapshot=False)
+
+        assert result is False
+
     def test_release_fallback_key_unchanged_returns_false(self, tmp_path: Path, monkeypatch) -> None:
         """Returns False when fallback key content matches existing signing key."""
         pkg_repo = tmp_path / "pkg"

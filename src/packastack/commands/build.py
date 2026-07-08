@@ -472,7 +472,7 @@ def build(
     update_control_min_versions: bool = typer.Option(
         True,
         "--update-control-min-versions/--no-update-control-min-versions",
-        help="Update debian/control minimum versions using current LTS floor when compatible",
+        help="Update debian/control minimum versions using latest LTS as the floor and cap",
     ),
     normalize_to_prev_lts_floor: bool = typer.Option(
         False,

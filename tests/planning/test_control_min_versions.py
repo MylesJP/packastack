@@ -7,7 +7,7 @@ from packastack.planning.control_min_versions import (
 )
 
 
-def test_chooses_previous_lts_when_compatible():
+def test_chooses_latest_lts_when_compatible():
     deps = [ParsedDependency(name="python3-foo")]
     updated, decisions = apply_min_version_policy(
         existing=deps,
@@ -20,7 +20,7 @@ def test_chooses_previous_lts_when_compatible():
     assert decisions[0].cloud_archive_required is False
 
 
-def test_does_not_reduce_without_normalize():
+def test_caps_existing_higher_constraint_to_latest_lts():
     deps = [ParsedDependency(name="python3-bar", relation=">=", version="3.0")]
     updated, decisions = apply_min_version_policy(
         existing=deps,
@@ -29,11 +29,12 @@ def test_does_not_reduce_without_normalize():
         normalize=False,
     )
 
-    assert updated[0].version == "3.0"
-    assert decisions[0].action == "kept"
+    assert updated[0].version == "2.1"
+    assert decisions[0].action == "lowered"
+    assert decisions[0].reason_code == "capped_to_lts"
 
 
-def test_normalize_allows_lowering_to_prev_lts():
+def test_normalize_allows_lowering_to_latest_lts():
     deps = [ParsedDependency(name="python3-baz", relation=">=", version="3.0")]
     updated, decisions = apply_min_version_policy(
         existing=deps,
@@ -46,7 +47,7 @@ def test_normalize_allows_lowering_to_prev_lts():
     assert decisions[0].action == "lowered"
 
 
-def test_cloud_archive_required_when_prev_lts_too_low():
+def test_cloud_archive_required_when_latest_lts_too_low():
     deps = [ParsedDependency(name="python3-qux")]
     updated, decisions = apply_min_version_policy(
         existing=deps,
@@ -54,7 +55,20 @@ def test_cloud_archive_required_when_prev_lts_too_low():
         prev_lts_versions={"python3-qux": "2.0"},
     )
 
-    assert updated[0].version == "2.1"
+    assert updated[0].version == "2.0"
+    assert decisions[0].cloud_archive_required is True
+
+
+def test_upstream_min_above_lts_is_capped_to_lts():
+    deps = [ParsedDependency(name="python3-new", relation=">=", version="1.0")]
+    updated, decisions = apply_min_version_policy(
+        existing=deps,
+        upstream_mins={"python3-new": "4.0"},
+        prev_lts_versions={"python3-new": "3.5"},
+    )
+
+    assert updated[0].version == "3.5"
+    assert decisions[0].action == "raised"
     assert decisions[0].cloud_archive_required is True
 
 
@@ -67,7 +81,7 @@ def test_report_summarises_actions_and_counts():
 
     assert report["raised"] == 0
     assert report["cloud_archive_required"] == 1
-    assert report["unchanged"] >= 1
+    assert report["lowered"] == 1
 
 
 def test_apply_preserves_alphabetical_ordering():
@@ -101,6 +115,20 @@ def test_no_upstream_min_keeps_existing():
 
     assert updated[0].version == "2.0"
     assert decisions[0].reason_code == "no_upstream_min"
+
+
+def test_no_upstream_min_uses_lts_when_available():
+    deps = [ParsedDependency(name="python3-floor")]
+    updated, decisions = apply_min_version_policy(
+        existing=deps,
+        upstream_mins={},
+        prev_lts_versions={"python3-floor": "3.2"},
+    )
+
+    assert updated[0].relation == ">="
+    assert updated[0].version == "3.2"
+    assert decisions[0].action == "added"
+    assert decisions[0].reason_code == "lts_floor_applied"
 
 
 def test_dry_run_does_not_modify_dependencies():

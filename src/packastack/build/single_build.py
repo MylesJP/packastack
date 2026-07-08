@@ -145,6 +145,14 @@ class BuildResult:
 # =============================================================================
 
 
+def _series_commit_name(series: str | None) -> str:
+    """Return the short series name used in package commit subjects."""
+
+    if not series:
+        return "Unknown"
+    return series.split()[0].capitalize()
+
+
 def resolve_lp_bug_key(
     build_type: str, is_library: bool, upstream_version: str
 ) -> str | None:
@@ -901,7 +909,7 @@ def fetch_packaging_repo(
         if is_snapshot:
             signing_key_msg = "d/u/signing-key.asc: remove for snapshot"
         else:
-            signing_key_msg = f"d/u/signing-key.asc: update for {ctx.openstack_target}"
+            signing_key_msg = f"d/u/signing-key.asc: update for {_series_commit_name(ctx.openstack_target)}"
         commit_result = git_commit(
             pkg_repo,
             signing_key_msg,
@@ -1667,7 +1675,7 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     # Optional control-file min-version normalization
     if ctx.update_control_min_versions:
         upstream_min_map = ctx.upstream_min_versions or {}
-        if upstream_min_map:
+        if upstream_min_map or current_lts_index is not None:
             current_lts_versions = {dep.name: current_lts_index.get_version(dep.name) if current_lts_index else None for dep in build_deps}
             updated_build, decisions_build = apply_min_version_policy(
                 existing=build_dep_list,
@@ -1687,6 +1695,7 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
             if not ctx.dry_run_control_edit:
                 # Rewrite Build-Depends/Build-Depends-Indep with updated ordering
                 text = control_path.read_text()
+                original_text = text
 
                 def _replace_field(body: str, field: str, value: str) -> str:
                     import re
@@ -1700,6 +1709,24 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
                 text = _replace_field(text, "Build-Depends", build_field)
                 text = _replace_field(text, "Build-Depends-Indep", indep_field)
                 control_path.write_text(text)
+                if text != original_text:
+                    series_name = _series_commit_name(ctx.current_lts_codename or ctx.resolved_ubuntu)
+                    control_msg = f"d/control: Bump dependencies for {series_name}."
+                    if (ctx.pkg_repo / ".git").exists():
+                        # gbp dch later picks up this subject as the changelog bullet.
+                        commit_result = git_commit(
+                            ctx.pkg_repo,
+                            control_msg,
+                            files=["debian/control"],
+                        )
+                        if commit_result.returncode == 0:
+                            activity("deps", f"Committed control dependency update: {control_msg}")
+                        else:
+                            raise GitCommitError(
+                                "Failed to commit control dependency update",
+                                stderr=commit_result.stderr,
+                                returncode=commit_result.returncode,
+                            )
 
             # Write control min-version report
             decisions = decisions_build + decisions_indep
@@ -1711,14 +1738,14 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
 
             ca_required = [d for d in decisions if d.cloud_archive_required]
             if ca_required:
-                activity("deps", "[deps] Cloud-archive required (upstream min exceeds previous-lts):")
+                activity("deps", "[deps] Cloud-archive required (upstream min exceeds latest LTS):")
                 for d in ca_required:
                     activity(
                         "deps",
-                        f"[deps]   - {d.name} (>= {d.upstream_min_required}) prev-lts={d.prev_lts_version or 'none'}",
+                        f"[deps]   - {d.name} (>= {d.upstream_min_required}) latest-lts={d.prev_lts_version or 'none'}",
                     )
         else:
-            activity("deps", "[deps] Skipping control min-version update (no upstream minima available)")
+            activity("deps", "[deps] Skipping control min-version update (no upstream minima or latest LTS index available)")
 
     activity("deps", "[deps] Dependency satisfaction:")
     activity(
@@ -2444,6 +2471,8 @@ def import_and_patch(
         lp_bug=lp_bug,
         openstack_series=ctx.openstack_target,
     )
+    if isinstance(changes, str):
+        changes = [changes]
 
     # Use gbp dch for snapshots as well to keep changelog handling consistent.
     use_gbp = True

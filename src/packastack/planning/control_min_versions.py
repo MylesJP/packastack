@@ -5,9 +5,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Control-file minimum-version policy helpers.
 
-Implements the policy of choosing the previous LTS version floor when compatible
-with upstream minimum requirements, without regressing existing constraints
-unless explicitly normalized.
+Implements the policy of choosing the latest LTS archive version as the
+control-file floor when available. The LTS version is both the preferred bump
+target and the maximum version PackaStack writes into ``debian/control``.
 """
 
 from __future__ import annotations
@@ -52,6 +52,29 @@ def decide_min_version(
 
     cloud_archive_required = False
     if upstream_min is None:
+        if prev_lts_version is not None:
+            chosen = prev_lts_version
+            action = "added" if not existing_version else "unchanged"
+            reason = "lts_floor_applied"
+            if existing_version:
+                cmp_existing = _cmp(existing_version, prev_lts_version)
+                if cmp_existing < 0:
+                    action = "raised"
+                elif cmp_existing > 0:
+                    action = "lowered"
+                    reason = "capped_to_lts"
+
+            return MinVersionDecision(
+                name=name,
+                upstream_min_required=None,
+                prev_lts_version=prev_lts_version,
+                existing_constraint=existing_version,
+                chosen_min_version=chosen,
+                action=action,
+                reason_code=reason,
+                cloud_archive_required=cloud_archive_required,
+            )
+
         return MinVersionDecision(
             name=name,
             upstream_min_required=None,
@@ -63,9 +86,14 @@ def decide_min_version(
             cloud_archive_required=cloud_archive_required,
         )
 
-    # Determine baseline candidate from previous LTS
-    baseline = upstream_min
-    if prev_lts_version and _cmp(prev_lts_version, upstream_min) >= 0:
+    # Latest LTS is the packaging floor and cap when available. If upstream
+    # asks for more than LTS has, report that a newer archive/Cloud Archive may
+    # be required, but do not write a higher constraint into debian/control.
+    baseline = prev_lts_version or upstream_min
+    baseline_is_lts = prev_lts_version is not None
+    if prev_lts_version and _cmp(prev_lts_version, upstream_min) < 0:
+        cloud_archive_required = True
+    elif prev_lts_version:
         baseline = prev_lts_version
     else:
         cloud_archive_required = True
@@ -77,10 +105,10 @@ def decide_min_version(
     if existing_version:
         cmp_existing = _cmp(existing_version, baseline)
         if cmp_existing > 0:
-            if normalize:
+            if baseline_is_lts or normalize:
                 chosen = baseline
                 action = "lowered"
-                reason = "normalized_to_baseline"
+                reason = "capped_to_lts" if baseline_is_lts else "normalized_to_baseline"
             else:
                 chosen = existing_version
                 action = "kept"

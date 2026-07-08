@@ -25,8 +25,30 @@ from packastack.build.single_build import (
     SingleBuildContext,
     ValidateDepsResult,
     _resolve_modify_delete_conflicts,
+    _series_commit_name,
+    report_dependency_satisfaction,
     resolve_lp_bug_key,
 )
+
+
+class _FakePackage:
+    def __init__(self, version: str, component: str = "main"):
+        self.version = version
+        self.component = component
+
+
+class _FakePackageIndex:
+    def __init__(self, versions: dict[str, str]):
+        self.versions = versions
+
+    def find_package(self, name: str) -> _FakePackage | None:
+        version = self.versions.get(name)
+        if version is None:
+            return None
+        return _FakePackage(version)
+
+    def get_version(self, name: str) -> str | None:
+        return self.versions.get(name)
 
 
 class TestPhaseResult:
@@ -181,6 +203,101 @@ class TestSingleBuildContext:
         assert ctx.package == "oslo.config"
         assert ctx.build_type == BuildType.SNAPSHOT
         assert ctx.binary is True
+
+
+class TestSeriesCommitName:
+    """Tests for package commit series display names."""
+
+    def test_capitalizes_short_series_name(self):
+        assert _series_commit_name("hibiscus") == "Hibiscus"
+
+    def test_uses_first_word_from_display_name(self):
+        assert _series_commit_name("resolute raccoon") == "Resolute"
+
+
+class TestReportDependencySatisfaction:
+    """Tests for dependency satisfaction reporting."""
+
+    def test_commits_control_bump_and_records_changelog_entry(self, tmp_path: Path):
+        from packastack.planning.type_selection import BuildType
+
+        pkg_repo = tmp_path / "pkg"
+        debian_dir = pkg_repo / "debian"
+        debian_dir.mkdir(parents=True)
+        (pkg_repo / ".git").mkdir()
+        (debian_dir / "control").write_text(
+            "\n".join(
+                [
+                    "Source: python-foo",
+                    "Build-Depends: debhelper-compat (= 13), python3-foo",
+                    "Build-Depends-Indep: python3-bar",
+                    "",
+                    "Package: python3-foo",
+                    "Architecture: all",
+                    "Depends: ${misc:Depends}, ${python3:Depends}",
+                    "Description: test package",
+                    " test",
+                    "",
+                ]
+            )
+        )
+
+        run = MagicMock()
+        run.run_id = "20260708-000000"
+        run.logs_path = tmp_path / "logs"
+        index = _FakePackageIndex({
+            "debhelper-compat": "13",
+            "python3-foo": "2.4.0-1",
+            "python3-bar": "1.8.0-1",
+        })
+        ctx = SingleBuildContext(
+            pkg_name="python-foo",
+            package="foo",
+            run=run,
+            target="devel",
+            openstack_target="hibiscus",
+            ubuntu_series="devel",
+            resolved_ubuntu="resolute",
+            cloud_archive="",
+            build_type=BuildType.RELEASE,
+            build_type_str="release",
+            binary=True,
+            builder="sbuild",
+            force=False,
+            offline=False,
+            skip_repo_regen=False,
+            no_spinner=True,
+            build_deps=False,
+            archive_deps=False,
+            min_version_policy="",
+            dep_report=True,
+            fail_on_cloud_archive_required=False,
+            fail_on_mir_required=False,
+            update_control_min_versions=True,
+            normalize_to_prev_lts_floor=False,
+            dry_run_control_edit=False,
+            paths={"cache_root": tmp_path / "cache"},
+            pkg_repo=pkg_repo,
+            ubuntu_index=index,
+            current_lts_codename="resolute raccoon",
+            current_lts_index=index,
+            upstream_min_versions={},
+        )
+
+        with patch("packastack.build.single_build.git_commit") as commit:
+            commit.return_value.returncode = 0
+            result = report_dependency_satisfaction(ctx)
+
+        assert result.success is True
+        expected_msg = "d/control: Bump dependencies for Resolute."
+        commit.assert_called_once_with(
+            pkg_repo,
+            expected_msg,
+            files=["debian/control"],
+        )
+        control_text = (debian_dir / "control").read_text()
+        assert "python3-foo (>= 2.4.0-1)" in control_text
+        assert "python3-bar (>= 1.8.0-1)" in control_text
 
 
 class TestResolveLpBugKey:
