@@ -235,7 +235,12 @@ class TestBuildSingleModeResumeBuildId:
         "include_retired": False,
     }
 
-    def _call(self, resume_run_id: str = "", resume_build_id: str = "") -> MagicMock:
+    def _call(
+        self,
+        resume_workspace: bool = False,
+        resume_run_id: str = "",
+        resume_build_id: str = "",
+    ) -> MagicMock:
         """Call _build_single_mode with mocked RunContext and capture the build_id argument.
 
         Returns the mock RunContext constructor so callers can assert on it.
@@ -256,7 +261,7 @@ class TestBuildSingleModeResumeBuildId:
 
             build._build_single_mode(
                 **self._COMMON_KWARGS,
-                resume_workspace=bool(resume_run_id or resume_build_id),
+                resume_workspace=resume_workspace or bool(resume_run_id or resume_build_id),
                 resume_run_id=resume_run_id,
                 resume_build_id=resume_build_id,
             )
@@ -281,6 +286,29 @@ class TestBuildSingleModeResumeBuildId:
         """Without resume flags, build_id is empty (RunContext generates a fresh timestamp)."""
         mock_cls = self._call()
         mock_cls.assert_called_once_with("build", package="cinder", build_id="")
+
+    def test_plain_resume_uses_latest_workspace_id(self, tmp_path: Path) -> None:
+        """Plain --resume passes the latest existing package build id to RunContext."""
+        build_root = tmp_path / "build"
+        (build_root / "cinder" / "20260708-221918").mkdir(parents=True)
+        (build_root / "cinder" / "20260708-222137").mkdir(parents=True)
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(build, "load_config", return_value={"paths": {}}))
+            stack.enter_context(
+                patch.object(
+                    build,
+                    "resolve_paths",
+                    return_value={
+                        "cache_root": tmp_path / "cache",
+                        "build_root": build_root,
+                    },
+                )
+            )
+
+            mock_cls = self._call(resume_workspace=True)
+
+        mock_cls.assert_called_once_with("build", package="cinder", build_id="20260708-222137")
 
 
 class TestEnsureNoMergePaths:

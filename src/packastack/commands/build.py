@@ -149,6 +149,31 @@ def _find_most_recent_workspace(build_root: Path, package: str) -> Path | None:
     return dirs[0]
 
 
+def _resolve_single_resume_build_id(
+    package: str,
+    resume_workspace: bool,
+    resume_run_id: str,
+    resume_build_id: str,
+) -> str:
+    """Return the build id RunContext should use for a single-package resume.
+
+    Explicit identifiers win. For plain ``--resume``, choose the newest
+    existing package workspace before RunContext creates any directories; this
+    prevents a fresh empty timestamped workspace from shadowing the real latest
+    build.
+    """
+    if resume_build_id or resume_run_id:
+        return resume_build_id or resume_run_id
+    if not resume_workspace:
+        return ""
+
+    cfg = load_config()
+    paths = resolve_paths(cfg)
+    build_root = paths.get("build_root", paths["cache_root"] / "build")
+    workspace = _find_most_recent_workspace(build_root, package)
+    return workspace.name if workspace is not None else ""
+
+
 def _parse_changes_files(changes_text: str) -> list[str]:
     files: list[str] = []
     in_files = False
@@ -683,7 +708,12 @@ def _build_single_mode(
     resume_build_id: str = "",
 ) -> None:
     """Build a single package."""
-    effective_build_id = resume_build_id or resume_run_id
+    effective_build_id = _resolve_single_resume_build_id(
+        package=package,
+        resume_workspace=resume_workspace,
+        resume_run_id=resume_run_id,
+        resume_build_id=resume_build_id,
+    )
     with RunContext("build", package=package, build_id=effective_build_id) as run:
         exit_code = EXIT_SUCCESS
         workspace: Path | None = None
