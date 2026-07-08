@@ -147,33 +147,103 @@ def _ensure_sudo_cached() -> bool:
     return result.returncode == 0
 
 
-def _create_schroot(
+_CHROOTS_ROOT = Path("/var/lib/schroot/chroots")
+
+# Number of trailing stdout lines to keep in error messages. Bootstrap
+# tools write their "E:"/"W:" failure lines to stdout while the wrapper
+# only puts a generic one-liner on stderr, so the tail carries the
+# actionable part.
+_ERROR_OUTPUT_TAIL_LINES = 15
+
+
+def _combine_process_output(
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    """Combine stderr and the stdout tail of a failed process.
+
+    sbuild-createchroot puts only a generic ``die`` line on stderr while
+    debootstrap's actual error output goes to stdout — returning just one
+    stream hides the real failure reason.
+    """
+    parts: list[str] = []
+    stderr = result.stderr.strip()
+    stdout = result.stdout.strip()
+    if stderr:
+        parts.append(stderr)
+    if stdout:
+        parts.append("\n".join(stdout.splitlines()[-_ERROR_OUTPUT_TAIL_LINES:]))
+    return "\n".join(parts) or "schroot creation failed"
+
+
+def _cleanup_partial_chroot(target_dir: Path) -> None:
+    """Remove a partially-created chroot directory after a failed creation.
+
+    Leaving the partial directory behind makes the next attempt fail with
+    "<dir> is not empty". Only paths under the schroot chroots root are
+    ever removed.
+    """
+    if _CHROOTS_ROOT not in target_dir.parents:
+        return
+    if not target_dir.is_dir():
+        return
+    cmd = ["rm", "-rf", str(target_dir)]
+    if os.geteuid() != 0:
+        cmd.insert(0, "sudo")
+    subprocess.run(cmd, capture_output=True, check=False)
+
+
+def _register_schroot_config(
     name: str,
     config: SchrootConfig,
+    target_dir: Path,
+) -> None:
+    """Write an /etc/schroot/chroot.d config for a manually-created chroot.
+
+    Mirrors the config that sbuild-createchroot would have registered:
+    directory type with an overlay union so build sessions are ephemeral.
+    """
+    sbuild_name = get_sbuild_chroot_name(config.series, config.arch)
+    content = (
+        f"[{sbuild_name}]\n"
+        f"description=Ubuntu {config.series}/{config.arch} autobuilder (PackaStack)\n"
+        "groups=root,sbuild\n"
+        "root-groups=root,sbuild\n"
+        "profile=sbuild\n"
+        "type=directory\n"
+        f"directory={target_dir}\n"
+        "union-type=overlay\n"
+        f"aliases={name}\n"
+    )
+    _sudo_write_file(_CHROOT_CONF_DIR / sbuild_name, content)
+
+
+def _create_schroot_mmdebstrap(
+    name: str,
+    config: SchrootConfig,
+    target_dir: Path,
 ) -> tuple[bool, str]:
-    if shutil.which("sbuild-createchroot") is None:
-        return False, "sbuild-createchroot not found"
+    """Create the chroot with mmdebstrap and register it with schroot.
 
-    target_dir = Path("/var/lib/schroot/chroots") / name
+    mmdebstrap drives apt's acquire layer, which keeps up with archive
+    format changes (e.g. SHA512-only indexes) that break debootstrap.
+    """
+    if shutil.which("mmdebstrap") is None:
+        return False, "mmdebstrap not found (install with: sudo apt install mmdebstrap)"
+
     cmd = [
-        "sbuild-createchroot",
-        "--arch",
-        config.arch,
-        "--chroot-mode=schroot",
-        f"--chroot-suffix={CHROOT_SUFFIX}",
-        f"--alias={name}",
+        "mmdebstrap",
+        f"--arch={config.arch}",
+        "--variant=buildd",
+        f"--components={','.join(config.components)}",
+        "--include=fakeroot",
+        config.series,
+        str(target_dir),
+        config.mirror,
+        *config.extra_repos,
     ]
-    if config.components:
-        cmd.append(f"--components={','.join(config.components)}")
-    for repo in config.extra_repos:
-        cmd.append(f"--extra-repository={repo}")
-
-    cmd.extend([config.series, str(target_dir), config.mirror])
-
     if os.geteuid() != 0:
         cmd.insert(0, "sudo")
 
-    # Sudo credentials should already be cached by _ensure_sudo_cached()
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -181,10 +251,65 @@ def _create_schroot(
         check=False,
     )
     if result.returncode != 0:
-        err = result.stderr.strip() or result.stdout.strip() or "schroot creation failed"
-        return False, err
+        return False, _combine_process_output(result)
+
+    try:
+        _register_schroot_config(name, config, target_dir)
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return False, f"mmdebstrap succeeded but schroot registration failed: {exc}"
 
     return True, ""
+
+
+def _create_schroot(
+    name: str,
+    config: SchrootConfig,
+) -> tuple[bool, str]:
+    target_dir = _CHROOTS_ROOT / name
+
+    if shutil.which("sbuild-createchroot") is None:
+        sbuild_err = "sbuild-createchroot not found"
+    else:
+        cmd = [
+            "sbuild-createchroot",
+            "--arch",
+            config.arch,
+            "--chroot-mode=schroot",
+            f"--chroot-suffix={CHROOT_SUFFIX}",
+            f"--alias={name}",
+        ]
+        if config.components:
+            cmd.append(f"--components={','.join(config.components)}")
+        for repo in config.extra_repos:
+            cmd.append(f"--extra-repository={repo}")
+
+        cmd.extend([config.series, str(target_dir), config.mirror])
+
+        if os.geteuid() != 0:
+            cmd.insert(0, "sudo")
+
+        # Sudo credentials should already be cached by _ensure_sudo_cached()
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return True, ""
+
+        sbuild_err = _combine_process_output(result)
+        _cleanup_partial_chroot(target_dir)
+
+    ok, mm_err = _create_schroot_mmdebstrap(name, config, target_dir)
+    if ok:
+        return True, ""
+
+    _cleanup_partial_chroot(target_dir)
+    return False, (
+        f"sbuild-createchroot failed:\n{sbuild_err}\n\n"
+        f"mmdebstrap fallback failed:\n{mm_err}"
+    )
 
 
 def ensure_schroot(
@@ -285,12 +410,17 @@ def _get_profile_fstab_path(config_text: str) -> Path:
     """Return the fstab path implied by a schroot config block.
 
     Checks ``setup.fstab=`` first, then falls back to the ``profile=``
-    directory's ``fstab`` file, and finally the sbuild default.
+    directory's ``fstab`` file, and finally the sbuild default. Relative
+    ``setup.fstab`` values are resolved against ``/etc/schroot``, matching
+    schroot's own semantics.
     """
     for line in config_text.splitlines():
         stripped = line.strip()
         if stripped.startswith("setup.fstab="):
-            return Path(stripped.split("=", 1)[1].strip())
+            path = Path(stripped.split("=", 1)[1].strip())
+            if not path.is_absolute():
+                path = Path("/etc/schroot") / path
+            return path
         if stripped.startswith("profile="):
             profile = stripped.split("=", 1)[1].strip()
             return Path(f"/etc/schroot/{profile}/fstab")
@@ -320,11 +450,16 @@ def _sudo_write_file(path: Path, content: str) -> None:
 
 
 def _sudo_set_fstab_key(config_path: Path, fstab_path: Path) -> None:
-    """Set ``setup.fstab=`` in an existing schroot config file."""
+    """Set ``setup.fstab=`` in an existing schroot config file.
+
+    schroot resolves ``setup.fstab`` relative to ``/etc/schroot``, so only
+    the filename is written — an absolute path would be double-prefixed
+    (``/etc/schroot//etc/schroot/...``) and break session creation.
+    """
     text = config_path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
 
-    key = f"setup.fstab={fstab_path}"
+    key = f"setup.fstab={fstab_path.name}"
     for i, line in enumerate(lines):
         if line.strip().startswith("setup.fstab="):
             lines[i] = key
@@ -377,7 +512,10 @@ def configure_repo_mount(
     config_text = config_path.read_text(encoding="utf-8", errors="replace")
 
     base_fstab = _get_profile_fstab_path(config_text)
-    custom_fstab = Path(f"/etc/schroot/packastack-{chroot_name}.fstab")
+    # Avoid a stuttering "packastack-packastack-..." filename when the
+    # chroot name (alias) already carries the prefix.
+    fstab_name = f"packastack-{chroot_name.removeprefix('packastack-')}.fstab"
+    custom_fstab = Path("/etc/schroot") / fstab_name
 
     if _fstab_has_repo_mount(custom_fstab, repo_path):
         return True

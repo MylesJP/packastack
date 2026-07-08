@@ -36,6 +36,7 @@ This module also handles:
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import time
@@ -63,6 +64,12 @@ if TYPE_CHECKING:
 CHROOT_REPO_MOUNT = "/srv/packastack-apt"
 CHROOT_SOURCES_LIST = "/etc/apt/sources.list.d/packastack-local.list"
 
+# Files written into the ephemeral schroot session to enable the Ubuntu
+# -proposed pocket (where new Python interpreters and the dual-supported
+# python3-defaults stage during a transition).
+CHROOT_PROPOSED_SOURCES = "/etc/apt/sources.list.d/packastack-proposed.list"
+CHROOT_PROPOSED_PREFERENCES = "/etc/apt/preferences.d/packastack-proposed"
+
 
 @dataclass
 class SbuildResult:
@@ -86,6 +93,8 @@ class SbuildResult:
     validation_message: str = ""
     report_path: Path | None = None
     command: list[str] = field(default_factory=list)
+    # Python versions pybuild exercised during the build (e.g. ["3.14", "3.15"])
+    python_versions_tested: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -105,6 +114,12 @@ class SbuildConfig:
     version: str | None = None
     # Lintian options to suppress expected warnings/errors
     lintian_suppress_tags: list[str] = field(default_factory=list)
+    # Enable the Ubuntu -proposed pocket inside the ephemeral session so
+    # pybuild builds/tests against all supported Python versions during a
+    # transition. Requires network (session apt update + dist-upgrade).
+    proposed: bool = True
+    mirror: str = "http://archive.ubuntu.com/ubuntu"
+    components: list[str] = field(default_factory=lambda: ["main", "universe"])
 
 
 def is_sbuild_available() -> bool:
@@ -133,6 +148,77 @@ def generate_chroot_setup_commands() -> list[str]:
             " -o Dir::Etc::sourceparts=-"
         ),
     ]
+
+
+def generate_proposed_setup_commands(
+    series: str,
+    mirror: str,
+    components: list[str],
+) -> list[str]:
+    """Generate chroot setup commands enabling the -proposed pocket.
+
+    Writes an apt sources entry for ``{series}-proposed`` plus an apt
+    preferences pin at priority 500. The pin is load-bearing: the devel
+    series -proposed pocket publishes ``NotAutomatic: yes``, which apt
+    pins at priority 100 — without the override neither dist-upgrade nor
+    build-dependency resolution would pull anything from -proposed.
+
+    The commands run inside the ephemeral schroot session overlay, so the
+    on-disk source chroot is never modified.
+
+    Note: sbuild interprets percent-escapes in external commands, so the
+    generated commands must not contain ``%`` (no ``printf``).
+
+    Args:
+        series: Resolved Ubuntu codename (e.g., "stonking").
+        mirror: Ubuntu archive mirror URL.
+        components: Archive components (e.g., ["main", "universe"]).
+
+    Returns:
+        List of shell commands to run in the chroot during setup.
+    """
+    pocket = f"{series}-proposed"
+    return [
+        (
+            f'echo "deb {mirror} {pocket} {" ".join(components)}"'
+            f" > {CHROOT_PROPOSED_SOURCES}"
+        ),
+        (
+            "{ "
+            "echo 'Package: *'; "
+            f"echo 'Pin: release a={pocket}'; "
+            "echo 'Pin-Priority: 500'; "
+            f"}} > {CHROOT_PROPOSED_PREFERENCES}"
+        ),
+    ]
+
+
+def parse_pybuild_python_versions(log_text: str) -> list[str]:
+    """Extract the Python versions pybuild exercised from an sbuild log.
+
+    Scans pybuild informational lines such as::
+
+        I: pybuild base:385: python3.14 setup.py config
+        I: pybuild pybuild:308: python3.15 -m pytest
+
+    and returns the unique Python versions they mention. This covers
+    configure/build/install/test steps, so "exercised" rather than
+    strictly "tested". Non-pybuild lines (e.g. apt download lines that
+    mention interpreter package names) are ignored.
+
+    Args:
+        log_text: Combined sbuild output.
+
+    Returns:
+        Sorted unique versions, e.g. ["3.14", "3.15"].
+    """
+    versions: set[str] = set()
+    for line in log_text.splitlines():
+        if not re.match(r"^I: pybuild \S+:\d+:", line):
+            continue
+        versions.update(re.findall(r"python(3\.\d+)", line))
+
+    return sorted(versions, key=lambda v: tuple(int(p) for p in v.split(".")))
 
 
 def generate_chroot_cleanup_commands() -> list[str]:
@@ -198,6 +284,15 @@ def build_sbuild_command(config: SbuildConfig) -> list[str]:
                 cmd.extend(["--chroot-setup-commands", setup_cmd])
             for cleanup_cmd in generate_chroot_cleanup_commands():
                 cmd.extend(["--finished-build-commands", cleanup_cmd])
+
+    # -proposed pocket: enable inside the ephemeral session and bring the
+    # session current so pybuild sees the transition python3-defaults.
+    if config.proposed:
+        for setup_cmd in generate_proposed_setup_commands(
+            config.distribution, config.mirror, config.components
+        ):
+            cmd.extend(["--chroot-setup-commands", setup_cmd])
+        cmd.extend(["--apt-update", "--apt-distupgrade"])
 
     # Extra arguments
     cmd.extend(config.extra_args)
@@ -366,6 +461,7 @@ def run_sbuild(config: SbuildConfig, timeout: int = 3600) -> SbuildResult:
             validation_message=validation_msg,
             report_path=report_path,
             command=cmd,
+            python_versions_tested=parse_pybuild_python_versions(combined_output),
         )
 
     except subprocess.TimeoutExpired:

@@ -2594,6 +2594,14 @@ def build_packages(
                     if pkg_repo
                     else None,
                     lintian_suppress_tags=["inconsistent-maintainer"],
+                    # -proposed needs network for the session apt update
+                    proposed=not ctx.offline,
+                    mirror=(ctx.cfg or {})
+                    .get("mirrors", {})
+                    .get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu"),
+                    components=(ctx.cfg or {})
+                    .get("defaults", {})
+                    .get("ubuntu_components", ["main", "universe"]),
                 )
 
                 activity("build", f"Running sbuild (binary): {source_result.dsc_file.name}")
@@ -2637,12 +2645,26 @@ def build_packages(
                     activity("build", "Binary package built successfully (sbuild)")
                     for artifact in sbuild_result.artifacts:
                         activity("build", f"  {artifact.name}")
+                    versions = sbuild_result.python_versions_tested
+                    if versions:
+                        activity(
+                            "build",
+                            f"pybuild exercised Python versions: {', '.join(versions)}",
+                        )
+                        if len(versions) == 1:
+                            activity(
+                                "build",
+                                f"Note: only Python {versions[0]} was exercised "
+                                "(package likely does not build for all supported "
+                                "versions; not a failure)",
+                            )
                     run.log_event(
                         {
                             "event": "build.binary_complete",
                             "builder": "sbuild",
                             "artifacts": [str(a) for a in sbuild_result.artifacts],
                             "deb_count": deb_count,
+                            "python_versions_tested": versions,
                         }
                     )
                     result.artifacts.extend(sbuild_result.artifacts)
@@ -2789,6 +2811,7 @@ class SingleBuildOutcome:
     build_type: str = ""
     artifacts: list[Path] = field(default_factory=list)
     signature_verified: bool = False
+    python_versions_tested: list[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -3286,6 +3309,8 @@ def build_single_package(
             return outcome
 
     outcome.artifacts = build_data.artifacts
+    if build_data.sbuild_result is not None:
+        outcome.python_versions_tested = build_data.sbuild_result.python_versions_tested
 
     # -------------------------------------------------------------------------
     # Phase 6: Verify and publish

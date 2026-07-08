@@ -31,7 +31,9 @@ from packastack.build.sbuild import (
     build_sbuild_command,
     generate_chroot_cleanup_commands,
     generate_chroot_setup_commands,
+    generate_proposed_setup_commands,
     get_default_chroot_name,
+    parse_pybuild_python_versions,
     run_sbuild,
 )
 
@@ -223,6 +225,7 @@ class TestBuildSbuildCommand:
             distribution="noble",
             local_repo_root=repo,
             chroot_name="noble-amd64-packastack",
+            proposed=False,
         )
         with patch(
             "packastack.build.sbuild.configure_repo_mount",
@@ -240,6 +243,7 @@ class TestBuildSbuildCommand:
             output_dir=tmp_path,
             distribution="noble",
             local_repo_root=repo,
+            proposed=False,
         )
         cmd = build_sbuild_command(config)
         assert "--chroot-setup-commands" not in cmd
@@ -278,6 +282,146 @@ class TestBuildSbuildCommand:
         assert "--lintian-opts" in cmd
         idx = cmd.index("--lintian-opts")
         assert cmd[idx + 1] == "--fail-on=error"
+
+
+class TestProposedPocket:
+    """Tests for -proposed pocket injection in the sbuild command."""
+
+    def test_proposed_on_by_default(self, tmp_path: Path) -> None:
+        """Default command enables -proposed with pin and apt flags."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="stonking",
+        )
+        cmd = build_sbuild_command(config)
+
+        setup_args = [
+            cmd[i + 1]
+            for i, arg in enumerate(cmd)
+            if arg == "--chroot-setup-commands" and i + 1 < len(cmd)
+        ]
+        assert any("stonking-proposed" in s for s in setup_args)
+        assert any("Pin-Priority: 500" in s for s in setup_args)
+        assert "--apt-update" in cmd
+        assert "--apt-distupgrade" in cmd
+        # DSC must remain the last argument
+        assert cmd[-1] == str(tmp_path / "pkg.dsc")
+
+    def test_proposed_disabled(self, tmp_path: Path) -> None:
+        """proposed=False omits setup commands and apt flags."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="stonking",
+            proposed=False,
+        )
+        cmd = build_sbuild_command(config)
+        assert "--chroot-setup-commands" not in cmd
+        assert "--apt-update" not in cmd
+        assert "--apt-distupgrade" not in cmd
+
+    def test_proposed_uses_mirror_and_components(self, tmp_path: Path) -> None:
+        """Configured mirror and components appear in the sources line."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="noble",
+            mirror="http://ca.archive.ubuntu.com/ubuntu",
+            components=["main", "universe", "multiverse"],
+        )
+        cmd = build_sbuild_command(config)
+        setup_args = [
+            cmd[i + 1]
+            for i, arg in enumerate(cmd)
+            if arg == "--chroot-setup-commands" and i + 1 < len(cmd)
+        ]
+        assert any(
+            "deb http://ca.archive.ubuntu.com/ubuntu noble-proposed "
+            "main universe multiverse" in s
+            for s in setup_args
+        )
+
+
+class TestGenerateProposedSetupCommands:
+    """Tests for generate_proposed_setup_commands function."""
+
+    def test_sources_line_format(self) -> None:
+        """Sources command writes the -proposed deb line."""
+        cmds = generate_proposed_setup_commands(
+            "stonking", "http://archive.ubuntu.com/ubuntu", ["main", "universe"]
+        )
+        assert (
+            'echo "deb http://archive.ubuntu.com/ubuntu stonking-proposed '
+            'main universe"' in cmds[0]
+        )
+        assert "packastack-proposed.list" in cmds[0]
+
+    def test_pin_content(self) -> None:
+        """Pin command writes a priority-500 preferences file."""
+        cmds = generate_proposed_setup_commands(
+            "stonking", "http://archive.ubuntu.com/ubuntu", ["main"]
+        )
+        assert "Package: *" in cmds[1]
+        assert "Pin: release a=stonking-proposed" in cmds[1]
+        assert "Pin-Priority: 500" in cmds[1]
+        assert "/etc/apt/preferences.d/packastack-proposed" in cmds[1]
+
+    def test_no_percent_escapes(self) -> None:
+        """sbuild percent-escapes external commands; none may contain %."""
+        cmds = generate_proposed_setup_commands(
+            "stonking", "http://archive.ubuntu.com/ubuntu", ["main", "universe"]
+        )
+        for cmd in cmds:
+            assert "%" not in cmd
+
+
+class TestParsePybuildPythonVersions:
+    """Tests for parse_pybuild_python_versions function."""
+
+    def test_two_versions(self) -> None:
+        """Detects both versions across pybuild lines."""
+        log = (
+            "I: pybuild base:385: python3.14 setup.py config\n"
+            "some unrelated line\n"
+            "I: pybuild pybuild:308: python3.15 -m pytest\n"
+        )
+        assert parse_pybuild_python_versions(log) == ["3.14", "3.15"]
+
+    def test_single_version(self) -> None:
+        """Single supported version yields a one-element list."""
+        log = "I: pybuild base:385: python3.14 setup.py build\n"
+        assert parse_pybuild_python_versions(log) == ["3.14"]
+
+    def test_deduplicates(self) -> None:
+        """Repeated mentions of a version are deduplicated."""
+        log = (
+            "I: pybuild base:385: python3.14 setup.py config\n"
+            "I: pybuild base:385: python3.14 setup.py build\n"
+            "I: pybuild base:385: python3.14 setup.py install\n"
+        )
+        assert parse_pybuild_python_versions(log) == ["3.14"]
+
+    def test_numeric_sort(self) -> None:
+        """Versions sort numerically, not lexically (3.9 < 3.14)."""
+        log = (
+            "I: pybuild base:385: python3.14 setup.py config\n"
+            "I: pybuild base:385: python3.9 setup.py config\n"
+        )
+        assert parse_pybuild_python_versions(log) == ["3.9", "3.14"]
+
+    def test_empty_log(self) -> None:
+        """Empty log yields an empty list."""
+        assert parse_pybuild_python_versions("") == []
+
+    def test_ignores_non_pybuild_lines(self) -> None:
+        """Interpreter mentions on apt/download lines are ignored."""
+        log = (
+            "Get:42 http://archive.ubuntu.com/ubuntu stonking/main amd64 "
+            "python3.14 amd64 3.14.0-1 [512 kB]\n"
+            "Setting up python3.15-minimal (3.15.0-1) ...\n"
+        )
+        assert parse_pybuild_python_versions(log) == []
 
 
 class TestGetDefaultChrootName:
@@ -419,6 +563,41 @@ class TestRunSbuild:
         assert result.stderr_log_path is not None
         assert result.stdout_log_path.exists()
         assert result.stderr_log_path.exists()
+
+    def test_populates_python_versions_tested(self, tmp_path: Path) -> None:
+        """Should parse pybuild-exercised Python versions from the output."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path / "output",
+            distribution="stonking",
+            run_log_dir=tmp_path / "logs",
+        )
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        def fake_run(cmd, **kwargs):
+            kwargs["stdout"].write(
+                "I: pybuild base:385: python3.14 setup.py config\n"
+                "I: pybuild pybuild:308: python3.15 -m pytest\n"
+            )
+            return mock_result
+
+        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
+             patch("packastack.build.sbuild.subprocess.run", side_effect=fake_run), \
+             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
+             patch("packastack.build.sbuild.collect_artifacts") as mock_collect:
+
+            from packastack.build.sbuildrc import CandidateDirectories
+            mock_discover.return_value = CandidateDirectories()
+            mock_collect.return_value = CollectionResult(
+                success=True,
+                validation_message="",
+            )
+
+            result = run_sbuild(config)
+
+        assert result.python_versions_tested == ["3.14", "3.15"]
 
     def test_collects_artifacts_from_user_config_dir(self, tmp_path: Path) -> None:
         """Should collect artifacts from user-configured build directory."""

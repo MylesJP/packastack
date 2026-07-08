@@ -1314,6 +1314,7 @@ def _run_build(
             upload_order=plan_result.upload_order,
             signature_verified=outcome.signature_verified,
             artifacts=[str(a) for a in outcome.artifacts],
+            python_versions_tested=outcome.python_versions_tested,
             provenance=summarize_provenance(ctx.provenance) if ctx.provenance else None,
             dependency_reports={k: str(v) for k, v in (ctx.dependency_reports or {}).items()},
             exit_code=EXIT_SUCCESS,

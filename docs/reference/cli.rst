@@ -47,7 +47,7 @@ packastack build
 
 **What it does**
 
-Builds an OpenStack package end-to-end: validates the plan, fetches sources, applies policy, drives sbuild or dpkg, and publishes results into the local repo. For sbuild-based binary builds, PackaStack ensures a schroot exists (creating it if missing). It upgrades ``debian/watch`` to ``version=5`` when present, enables the ``sphinxdoc`` addon in ``debian/rules``, defaults to ``gbp dch`` for changelog entries, and exports the patch queue back to ``master`` before finishing. Artifacts, logs, and a run summary are written to configured cache paths.
+Builds an OpenStack package end-to-end: validates the plan, fetches sources, applies policy, drives sbuild or dpkg, and publishes results into the local repo. For sbuild-based binary builds, PackaStack ensures a schroot exists (creating it if missing). Online sbuild builds always enable the series ``-proposed`` pocket inside the ephemeral schroot session (pinned to priority 500, then apt update + dist-upgrade), so during a Python transition pybuild builds and tests against **all** supported interpreters (e.g. python3.14 and python3.15) in one run; the versions actually exercised are reported in the build output and in ``summary.json`` as ``python_versions_tested``. Offline builds skip the ``-proposed`` injection. It upgrades ``debian/watch`` to ``version=5`` when present, enables the ``sphinxdoc`` addon in ``debian/rules``, defaults to ``gbp dch`` for changelog entries, and exports the patch queue back to ``master`` before finishing. Artifacts, logs, and a run summary are written to configured cache paths.
 
 **Subset builds**
 

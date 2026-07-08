@@ -1121,3 +1121,155 @@ class TestFixSudoersArgs:
         _fix_sudoers_args(ctx)
 
         ctx.run.log_event.assert_not_called()
+
+
+class TestBuildPackagesSbuildProposed:
+    """Tests for -proposed wiring and Python-version reporting in build_packages."""
+
+    @staticmethod
+    def _make_ctx(tmp_path: Path, offline: bool = False) -> SingleBuildContext:
+        from packastack.planning.type_selection import BuildType
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(parents=True, exist_ok=True)
+        return SingleBuildContext(
+            pkg_name="python-oslo-config",
+            package="oslo.config",
+            run=MagicMock(),
+            target="devel",
+            openstack_target="dalmatian",
+            ubuntu_series="devel",
+            resolved_ubuntu="stonking",
+            cloud_archive="",
+            build_type=BuildType.RELEASE,
+            build_type_str="release",
+            binary=True,
+            builder="sbuild",
+            force=False,
+            offline=offline,
+            skip_repo_regen=True,
+            no_spinner=True,
+            build_deps=False,
+            archive_deps=True,
+            min_version_policy="",
+            dep_report=False,
+            fail_on_cloud_archive_required=False,
+            fail_on_mir_required=False,
+            update_control_min_versions=False,
+            normalize_to_prev_lts_floor=False,
+            dry_run_control_edit=False,
+            paths={"cache_root": tmp_path / "cache"},
+            ai_enabled=False,
+            cfg={
+                "mirrors": {"ubuntu_archive": "http://mirror.example.com/ubuntu"},
+                "defaults": {"ubuntu_components": ["main", "universe"]},
+            },
+            workspace=workspace,
+            pkg_repo=None,
+            schroot_name="packastack-stonking-amd64",
+        )
+
+    def _run_build_packages(
+        self,
+        tmp_path: Path,
+        offline: bool = False,
+        python_versions: list[str] | None = None,
+    ):
+        from packastack.build.sbuild import SbuildResult
+        from packastack.build.single_build import build_packages
+
+        ctx = self._make_ctx(tmp_path, offline=offline)
+
+        dsc = tmp_path / "oslo.config_1.0-0ubuntu1.dsc"
+        dsc.touch()
+        source_result = MagicMock()
+        source_result.success = True
+        source_result.artifacts = [dsc]
+        source_result.dsc_file = dsc
+        source_result.changes_file = None
+
+        captured: dict = {}
+
+        def fake_run_sbuild(config, timeout=3600):
+            captured["config"] = config
+            return SbuildResult(
+                success=True,
+                artifacts=[],
+                collected_artifacts=[],
+                exit_code=0,
+                python_versions_tested=python_versions or [],
+            )
+
+        activities: list[str] = []
+
+        with patch(
+            "packastack.debpkg.gbp.build_source", return_value=source_result
+        ), patch(
+            "packastack.build.sbuild.is_sbuild_available", return_value=True
+        ), patch(
+            "packastack.build.sbuild.run_sbuild", side_effect=fake_run_sbuild
+        ), patch(
+            "packastack.build.single_build.activity",
+            side_effect=lambda phase, msg: activities.append(msg),
+        ):
+            phase_result, build_result = build_packages(ctx, "1.0-0ubuntu1")
+
+        return phase_result, build_result, captured, activities
+
+    def test_proposed_enabled_online(self, tmp_path: Path) -> None:
+        """Online builds enable -proposed with config mirror/components."""
+        phase_result, build_result, captured, _ = self._run_build_packages(
+            tmp_path, offline=False, python_versions=["3.14", "3.15"]
+        )
+
+        assert phase_result.success
+        config = captured["config"]
+        assert config.proposed is True
+        assert config.mirror == "http://mirror.example.com/ubuntu"
+        assert config.components == ["main", "universe"]
+        assert build_result.sbuild_result.python_versions_tested == ["3.14", "3.15"]
+
+    def test_proposed_disabled_offline(self, tmp_path: Path) -> None:
+        """Offline builds skip -proposed (session apt update needs network)."""
+        phase_result, _, captured, _ = self._run_build_packages(
+            tmp_path, offline=True, python_versions=["3.14"]
+        )
+
+        assert phase_result.success
+        assert captured["config"].proposed is False
+
+    def test_reports_python_versions(self, tmp_path: Path) -> None:
+        """Both-version builds report the exercised versions."""
+        _, _, _, activities = self._run_build_packages(
+            tmp_path, python_versions=["3.14", "3.15"]
+        )
+
+        assert any(
+            "pybuild exercised Python versions: 3.14, 3.15" in msg
+            for msg in activities
+        )
+        assert not any("only Python" in msg for msg in activities)
+
+    def test_single_version_informational_note(self, tmp_path: Path) -> None:
+        """Single-version builds emit the informational note."""
+        _, _, _, activities = self._run_build_packages(
+            tmp_path, python_versions=["3.14"]
+        )
+
+        assert any("only Python 3.14 was exercised" in msg for msg in activities)
+
+    def test_no_versions_no_report(self, tmp_path: Path) -> None:
+        """No pybuild lines (non-Python package) means no version report."""
+        _, _, _, activities = self._run_build_packages(tmp_path, python_versions=[])
+
+        assert not any("pybuild exercised" in msg for msg in activities)
+
+
+class TestSingleBuildOutcomePythonVersions:
+    """Tests for python_versions_tested on SingleBuildOutcome."""
+
+    def test_default_empty(self) -> None:
+        from packastack.build.single_build import SingleBuildOutcome
+
+        outcome = SingleBuildOutcome(success=True)
+        assert outcome.python_versions_tested == []

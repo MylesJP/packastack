@@ -15,6 +15,10 @@ What happens inside the schroot
 -------------------------------
 APT updates against the mounted local repo, so anything you’ve already built is first in line. Build-deps are resolved from that repo plus the Ubuntu archive view; with ``--build-deps``, missing build-deps get built earlier and are waiting on the shelf. sbuild then runs the usual Debian playbook: unpack, build, run hooks/tests, package, sign/annotate.
 
+The -proposed pocket and multi-Python testing
+---------------------------------------------
+Every online sbuild build also enables the series ``-proposed`` pocket **inside the ephemeral session**: setup commands write a sources entry and an apt pin (priority 500 — required because devel ``-proposed`` publishes ``NotAutomatic: yes``), then ``--apt-update --apt-distupgrade`` bring the session current. The on-disk chroot is never modified; every session starts fresh from today's archive. The point: during a Python transition, ``-proposed`` carries the new interpreter and a ``python3-defaults`` that lists **both** Python versions as supported, so any package that Build-Depends on ``python3-all`` builds and runs its tests under every supported interpreter (e.g. 3.14 *and* 3.15) in a single build. After the build, PackaStack parses the log and reports which versions pybuild exercised — if only one shows up, the package likely doesn't build for all supported versions (informational, not a failure). Offline builds skip the ``-proposed`` injection since the session apt update needs the network.
+
 How to read the output
 ----------------------
 In ``<workspace>/output/<run>/logs`` you’ll find ``sbuild.stdout.log`` and ``sbuild.stderr.log``—start with stdout for the plot, dip into stderr for the drama. ``sbuild-artifacts.json`` is the neatly typed postmortem: command, exit code, where artifacts were found, every file we copied. A primary-log symlink points at the crown-jewel log. Artifacts themselves land under ``<workspace>/output/<run>/`` and get mirrored into ``<workspace>/localrepo`` with fresh metadata. Expect ``.deb``, ``.changes``, ``.buildinfo``, and logs; no ``.deb`` plus a nonzero exit code means we call it a failure.
