@@ -32,6 +32,7 @@ from packastack.build.collector import (
     compute_sha256,
     copy_file_with_checksum,
     create_primary_log_symlink,
+    detect_masked_test_failure,
     find_artifacts_in_directory,
     find_logs_in_directory,
     matches_package,
@@ -60,6 +61,27 @@ class TestComputeSha256:
         result = compute_sha256(test_file)
         assert len(result) == 64  # SHA256 hex is 64 chars
 
+
+class TestDetectMaskedTestFailure:
+    """Tests for failures hidden by successful shell pipelines."""
+
+    def test_detects_discovery_failure(self) -> None:
+        log = "=========================\nFailures during discovery\n=========================\n"
+        assert detect_masked_test_failure(log) == "test discovery failed"
+
+    def test_detects_no_tests(self) -> None:
+        assert detect_masked_test_failure("Ran 0 tests in 0.2s\nNO TESTS RAN\n") is not None
+
+    def test_detects_unittest_failure(self) -> None:
+        assert detect_masked_test_failure("FAILED (failures=1)\n") is not None
+
+    def test_detects_pytest_failure(self) -> None:
+        log = "================ 2 failed, 10 passed in 1.2s ================\n"
+        assert detect_masked_test_failure(log) == "pytest reported failures"
+
+    def test_ignores_success_and_expected_traceback(self) -> None:
+        log = "Traceback (most recent call last):\nExpectedError\nRan 113 tests in 2s\nOK\n"
+        assert detect_masked_test_failure(log) is None
 
 class TestCopyFileWithChecksum:
     """Tests for copy_file_with_checksum function."""
@@ -350,6 +372,29 @@ class TestCollectArtifacts:
 
         assert not result.success
         assert "No binary packages" in result.validation_message
+
+    def test_rejects_test_failure_masked_by_successful_pipeline(self, tmp_path: Path) -> None:
+        """Test summaries override otherwise successful artifact validation."""
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "package_1.0_amd64.deb").write_text("deb")
+
+        candidates = CandidateDirectories()
+        candidates.add_build_dir(build_dir, "test")
+        result = collect_artifacts(
+            tmp_path / "dest",
+            candidates,
+            sbuild_output=(
+                "Failures during discovery\n"
+                "Ran 0 tests in 0.2s\n"
+                "NO TESTS RAN\n"
+            ),
+        )
+
+        assert result.deb_count == 1
+        assert result.success is False
+        assert "masked by a successful sbuild pipeline" in result.validation_message
+        assert "test discovery failed" in result.validation_message
 
     def test_records_searched_dirs(self, tmp_path: Path) -> None:
         """Should record which directories were searched."""

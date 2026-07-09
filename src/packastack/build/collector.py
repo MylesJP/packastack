@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -49,6 +50,43 @@ ALL_ARTIFACT_EXTENSIONS = BINARY_EXTENSIONS | METADATA_EXTENSIONS
 
 # Log file patterns
 LOG_EXTENSIONS = {".log", ".build"}
+
+# Test runners are sometimes piped through formatters without ``pipefail`` in
+# debian/rules. In that case the formatter exits successfully and masks the
+# actual test failure from dpkg-buildpackage and sbuild. These patterns match
+# terminal test-runner summaries rather than generic tracebacks, which may be
+# legitimate output from tests that exercise exception handling.
+_MASKED_TEST_FAILURE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^Failures during discovery\s*$", re.MULTILINE), "test discovery failed"),
+    (re.compile(r"^NO TESTS RAN\s*$", re.MULTILINE), "the test runner ran no tests"),
+    (re.compile(r"^Ran 0 tests(?: in .*)?$", re.MULTILINE), "the test runner ran zero tests"),
+    (re.compile(r"^FAILED \(.+\)\s*$", re.MULTILINE), "the unit test suite reported failure"),
+    (
+        re.compile(
+            r"^=+\s+.*\b[1-9]\d* (?:failed|errors?)\b.*=+\s*$",
+            re.MULTILINE,
+        ),
+        "pytest reported failures",
+    ),
+    (re.compile(r"^ERROR collecting .+$", re.MULTILINE), "pytest collection failed"),
+)
+
+
+def detect_masked_test_failure(log_text: str | None) -> str | None:
+    """Return a failure reason when test output contradicts sbuild's exit code.
+
+    Some packaging invokes a test runner in a shell pipeline without enabling
+    ``pipefail``. The pipeline can therefore return zero even after discovery,
+    collection, or test failures. Strong test-runner summary markers let
+    Packastack reject that false success after sbuild finishes.
+    """
+    if not log_text:
+        return None
+
+    for pattern, reason in _MASKED_TEST_FAILURE_PATTERNS:
+        if pattern.search(log_text):
+            return reason
+    return None
 
 
 @dataclass
@@ -520,6 +558,14 @@ def collect_artifacts(
             if len(searched_build_dirs) > 3
             else f"No binary packages (.deb/.udeb) found. "
             f"Searched directories: {', '.join(searched_build_dirs) or 'none'}"
+        )
+
+    masked_test_failure = detect_masked_test_failure(sbuild_output)
+    if masked_test_failure:
+        result.success = False
+        result.validation_message = (
+            "Test failure was masked by a successful sbuild pipeline: "
+            f"{masked_test_failure}"
         )
 
     return result
