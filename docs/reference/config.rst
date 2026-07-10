@@ -36,6 +36,44 @@ The ``paths`` section defines all on-disk locations used by PackaStack:
      - PPA to automatically upload to when ``--ppa-upload`` is used.
      - ``None``
 
+sbuild
+------
+
+The optional ``sbuild.python_versions`` list makes PackaStack run one isolated
+sbuild pass per requested interpreter. In each pass the interpreter is added
+as an ephemeral build-dependency, and PackaStack sets
+``DEBPYTHON3_SUPPORTED``, ``PYBUILD_VERSIONS``, and ``PYTHON`` to that version.
+This covers both pybuild-based tests and custom stestr commands that bypass the
+standard helpers. The matrix succeeds only when every pass succeeds, and it
+leaves the package's ``debian/control`` unchanged.
+
+By default the list is empty, so Debian's normal pybuild interpreter selection
+is used. To test both Python 3.14 and Python 3.15:
+
+.. code-block:: yaml
+
+   sbuild:
+     python_versions:
+       - "3.14"
+       - "3.15"
+
+Use quoted strings: unquoted values such as ``3.14`` are YAML numbers. Set the
+list to ``[]`` to restore the normal Debian-selected interpreter set. Packages
+with custom test commands that ignore ``PYTHON`` may still require a
+package-specific change. Explicit matrices take proportionally longer because
+they perform a complete sbuild for every listed version.
+
+``sbuild.proposed`` defaults to ``true`` and enables the series ``-proposed``
+pocket inside each ephemeral build session, with an apt pin and a session
+dist-upgrade. This also applies to every pass in an explicit Python matrix.
+Set it to ``false`` to opt out. It is always ignored for ``--offline`` builds,
+which skip the session apt update entirely:
+
+.. code-block:: yaml
+
+   sbuild:
+     proposed: false
+
 Managed Packages
 ----------------
 

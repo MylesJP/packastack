@@ -98,6 +98,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ubuntu_archive": "http://archive.ubuntu.com/ubuntu",
         "ubuntu_openstack_git": "https://git.launchpad.net/~ubuntu-openstack-dev/ubuntu/+source",
     },
+    # Settings that affect only sbuild-based binary builds.
+    "sbuild": {
+        # Empty means let Debian's pybuild select its normal supported
+        # interpreter set. A non-empty list runs a separate sbuild pass with
+        # each requested Python version selected for its unit tests.
+        "python_versions": [],
+        # Enable the series -proposed pocket inside online build sessions.
+        # This is useful during transitions such as Python 3.14 -> 3.15.
+        "proposed": True,
+    },
     # Launchpad git repo name overrides for packages whose LP git
     # repository name differs from the source package name.
     # Maps source-package-name → launchpad-git-repo-name.

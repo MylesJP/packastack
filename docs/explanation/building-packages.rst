@@ -17,7 +17,15 @@ APT updates against the mounted local repo, so anything you’ve already built i
 
 The -proposed pocket and multi-Python testing
 ---------------------------------------------
-Every online sbuild build also enables the series ``-proposed`` pocket **inside the ephemeral session**: setup commands write a sources entry and an apt pin (priority 500 — required because devel ``-proposed`` publishes ``NotAutomatic: yes``), then ``--apt-update --apt-distupgrade`` bring the session current. The on-disk chroot is never modified; every session starts fresh from today's archive. The point: during a Python transition, ``-proposed`` carries the new interpreter and a ``python3-defaults`` that lists **both** Python versions as supported, so any package that Build-Depends on ``python3-all`` builds and runs its tests under every supported interpreter (e.g. 3.14 *and* 3.15) in a single build. After the build, PackaStack parses the log and reports which versions pybuild exercised — if only one shows up, the package likely doesn't build for all supported versions (informational, not a failure). Offline builds skip the ``-proposed`` injection since the session apt update needs the network.
+Every online sbuild build enables the series ``-proposed`` pocket **inside the ephemeral session** by default: setup commands write a sources entry and an apt pin (priority 500 — required because devel ``-proposed`` publishes ``NotAutomatic: yes``), then ``--apt-update --apt-distupgrade`` bring the session current. The on-disk chroot is never modified; every session starts fresh from today's archive. The point: during a Python transition, ``-proposed`` carries the new interpreter and rebuilt dependencies needed to test the package against it. Offline builds skip the ``-proposed`` injection since the session apt update needs the network.
+
+When the archive has multiple interpreter packages but ``python3-all`` has not
+yet selected both, set ``sbuild.python_versions`` in ``config.yaml``. PackaStack
+then runs a separate sbuild pass for each requested interpreter. Each pass
+exports ``DEBPYTHON3_SUPPORTED``, ``PYBUILD_VERSIONS``, and ``PYTHON`` for one
+version, so both pybuild tests and custom stestr commands select that
+interpreter. The matrix succeeds only if every pass succeeds; see
+:doc:`../reference/config`.
 
 How to read the output
 ----------------------

@@ -2623,18 +2623,29 @@ def build_packages(
                     if pkg_repo
                     else None,
                     lintian_suppress_tags=["inconsistent-maintainer"],
-                    # -proposed needs network for the session apt update
-                    proposed=not ctx.offline,
+                    # Online builds use -proposed by default; offline builds
+                    # must skip it because the session apt update needs network.
+                    proposed=(
+                        (ctx.cfg or {}).get("sbuild", {}).get("proposed", True)
+                        and not ctx.offline
+                    ),
                     mirror=(ctx.cfg or {})
                     .get("mirrors", {})
                     .get("ubuntu_archive", "http://archive.ubuntu.com/ubuntu"),
                     components=(ctx.cfg or {})
                     .get("defaults", {})
                     .get("ubuntu_components", ["main", "universe"]),
+                    python_versions=(ctx.cfg or {}).get("sbuild", {}).get("python_versions", []),
                 )
 
                 activity("build", f"Running sbuild (binary): {source_result.dsc_file.name}")
                 activity("build", f"sbuild logs will be captured to: {run.logs_path}/sbuild.*.log")
+                if sbuild_config.python_versions:
+                    activity(
+                        "build",
+                        "sbuild Python test passes: "
+                        f"{', '.join(sbuild_config.python_versions)}",
+                    )
 
                 with activity_spinner(
                     "sbuild",
@@ -2678,14 +2689,12 @@ def build_packages(
                     if versions:
                         activity(
                             "build",
-                            f"pybuild exercised Python versions: {', '.join(versions)}",
+                            f"sbuild tested Python versions: {', '.join(versions)}",
                         )
                         if len(versions) == 1:
                             activity(
                                 "build",
-                                f"Note: only Python {versions[0]} was exercised "
-                                "(package likely does not build for all supported "
-                                "versions; not a failure)",
+                                f"Note: only Python {versions[0]} was tested",
                             )
                     run.log_event(
                         {

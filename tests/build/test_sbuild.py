@@ -35,6 +35,7 @@ from packastack.build.sbuild import (
     get_default_chroot_name,
     parse_pybuild_python_versions,
     run_sbuild,
+    write_python_versions_sbuild_config,
 )
 
 
@@ -80,6 +81,7 @@ class TestSbuildConfig:
         assert config.dsc_path == tmp_path / "pkg.dsc"
         assert config.distribution == "noble"
         assert config.arch == "amd64"
+        assert config.python_versions == []
 
     def test_full_config(self, tmp_path: Path) -> None:
         """Test full config with all fields."""
@@ -95,6 +97,26 @@ class TestSbuildConfig:
         assert config.arch == "arm64"
         assert config.chroot_name == "jammy-arm64-sbuild"
         assert config.extra_args == ["--verbose"]
+
+    def test_python_versions_are_validated_and_deduplicated(self, tmp_path: Path) -> None:
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="noble",
+            python_versions=["3.14", "3.15", "3.14"],
+        )
+        assert config.python_versions == ["3.14", "3.15"]
+
+    def test_rejects_invalid_python_versions(self, tmp_path: Path) -> None:
+        import pytest
+
+        with pytest.raises(ValueError, match="must look like"):
+            SbuildConfig(
+                dsc_path=tmp_path / "pkg.dsc",
+                output_dir=tmp_path,
+                distribution="noble",
+                python_versions=["3.14; rm -rf /"],
+            )
 
 
 class TestGenerateChrootSetupCommands:
@@ -283,16 +305,49 @@ class TestBuildSbuildCommand:
         idx = cmd.index("--lintian-opts")
         assert cmd[idx + 1] == "--fail-on=error"
 
+    def test_adds_explicit_python_versions_as_build_dependencies(self, tmp_path: Path) -> None:
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="stonking",
+            python_versions=["3.14", "3.15"],
+        )
+        cmd = build_sbuild_command(config)
+        assert "--add-depends=python3.14" in cmd
+        assert "--add-depends=python3.15" in cmd
+        assert cmd[-1] == str(tmp_path / "pkg.dsc")
+
 
 class TestProposedPocket:
     """Tests for -proposed pocket injection in the sbuild command."""
 
     def test_proposed_on_by_default(self, tmp_path: Path) -> None:
-        """Default command enables -proposed with pin and apt flags."""
+        """Default command enables -proposed with the apt update flags."""
         config = SbuildConfig(
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path,
             distribution="stonking",
+        )
+        cmd = build_sbuild_command(config)
+
+        setup_args = [
+            cmd[i + 1]
+            for i, arg in enumerate(cmd)
+            if arg == "--chroot-setup-commands" and i + 1 < len(cmd)
+        ]
+        assert any("stonking-proposed" in arg for arg in setup_args)
+        assert "--apt-update" in cmd
+        assert "--apt-distupgrade" in cmd
+        # DSC must remain the last argument
+        assert cmd[-1] == str(tmp_path / "pkg.dsc")
+
+    def test_proposed_enabled(self, tmp_path: Path) -> None:
+        """proposed=True enables -proposed with pin and apt flags."""
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path,
+            distribution="stonking",
+            proposed=True,
         )
         cmd = build_sbuild_command(config)
 
@@ -327,6 +382,7 @@ class TestProposedPocket:
             dsc_path=tmp_path / "pkg.dsc",
             output_dir=tmp_path,
             distribution="noble",
+            proposed=True,
             mirror="http://ca.archive.ubuntu.com/ubuntu",
             components=["main", "universe", "multiverse"],
         )
@@ -337,8 +393,7 @@ class TestProposedPocket:
             if arg == "--chroot-setup-commands" and i + 1 < len(cmd)
         ]
         assert any(
-            "deb http://ca.archive.ubuntu.com/ubuntu noble-proposed "
-            "main universe multiverse" in s
+            "deb http://ca.archive.ubuntu.com/ubuntu noble-proposed main universe multiverse" in s
             for s in setup_args
         )
 
@@ -540,17 +595,20 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
-             patch("packastack.build.sbuild.collect_artifacts") as mock_collect:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+            patch("packastack.build.sbuild.collect_artifacts") as mock_collect,
+        ):
             # Setup mock candidates
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
 
             # Setup mock collection with no binaries (to test the failure path)
             from packastack.build.collector import CollectionResult
+
             mock_collect.return_value = CollectionResult(
                 success=False,
                 validation_message="No binary packages found",
@@ -583,12 +641,14 @@ class TestRunSbuild:
             )
             return mock_result
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", side_effect=fake_run), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
-             patch("packastack.build.sbuild.collect_artifacts") as mock_collect:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", side_effect=fake_run),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+            patch("packastack.build.sbuild.collect_artifacts") as mock_collect,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
             mock_collect.return_value = CollectionResult(
                 success=True,
@@ -598,6 +658,96 @@ class TestRunSbuild:
             result = run_sbuild(config)
 
         assert result.python_versions_tested == ["3.14", "3.15"]
+
+    def test_passes_explicit_matrix_via_sbuild_config(self, tmp_path: Path) -> None:
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path / "output",
+            distribution="stonking",
+            run_log_dir=tmp_path / "logs",
+            python_versions=["3.14", "3.15"],
+        )
+        mock_result = MagicMock(returncode=0)
+
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result) as mock_run,
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+            patch("packastack.build.sbuild.collect_artifacts") as mock_collect,
+        ):
+            from packastack.build.sbuildrc import CandidateDirectories
+
+            mock_discover.return_value = CandidateDirectories()
+            mock_collect.return_value = CollectionResult(success=True)
+            result = run_sbuild(config)
+
+        assert result.success
+        assert result.python_versions_tested == ["3.14", "3.15"]
+        assert mock_run.call_count == 2
+        for version, call in zip(config.python_versions, mock_run.call_args_list, strict=True):
+            command = call.args[0]
+            assert "--apt-update" in command
+            assert "--apt-distupgrade" in command
+            assert any("stonking-proposed" in argument for argument in command)
+            env = call.kwargs["env"]
+            config_path = Path(env["SBUILD_CONFIG"])
+            assert config_path.parent.name == f"python{version}"
+            assert config_path.read_text() == (
+                "# Generated by Packastack; retained with this build's logs.\n"
+                f"$build_environment->{{'DEBPYTHON3_SUPPORTED'}} = '{version}';\n"
+                f"$build_environment->{{'PYBUILD_VERSIONS'}} = '{version}';\n"
+                f"$build_environment->{{'PYTHON'}} = 'python{version}';\n"
+            )
+
+    def test_matrix_fails_if_either_python_pass_fails(self, tmp_path: Path) -> None:
+        config = SbuildConfig(
+            dsc_path=tmp_path / "pkg.dsc",
+            output_dir=tmp_path / "output",
+            distribution="stonking",
+            run_log_dir=tmp_path / "logs",
+            python_versions=["3.14", "3.15"],
+        )
+        artifact = tmp_path / "output" / "python3.14" / "pkg.deb"
+        pass_result = SbuildResult(
+            success=True,
+            output="Python 3.14 tests passed\n",
+            artifacts=[artifact],
+            exit_code=0,
+        )
+        fail_result = SbuildResult(
+            success=False,
+            output="Failures during discovery\nNO TESTS RAN\n",
+            exit_code=0,
+            validation_message="Test failure was masked by a successful sbuild pipeline",
+        )
+
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch(
+                "packastack.build.sbuild._run_sbuild_once",
+                side_effect=[pass_result, fail_result],
+            ) as mock_pass,
+        ):
+            result = run_sbuild(config)
+
+        assert mock_pass.call_count == 2
+        assert mock_pass.call_args_list[0].args[0].python_versions == ["3.14"]
+        assert mock_pass.call_args_list[1].args[0].python_versions == ["3.15"]
+        assert not result.success
+        assert result.artifacts == [artifact]
+        assert result.python_versions_tested == ["3.14"]
+        assert "Python 3.15" in result.validation_message
+        assert result.python_version_results == {
+            "3.14": pass_result,
+            "3.15": fail_result,
+        }
+
+
+class TestPythonVersionsSbuildConfig:
+    """Tests for per-build sbuild configuration fragments."""
+
+    def test_returns_none_for_an_empty_matrix(self, tmp_path: Path) -> None:
+        assert write_python_versions_sbuild_config(tmp_path, []) is None
 
     def test_collects_artifacts_from_user_config_dir(self, tmp_path: Path) -> None:
         """Should collect artifacts from user-configured build directory."""
@@ -616,11 +766,13 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             candidates = CandidateDirectories()
             candidates.add_build_dir(user_build_dir, "~/.sbuildrc")
             mock_discover.return_value = candidates
@@ -653,17 +805,23 @@ class TestRunSbuild:
         collected = CollectionResult(success=True)
         from packastack.build.collector import CollectedFile
 
-        collected.logs.append(CollectedFile(real_log, real_log, "hash", real_log.stat().st_size, real_log.stat().st_mtime))
+        collected.logs.append(
+            CollectedFile(
+                real_log, real_log, "hash", real_log.stat().st_size, real_log.stat().st_mtime
+            )
+        )
 
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
-             patch("packastack.build.sbuild.collect_artifacts", return_value=collected):
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+            patch("packastack.build.sbuild.collect_artifacts", return_value=collected),
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
 
             result = run_sbuild(config)
@@ -690,18 +848,22 @@ class TestRunSbuild:
         from packastack.build.collector import CollectedFile
 
         collected.logs.append(
-            CollectedFile(real_log, real_log, "hash", real_log.stat().st_size, real_log.stat().st_mtime)
+            CollectedFile(
+                real_log, real_log, "hash", real_log.stat().st_size, real_log.stat().st_mtime
+            )
         )
 
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover, \
-             patch("packastack.build.sbuild.collect_artifacts", return_value=collected):
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+            patch("packastack.build.sbuild.collect_artifacts", return_value=collected),
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
 
             result = run_sbuild(config)
@@ -722,11 +884,13 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0  # sbuild succeeds
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
 
             result = run_sbuild(config)
@@ -751,11 +915,13 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             candidates = CandidateDirectories()
             candidates.add_build_dir(build_dir, "test")
             mock_discover.return_value = candidates
@@ -767,6 +933,7 @@ class TestRunSbuild:
 
         # Verify report content
         import json
+
         report_data = json.loads(result.report_path.read_text())
         assert "sbuild_command" in report_data
         assert "sbuild_exit_code" in report_data
@@ -784,11 +951,13 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             mock_discover.return_value = CandidateDirectories()
 
             result = run_sbuild(config)
@@ -809,8 +978,10 @@ class TestRunSbuild:
             run_log_dir=tmp_path / "logs",
         )
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run") as mock_run:
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run") as mock_run,
+        ):
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="sbuild", timeout=3600)
 
             result = run_sbuild(config, timeout=3600)
@@ -841,11 +1012,13 @@ class TestRunSbuild:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("packastack.build.sbuild.is_sbuild_available", return_value=True), \
-             patch("packastack.build.sbuild.subprocess.run", return_value=mock_result), \
-             patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover:
-
+        with (
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.subprocess.run", return_value=mock_result),
+            patch("packastack.build.sbuild.discover_candidate_directories") as mock_discover,
+        ):
             from packastack.build.sbuildrc import CandidateDirectories
+
             candidates = CandidateDirectories()
             candidates.add_build_dir(build_dir, "test")
             candidates.add_log_dir(log_dir, "~/.sbuildrc")

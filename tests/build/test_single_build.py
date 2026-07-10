@@ -1291,11 +1291,14 @@ class TestBuildPackagesSbuildProposed:
         tmp_path: Path,
         offline: bool = False,
         python_versions: list[str] | None = None,
+        sbuild_cfg: dict | None = None,
     ):
         from packastack.build.sbuild import SbuildResult
         from packastack.build.single_build import build_packages
 
         ctx = self._make_ctx(tmp_path, offline=offline)
+        if sbuild_cfg is not None:
+            ctx.cfg["sbuild"] = sbuild_cfg
 
         dsc = tmp_path / "oslo.config_1.0-0ubuntu1.dsc"
         dsc.touch()
@@ -1344,42 +1347,75 @@ class TestBuildPackagesSbuildProposed:
         assert config.proposed is True
         assert config.mirror == "http://mirror.example.com/ubuntu"
         assert config.components == ["main", "universe"]
-        assert build_result.sbuild_result.python_versions_tested == ["3.14", "3.15"]
 
-    def test_proposed_disabled_offline(self, tmp_path: Path) -> None:
-        """Offline builds skip -proposed (session apt update needs network)."""
+    def test_proposed_can_be_disabled_via_config(self, tmp_path: Path) -> None:
+        """An explicit false value disables -proposed for an online build."""
         phase_result, _, captured, _ = self._run_build_packages(
-            tmp_path, offline=True, python_versions=["3.14"]
+            tmp_path,
+            offline=False,
+            python_versions=["3.14"],
+            sbuild_cfg={"proposed": False},
         )
 
         assert phase_result.success
         assert captured["config"].proposed is False
 
-    def test_reports_python_versions(self, tmp_path: Path) -> None:
-        """Both-version builds report the exercised versions."""
-        _, _, _, activities = self._run_build_packages(
-            tmp_path, python_versions=["3.14", "3.15"]
+    def test_proposed_disabled_offline(self, tmp_path: Path) -> None:
+        """Offline builds skip -proposed even though it defaults on."""
+        phase_result, _, captured, _ = self._run_build_packages(
+            tmp_path,
+            offline=True,
+            python_versions=["3.14"],
         )
 
-        assert any(
-            "pybuild exercised Python versions: 3.14, 3.15" in msg
-            for msg in activities
-        )
+        assert phase_result.success
+        assert captured["config"].proposed is False
+
+    def test_reads_explicit_python_matrix_from_sbuild_config(self, tmp_path: Path) -> None:
+        """The sbuild config section is passed to the binary build."""
+        from packastack.build.sbuild import SbuildResult
+        from packastack.build.single_build import build_packages
+
+        ctx = self._make_ctx(tmp_path)
+        ctx.cfg["sbuild"] = {"python_versions": ["3.14", "3.15"]}
+
+        dsc = tmp_path / "oslo.config_1.0-0ubuntu1.dsc"
+        dsc.touch()
+        source_result = MagicMock(success=True, artifacts=[dsc], dsc_file=dsc, changes_file=None)
+        captured: dict = {}
+
+        def fake_run_sbuild(config, timeout=3600):
+            captured["config"] = config
+            return SbuildResult(success=True, exit_code=0)
+
+        with (
+            patch("packastack.debpkg.gbp.build_source", return_value=source_result),
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.run_sbuild", side_effect=fake_run_sbuild),
+        ):
+            phase_result, _ = build_packages(ctx, "1.0-0ubuntu1")
+
+        assert phase_result.success
+        assert captured["config"].python_versions == ["3.14", "3.15"]
+
+    def test_reports_python_versions(self, tmp_path: Path) -> None:
+        """Both-version builds report the tested versions."""
+        _, _, _, activities = self._run_build_packages(tmp_path, python_versions=["3.14", "3.15"])
+
+        assert any("sbuild tested Python versions: 3.14, 3.15" in msg for msg in activities)
         assert not any("only Python" in msg for msg in activities)
 
     def test_single_version_informational_note(self, tmp_path: Path) -> None:
         """Single-version builds emit the informational note."""
-        _, _, _, activities = self._run_build_packages(
-            tmp_path, python_versions=["3.14"]
-        )
+        _, _, _, activities = self._run_build_packages(tmp_path, python_versions=["3.14"])
 
-        assert any("only Python 3.14 was exercised" in msg for msg in activities)
+        assert any("only Python 3.14 was tested" in msg for msg in activities)
 
     def test_no_versions_no_report(self, tmp_path: Path) -> None:
         """No pybuild lines (non-Python package) means no version report."""
         _, _, _, activities = self._run_build_packages(tmp_path, python_versions=[])
 
-        assert not any("pybuild exercised" in msg for msg in activities)
+        assert not any("sbuild tested" in msg for msg in activities)
 
 
 class TestSingleBuildOutcomePythonVersions:

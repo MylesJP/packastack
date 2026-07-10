@@ -35,6 +35,13 @@ class TestDefaultConfig:
         assert "defaults" in config.DEFAULT_CONFIG
         assert "mirrors" in config.DEFAULT_CONFIG
         assert "behavior" in config.DEFAULT_CONFIG
+        assert "sbuild" in config.DEFAULT_CONFIG
+
+    def test_default_sbuild_python_versions_is_empty(self) -> None:
+        assert config.DEFAULT_CONFIG["sbuild"]["python_versions"] == []
+
+    def test_default_sbuild_proposed_is_true(self) -> None:
+        assert config.DEFAULT_CONFIG["sbuild"]["proposed"] is True
 
     def test_default_config_paths_use_tilde(self) -> None:
         paths = config.DEFAULT_CONFIG["paths"]
