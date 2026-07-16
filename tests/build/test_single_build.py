@@ -245,11 +245,13 @@ class TestReportDependencySatisfaction:
         run = MagicMock()
         run.run_id = "20260708-000000"
         run.logs_path = tmp_path / "logs"
-        index = _FakePackageIndex({
-            "debhelper-compat": "13",
-            "python3-foo": "2.4.0-1",
-            "python3-bar": "1.8.0-1",
-        })
+        index = _FakePackageIndex(
+            {
+                "debhelper-compat": "13",
+                "python3-foo": "2.4.0-1",
+                "python3-bar": "1.8.0-1",
+            }
+        )
         ctx = SingleBuildContext(
             pkg_name="python-foo",
             package="foo",
@@ -480,9 +482,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"fix-brittle-tests.patch": "diff content"})
 
-        phase = PhaseResult.fail(
-            4, "Patch fix-brittle-tests.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch fix-brittle-tests.patch failed to apply")
 
         diagnosis_result = MagicMock()
         diagnosis_result.diagnosed = True
@@ -529,9 +529,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"drop-zun.patch": "diff content"})
 
-        phase = PhaseResult.fail(
-            4, "Patch drop-zun.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch drop-zun.patch failed to apply")
 
         mech_result = MagicMock()
         mech_result.refreshed = False
@@ -573,9 +571,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"drop-zun.patch": "old diff"})
 
-        phase = PhaseResult.fail(
-            4, "Patch drop-zun.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch drop-zun.patch failed to apply")
 
         mech_result = MagicMock()
         mech_result.refreshed = True
@@ -609,9 +605,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"drop-zun.patch": "old diff"})
 
-        phase = PhaseResult.fail(
-            4, "Patch drop-zun.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch drop-zun.patch failed to apply")
 
         mech_result = MagicMock()
         mech_result.refreshed = False
@@ -797,9 +791,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"ubuntu-fix.patch": "diff"})
 
-        phase = PhaseResult.fail(
-            4, "Patch ubuntu-fix.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch ubuntu-fix.patch failed to apply")
 
         diagnosis_result = MagicMock()
         diagnosis_result.diagnosed = True
@@ -837,10 +829,13 @@ class TestAiDiagnosePatchFailure:
         from packastack.build.single_build import _ai_diagnose_patch_failure
 
         ctx = _make_ctx_for_patch_test(tmp_path)
-        _setup_patches(ctx.pkg_repo, {
-            "fail-drop.patch": "diff1",
-            "ok-drop.patch": "diff2",
-        })
+        _setup_patches(
+            ctx.pkg_repo,
+            {
+                "fail-drop.patch": "diff1",
+                "ok-drop.patch": "diff2",
+            },
+        )
 
         phase = PhaseResult.fail(4, "patch queue import failed")
 
@@ -882,10 +877,13 @@ class TestAiDiagnosePatchFailure:
         from packastack.build.single_build import _ai_diagnose_patch_failure
 
         ctx = _make_ctx_for_patch_test(tmp_path)
-        _setup_patches(ctx.pkg_repo, {
-            "patch-a.patch": "diff1",
-            "patch-b.patch": "diff2",
-        })
+        _setup_patches(
+            ctx.pkg_repo,
+            {
+                "patch-a.patch": "diff1",
+                "patch-b.patch": "diff2",
+            },
+        )
 
         phase = PhaseResult.fail(4, "patch queue import failed")
 
@@ -928,9 +926,7 @@ class TestAiDiagnosePatchFailure:
         ctx = _make_ctx_for_patch_test(tmp_path)
         _setup_patches(ctx.pkg_repo, {"fix.patch": "diff"})
 
-        phase = PhaseResult.fail(
-            4, "Patch fix.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch fix.patch failed to apply")
 
         diagnosis_result = MagicMock()
         diagnosis_result.diagnosed = False
@@ -972,9 +968,7 @@ class TestAiDiagnosePatchFailure:
         patch_content = "--- a/setup.cfg\n+++ b/setup.cfg\n@@ -1 +1 @@\n-old\n+new\n"
         _setup_patches(ctx.pkg_repo, {"fix-setup.patch": patch_content})
 
-        phase = PhaseResult.fail(
-            4, "Patch fix-setup.patch failed to apply"
-        )
+        phase = PhaseResult.fail(4, "Patch fix-setup.patch failed to apply")
 
         diagnosis_result = MagicMock()
         diagnosis_result.diagnosed = True
@@ -1060,9 +1054,7 @@ class TestAiDiagnosePatchFailure:
         patches_dir = ctx.pkg_repo / "debian" / "patches"
         patches_dir.mkdir(parents=True)
         (patches_dir / "real.patch").write_text("diff")
-        (patches_dir / "series").write_text(
-            "# comment\n\nreal.patch\n  \n# another comment\n"
-        )
+        (patches_dir / "series").write_text("# comment\n\nreal.patch\n  \n# another comment\n")
 
         phase = PhaseResult.fail(4, "patch queue import failed")
 
@@ -1133,9 +1125,7 @@ class TestResolveModifyDeleteConflicts:
         run_command(["git", "commit", "-m", "remove AUTHORS"], cwd=pkg_repo)
 
         # Merge upstream — triggers modify/delete conflict
-        merge_rc, _, _ = run_command(
-            ["git", "merge", "-Xtheirs", "upstream"], cwd=pkg_repo
-        )
+        merge_rc, _, _ = run_command(["git", "merge", "-Xtheirs", "upstream"], cwd=pkg_repo)
         assert merge_rc != 0  # Conflict expected
 
         # Now resolve
@@ -1322,24 +1312,23 @@ class TestBuildPackagesSbuildProposed:
 
         activities: list[str] = []
 
-        with patch(
-            "packastack.debpkg.gbp.build_source", return_value=source_result
-        ), patch(
-            "packastack.build.sbuild.is_sbuild_available", return_value=True
-        ), patch(
-            "packastack.build.sbuild.run_sbuild", side_effect=fake_run_sbuild
-        ), patch(
-            "packastack.build.single_build.activity",
-            side_effect=lambda phase, msg: activities.append(msg),
+        with (
+            patch("packastack.debpkg.gbp.build_source", return_value=source_result),
+            patch("packastack.build.sbuild.is_sbuild_available", return_value=True),
+            patch("packastack.build.sbuild.run_sbuild", side_effect=fake_run_sbuild),
+            patch(
+                "packastack.build.single_build.activity",
+                side_effect=lambda phase, msg: activities.append(msg),
+            ),
         ):
             phase_result, build_result = build_packages(ctx, "1.0-0ubuntu1")
 
         return phase_result, build_result, captured, activities
 
     def test_proposed_enabled_online(self, tmp_path: Path) -> None:
-        """Online builds enable -proposed with config mirror/components."""
-        phase_result, build_result, captured, _ = self._run_build_packages(
-            tmp_path, offline=False, python_versions=["3.14", "3.15"]
+        """Online builds enable -proposed by default."""
+        phase_result, _, captured, _ = self._run_build_packages(
+            tmp_path, offline=False, python_versions=["3.14"]
         )
 
         assert phase_result.success

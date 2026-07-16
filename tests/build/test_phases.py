@@ -107,6 +107,7 @@ class TestCheckRetirementStatus:
         # Simulate directory creation during clone
         def create_dir(*args, **kwargs):
             project_config_path.mkdir(parents=True, exist_ok=True)
+
         mock_clone.side_effect = create_dir
         mock_spinner.return_value.__enter__ = MagicMock()
         mock_spinner.return_value.__exit__ = MagicMock()
@@ -260,9 +261,7 @@ class TestCheckRetirementStatus:
         )
 
         # Check that the deliverable was passed without python- prefix
-        mock_checker.check_retirement.assert_called_once_with(
-            "python-oslo.config", "oslo.config"
-        )
+        mock_checker.check_retirement.assert_called_once_with("python-oslo.config", "oslo.config")
 
 
 class TestResolveUpstreamRegistry:
@@ -307,7 +306,9 @@ class TestResolveUpstreamRegistry:
 
     @patch("packastack.upstream.releases.load_openstack_packages")
     @patch("packastack.upstream.registry.UpstreamsRegistry")
-    def test_detects_openstack_governed_package(self, mock_registry_class, mock_load_pkgs, tmp_path):
+    def test_detects_openstack_governed_package(
+        self, mock_registry_class, mock_load_pkgs, tmp_path
+    ):
         """Test that OpenStack-governed packages are detected."""
         run = MagicMock()
 
@@ -496,9 +497,7 @@ class TestCheckPolicy:
         assert policy_result.snapshot_eligible is True
 
     @patch("packastack.upstream.releases.is_snapshot_eligible")
-    def test_openstack_releases_still_checked_for_default(
-        self, mock_eligible, tmp_path
-    ):
+    def test_openstack_releases_still_checked_for_default(self, mock_eligible, tmp_path):
         """Test that openstack_releases projects still use eligibility check."""
         from packastack.build.phases import check_policy
         from packastack.planning.type_selection import BuildType
@@ -519,9 +518,7 @@ class TestCheckPolicy:
         mock_eligible.assert_called_once()
 
     @patch("packastack.upstream.releases.is_snapshot_eligible")
-    def test_openstack_releases_blocked_when_release_exists(
-        self, mock_eligible, tmp_path
-    ):
+    def test_openstack_releases_blocked_when_release_exists(self, mock_eligible, tmp_path):
         """Test that openstack_releases projects are blocked when release exists."""
         from packastack.build.phases import check_policy
         from packastack.planning.type_selection import BuildType
@@ -591,3 +588,168 @@ class TestCheckPolicy:
 
         # Should have called is_snapshot_eligible (openstack_releases path)
         mock_eligible.assert_called_once()
+
+
+class TestSchrootSetupResult:
+    """Tests for SchrootSetupResult dataclass."""
+
+    def test_default_values(self):
+        """Test that SchrootSetupResult has sensible defaults."""
+        from packastack.build.phases import SchrootSetupResult
+
+        result = SchrootSetupResult()
+        assert result.schroot_name == ""
+        assert result.chroot_mode == "schroot"
+        assert result.created is False
+        assert result.skipped is False
+
+
+class TestEnsureSchrootReady:
+    """Tests for ensure_schroot_ready function."""
+
+    def _call(self, **overrides):
+        from packastack.build.phases import ensure_schroot_ready
+
+        kwargs = {
+            "binary": True,
+            "builder": "sbuild",
+            "resolved_ubuntu": "noble",
+            "mirror": "http://archive.ubuntu.com/ubuntu",
+            "components": ["main", "universe"],
+            "offline": False,
+            "run": MagicMock(),
+        }
+        kwargs.update(overrides)
+        return ensure_schroot_ready(**kwargs)
+
+    def test_skipped_when_not_binary(self):
+        """No chroot is needed for source-only builds."""
+        result, info = self._call(binary=False)
+        assert result.success is True
+        assert info.skipped is True
+
+    def test_skipped_for_non_sbuild_builder(self):
+        """No chroot is needed for dpkg-buildpackage builds."""
+        result, info = self._call(builder="dpkg")
+        assert result.success is True
+        assert info.skipped is True
+
+    def test_invalid_chroot_mode_fails_with_config_error(self):
+        """An unknown configured mode fails the phase cleanly."""
+        from packastack.build.errors import EXIT_CONFIG_ERROR
+
+        run = MagicMock()
+        with patch("packastack.target.arch.get_host_arch", return_value="amd64"):
+            result, _info = self._call(chroot_mode="container", run=run)
+        assert result.success is False
+        assert result.exit_code == EXIT_CONFIG_ERROR
+        assert "Invalid sbuild.chroot_mode" in result.message
+        run.write_summary.assert_called_once()
+
+    def test_unshare_mode_ensures_tarball(self):
+        """Unshare mode delegates to ensure_unshare_tarball."""
+        from packastack.build.unshare import UnshareResult
+
+        run = MagicMock()
+        tarball = "/home/user/.cache/sbuild/noble-amd64.tar.zst"
+        with (
+            patch("packastack.target.arch.get_host_arch", return_value="amd64"),
+            patch(
+                "packastack.build.unshare.resolve_chroot_mode",
+                return_value="unshare",
+            ) as mock_resolve,
+            patch(
+                "packastack.build.unshare.ensure_unshare_tarball",
+                return_value=UnshareResult(name=tarball, exists=True, created=True),
+            ) as mock_ensure,
+        ):
+            result, info = self._call(run=run)
+
+        assert result.success is True
+        assert info.chroot_mode == "unshare"
+        assert info.schroot_name == tarball
+        assert info.created is True
+        mock_resolve.assert_called_once_with("auto", "noble", "amd64")
+        assert mock_ensure.call_args.kwargs["offline"] is False
+        event = run.log_event.call_args.args[0]
+        assert event["event"] == "schroot.ready"
+        assert event["mode"] == "unshare"
+        assert event["created"] is True
+
+    def test_schroot_mode_ensures_schroot(self):
+        """Schroot mode delegates to ensure_schroot."""
+        from packastack.build.schroot import SchrootResult
+
+        run = MagicMock()
+        with (
+            patch("packastack.target.arch.get_host_arch", return_value="amd64"),
+            patch(
+                "packastack.build.unshare.resolve_chroot_mode",
+                return_value="schroot",
+            ),
+            patch(
+                "packastack.build.schroot.ensure_schroot",
+                return_value=SchrootResult(name="packastack-noble-amd64", exists=True),
+            ),
+        ):
+            result, info = self._call(run=run)
+
+        assert result.success is True
+        assert info.chroot_mode == "schroot"
+        assert info.schroot_name == "packastack-noble-amd64"
+        assert info.created is False
+        event = run.log_event.call_args.args[0]
+        assert event["mode"] == "schroot"
+
+    def test_missing_tool_error_maps_to_tool_missing_exit(self):
+        """A 'not found' error is reported as a missing tool."""
+        from packastack.build.errors import EXIT_TOOL_MISSING
+        from packastack.build.unshare import UnshareResult
+
+        run = MagicMock()
+        with (
+            patch("packastack.target.arch.get_host_arch", return_value="amd64"),
+            patch(
+                "packastack.build.unshare.resolve_chroot_mode",
+                return_value="unshare",
+            ),
+            patch(
+                "packastack.build.unshare.ensure_unshare_tarball",
+                return_value=UnshareResult(
+                    name="/x.tar.zst",
+                    exists=False,
+                    error="mmdebstrap not found",
+                ),
+            ),
+        ):
+            result, _info = self._call(run=run)
+
+        assert result.success is False
+        assert result.exit_code == EXIT_TOOL_MISSING
+        run.write_summary.assert_called_once()
+
+    def test_other_error_maps_to_config_error_exit(self):
+        """Other creation errors are reported as configuration errors."""
+        from packastack.build.errors import EXIT_CONFIG_ERROR
+        from packastack.build.schroot import SchrootResult
+
+        run = MagicMock()
+        with (
+            patch("packastack.target.arch.get_host_arch", return_value="amd64"),
+            patch(
+                "packastack.build.unshare.resolve_chroot_mode",
+                return_value="schroot",
+            ),
+            patch(
+                "packastack.build.schroot.ensure_schroot",
+                return_value=SchrootResult(
+                    name="packastack-noble-amd64",
+                    exists=False,
+                    error="sudo authentication failed",
+                ),
+            ),
+        ):
+            result, _info = self._call(run=run)
+
+        assert result.success is False
+        assert result.exit_code == EXIT_CONFIG_ERROR

@@ -153,9 +153,7 @@ def _series_commit_name(series: str | None) -> str:
     return series.split()[0].capitalize()
 
 
-def resolve_lp_bug_key(
-    build_type: str, is_library: bool, upstream_version: str
-) -> str | None:
+def resolve_lp_bug_key(build_type: str, is_library: bool, upstream_version: str) -> str | None:
     """Resolve the Launchpad bug config key type for a build.
 
     Maps a build scenario to the appropriate ``launchpad_bugs`` config key:
@@ -246,8 +244,10 @@ class SingleBuildContext:
     current_lts_index: PackageIndex | None = None
     openstack_pkgs: dict[str, str] | None = None
 
-    # Schroot
+    # Build chroot (schroot name or unshare tarball path, plus the
+    # resolved sbuild chroot mode)
     schroot_name: str | None = None
+    chroot_mode: str = "schroot"
 
     # Provenance
     provenance: BuildProvenance | None = None
@@ -427,13 +427,17 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
 
             # Try deliverable first
             if deliverable_name:
-                test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
+                test_releases = load_project_releases(
+                    releases_repo, openstack_target, deliverable_name
+                )
                 if test_releases:
                     # Deliverable exists in releases, use it
                     pass
                 else:
                     # Deliverable doesn't exist, try pkg_name
-                    test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
+                    test_releases = load_project_releases(
+                        releases_repo, openstack_target, pkg_name
+                    )
                     if test_releases:
                         deliverable_name = pkg_name
             else:
@@ -452,11 +456,13 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
             # Propagate exceptions as fatal for this package
             raise
         build_type = chosen
-        run.log_event({
-            "event": "resolve.build_type",
-            "type": build_type.value,
-            "auto_reason": reason,
-        })
+        run.log_event(
+            {
+                "event": "resolve.build_type",
+                "type": build_type.value,
+                "auto_reason": reason,
+            }
+        )
         activity("resolve", f"Chosen build type: {build_type.value} (auto: {reason})")
     else:
         build_type = _build_type_from_string(inputs.resolved_build_type_str)
@@ -466,7 +472,9 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     prev_series = get_previous_series(releases_repo, openstack_target)
     if prev_series:
         activity("resolve", f"Previous series: {prev_series}")
-    run.log_event({"event": "resolve.prev_series", "prev": prev_series, "target": openstack_target})
+    run.log_event(
+        {"event": "resolve.prev_series", "prev": prev_series, "target": openstack_target}
+    )
 
     # Initialize provenance
     provenance = create_provenance(pkg_name, run.run_id)
@@ -495,8 +503,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         if upstream_config.release_source.type != ReleaseSourceType.OPENSTACK_RELEASES:
             eligible = True
             reason = (
-                f"Snapshots allowed (release source: "
-                f"{upstream_config.release_source.type.value})"
+                f"Snapshots allowed (release source: {upstream_config.release_source.type.value})"
             )
             preferred = None
             activity("policy", f"Note: {reason}")
@@ -510,16 +517,22 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
 
             # Check if deliverable exists in releases
             if deliverable_name:
-                test_releases = load_project_releases(releases_repo, openstack_target, deliverable_name)
+                test_releases = load_project_releases(
+                    releases_repo, openstack_target, deliverable_name
+                )
                 if not test_releases:
                     # Deliverable doesn't exist, try pkg_name
-                    test_releases = load_project_releases(releases_repo, openstack_target, pkg_name)
+                    test_releases = load_project_releases(
+                        releases_repo, openstack_target, pkg_name
+                    )
                     if test_releases:
                         project_name = pkg_name
             else:
                 project_name = pkg_name
 
-            eligible, reason, preferred = is_snapshot_eligible(releases_repo, openstack_target, project_name)
+            eligible, reason, preferred = is_snapshot_eligible(
+                releases_repo, openstack_target, project_name
+            )
 
         if not eligible:
             activity("policy", f"Blocked: {reason}")
@@ -531,7 +544,9 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
                     error=f"Snapshot build blocked: {reason}",
                     exit_code=EXIT_POLICY_BLOCKED,
                 )
-                return PhaseResult.fail(EXIT_POLICY_BLOCKED, f"Snapshot build blocked: {reason}"), None
+                return PhaseResult.fail(
+                    EXIT_POLICY_BLOCKED, f"Snapshot build blocked: {reason}"
+                ), None
             activity("policy", "Continuing with --force")
         elif "Warning" in reason:
             activity("policy", f"Warning: {reason}")
@@ -570,12 +585,29 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
     current_lts_index = None
     if current_lts_codename:
         try:
-            current_lts_index = load_package_index(paths["ubuntu_archive_cache"], current_lts_codename, pockets, components)
-            activity("plan", f"Current LTS index ({current_lts_codename}): {len(current_lts_index.packages)} packages")
-            run.log_event({"event": "plan.current_lts_index", "series": current_lts_codename, "count": len(current_lts_index.packages)})
+            current_lts_index = load_package_index(
+                paths["ubuntu_archive_cache"], current_lts_codename, pockets, components
+            )
+            activity(
+                "plan",
+                f"Current LTS index ({current_lts_codename}): {len(current_lts_index.packages)} packages",
+            )
+            run.log_event(
+                {
+                    "event": "plan.current_lts_index",
+                    "series": current_lts_codename,
+                    "count": len(current_lts_index.packages),
+                }
+            )
         except Exception as exc:
             activity("warn", f"Failed to load current LTS index ({current_lts_codename}): {exc}")
-            run.log_event({"event": "plan.current_lts_index_failed", "series": current_lts_codename, "error": str(exc)})
+            run.log_event(
+                {
+                    "event": "plan.current_lts_index_failed",
+                    "series": current_lts_codename,
+                    "error": str(exc),
+                }
+            )
 
     activity("plan", f"OpenStack packages: {len(openstack_pkgs)} in {openstack_target}")
 
@@ -598,10 +630,12 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         components=components,
         offline=inputs.offline,
         run=run,
+        chroot_mode=cfg.get("sbuild", {}).get("chroot_mode", "auto"),
     )
     if not result.success:
         return result, None
     schroot_name = schroot_info.schroot_name
+    chroot_mode = schroot_info.chroot_mode
 
     # Select upstream source
     upstream = select_upstream_source(
@@ -661,6 +695,7 @@ def setup_build_context(inputs: SetupInputs) -> tuple[PhaseResult, SingleBuildCo
         current_lts_index=current_lts_index,
         openstack_pkgs=openstack_pkgs,
         schroot_name=schroot_name,
+        chroot_mode=chroot_mode,
         provenance=provenance,
         resume_workspace_path=inputs.resume_workspace_path,
     )
@@ -719,11 +754,13 @@ def fetch_packaging_repo(
             run.add_log_mirror(workspace / "logs")
 
         activity("resume", f"Resuming from: {pkg_repo}")
-        run.log_event({
-            "event": "resume.workspace_reused",
-            "workspace": str(workspace),
-            "pkg_repo": str(pkg_repo),
-        })
+        run.log_event(
+            {
+                "event": "resume.workspace_reused",
+                "workspace": str(workspace),
+                "pkg_repo": str(pkg_repo),
+            }
+        )
 
         # Skip the rest of fetch - we're using existing state
         return PhaseResult.ok(), result
@@ -866,7 +903,9 @@ def fetch_packaging_repo(
         if is_snapshot:
             activity("prepare", "Removed debian/upstream/signing-key.asc for snapshot build")
         else:
-            activity("prepare", f"Updated debian/upstream/signing-key.asc for {ctx.openstack_target}")
+            activity(
+                "prepare", f"Updated debian/upstream/signing-key.asc for {ctx.openstack_target}"
+            )
 
     # For snapshot builds, remove PGP signature verification options from watch file
     # since there are no official signed tarballs for snapshots
@@ -909,7 +948,9 @@ def fetch_packaging_repo(
         if is_snapshot:
             signing_key_msg = "d/u/signing-key.asc: remove for snapshot"
         else:
-            signing_key_msg = f"d/u/signing-key.asc: update for {_series_commit_name(ctx.openstack_target)}"
+            signing_key_msg = (
+                f"d/u/signing-key.asc: update for {_series_commit_name(ctx.openstack_target)}"
+            )
         commit_result = git_commit(
             pkg_repo,
             signing_key_msg,
@@ -1082,7 +1123,9 @@ def prepare_upstream_source(
     removed_keys = apply_signature_policy(debian_dir, ctx.build_type)
     if removed_keys:
         activity("prepare", f"Removed signing keys: {len(removed_keys)} files")
-        run.log_event({"event": "prepare.signing_keys_removed", "files": [str(f) for f in removed_keys]})
+        run.log_event(
+            {"event": "prepare.signing_keys_removed", "files": [str(f) for f in removed_keys]}
+        )
 
     # Get/fetch upstream source
     upstream_tarball: Path | None = None
@@ -1149,7 +1192,9 @@ def prepare_upstream_source(
             current_version = get_current_version(debian_dir / "changelog")
             if current_version:
                 parsed_ver = parse_version(current_version)
-                base_version = increment_upstream_version(parsed_ver.upstream) if parsed_ver else "0.0.0"
+                base_version = (
+                    increment_upstream_version(parsed_ver.upstream) if parsed_ver else "0.0.0"
+                )
             else:
                 base_version = "0.0.0"
 
@@ -1172,11 +1217,15 @@ def prepare_upstream_source(
             project_name = ctx.pkg_name
 
             # Verify the project exists in releases for this series
-            test_releases = load_project_releases(releases_repo, ctx.openstack_target, project_name)
+            test_releases = load_project_releases(
+                releases_repo, ctx.openstack_target, project_name
+            )
             if not test_releases and ctx.upstream_config.release_source.deliverable:
                 # Fallback: try the deliverable name from registry
                 test_releases = load_project_releases(
-                    releases_repo, ctx.openstack_target, ctx.upstream_config.release_source.deliverable
+                    releases_repo,
+                    ctx.openstack_target,
+                    ctx.upstream_config.release_source.deliverable,
                 )
                 if test_releases:
                     project_name = ctx.upstream_config.release_source.deliverable
@@ -1382,7 +1431,9 @@ def validate_and_build_deps(
     if ctx.build_type == BuildType.SNAPSHOT and snapshot_result and snapshot_result.repo_path:
         upstream_repo_path = snapshot_result.repo_path
     elif ctx.build_type == BuildType.RELEASE and upstream_tarball:
-        activity("validate-deps", f"Extracting tarball for dependency analysis: {upstream_tarball.name}")
+        activity(
+            "validate-deps", f"Extracting tarball for dependency analysis: {upstream_tarball.name}"
+        )
         tarball_version = ctx.upstream.version if ctx.upstream else ctx.pkg_name
 
         extraction_result = extract_tarball(
@@ -1493,12 +1544,18 @@ def validate_and_build_deps(
                 )
             else:
                 missing_deps_list.append(debian_name)
-                activity("validate-deps", f"  {python_dep}{spec_display} -> {debian_name} [✗ MISSING]")
+                activity(
+                    "validate-deps", f"  {python_dep}{spec_display} -> {debian_name} [✗ MISSING]"
+                )
 
-        activity("validate-deps", f"Resolved {resolved_count}/{len(upstream_deps.runtime)} dependencies")
+        activity(
+            "validate-deps", f"Resolved {resolved_count}/{len(upstream_deps.runtime)} dependencies"
+        )
 
         if missing_deps_list:
-            activity("validate-deps", f"Warning: {len(missing_deps_list)} dependencies not resolved")
+            activity(
+                "validate-deps", f"Warning: {len(missing_deps_list)} dependencies not resolved"
+            )
             run.log_event(
                 {
                     "event": "validate-deps.missing",
@@ -1528,9 +1585,16 @@ def validate_and_build_deps(
                         buildable_deps.append(source_pkg)
 
             if buildable_deps:
-                activity("validate-deps", f"The following {len(buildable_deps)} packages could be built first:")
+                activity(
+                    "validate-deps",
+                    f"The following {len(buildable_deps)} packages could be built first:",
+                )
                 for dep in buildable_deps[:10]:
-                    type_hint = f" --type {ctx.build_type.value}" if ctx.build_type != BuildType.RELEASE else ""
+                    type_hint = (
+                        f" --type {ctx.build_type.value}"
+                        if ctx.build_type != BuildType.RELEASE
+                        else ""
+                    )
                     activity("validate-deps", f"  packastack build {dep}{type_hint}")
                 if len(buildable_deps) > 10:
                     activity("validate-deps", f"  ... and {len(buildable_deps) - 10} more")
@@ -1617,8 +1681,12 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     build_deps = build_dep_list + build_dep_indep
     runtime_deps = source_pkg.get_runtime_depends()
 
-    build_results, build_summary = evaluate_dependencies(build_deps, dev_index, current_lts_index, kind="build")
-    runtime_results, runtime_summary = evaluate_dependencies(runtime_deps, dev_index, current_lts_index, kind="runtime")
+    build_results, build_summary = evaluate_dependencies(
+        build_deps, dev_index, current_lts_index, kind="build"
+    )
+    runtime_results, runtime_summary = evaluate_dependencies(
+        runtime_deps, dev_index, current_lts_index, kind="runtime"
+    )
 
     def _count_components(results: list) -> tuple[int, int]:
         main_count = 0
@@ -1647,7 +1715,8 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
         "runtime_deps_total": runtime_summary.total,
         "runtime_deps_dev_satisfied": runtime_summary.dev_satisfied,
         "runtime_deps_current_lts_satisfied": runtime_summary.prev_lts_satisfied,
-        "cloud_archive_required_count": build_summary.cloud_archive_required + runtime_summary.cloud_archive_required,
+        "cloud_archive_required_count": build_summary.cloud_archive_required
+        + runtime_summary.cloud_archive_required,
         "mir_warning_count": build_summary.mir_warnings + runtime_summary.mir_warnings,
         "dev_main_satisfied": dev_main,
         "dev_universe_satisfied": dev_universe,
@@ -1676,7 +1745,10 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     if ctx.update_control_min_versions:
         upstream_min_map = ctx.upstream_min_versions or {}
         if upstream_min_map or current_lts_index is not None:
-            current_lts_versions = {dep.name: current_lts_index.get_version(dep.name) if current_lts_index else None for dep in build_deps}
+            current_lts_versions = {
+                dep.name: current_lts_index.get_version(dep.name) if current_lts_index else None
+                for dep in build_deps
+            }
             updated_build, decisions_build = apply_min_version_policy(
                 existing=build_dep_list,
                 upstream_mins=upstream_min_map,
@@ -1710,7 +1782,9 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
                 text = _replace_field(text, "Build-Depends-Indep", indep_field)
                 control_path.write_text(text)
                 if text != original_text:
-                    series_name = _series_commit_name(ctx.current_lts_codename or ctx.resolved_ubuntu)
+                    series_name = _series_commit_name(
+                        ctx.current_lts_codename or ctx.resolved_ubuntu
+                    )
                     control_msg = f"d/control: Bump dependencies for {series_name}."
                     if (ctx.pkg_repo / ".git").exists():
                         # gbp dch later picks up this subject as the changelog bullet.
@@ -1738,14 +1812,19 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
 
             ca_required = [d for d in decisions if d.cloud_archive_required]
             if ca_required:
-                activity("deps", "[deps] Cloud-archive required (upstream min exceeds latest LTS):")
+                activity(
+                    "deps", "[deps] Cloud-archive required (upstream min exceeds latest LTS):"
+                )
                 for d in ca_required:
                     activity(
                         "deps",
                         f"[deps]   - {d.name} (>= {d.upstream_min_required}) latest-lts={d.prev_lts_version or 'none'}",
                     )
         else:
-            activity("deps", "[deps] Skipping control min-version update (no upstream minima or latest LTS index available)")
+            activity(
+                "deps",
+                "[deps] Skipping control min-version update (no upstream minima or latest LTS index available)",
+            )
 
     activity("deps", "[deps] Dependency satisfaction:")
     activity(
@@ -1764,18 +1843,20 @@ def report_dependency_satisfaction(ctx: SingleBuildContext) -> PhaseResult:
     )
     activity("deps", f"[deps]   MIR warnings (universe):   {summary['mir_warning_count']} deps")
 
-    cloud_required = [d for d in build_payload + runtime_payload if d.get("cloud_archive_required")]
+    cloud_required = [
+        d for d in build_payload + runtime_payload if d.get("cloud_archive_required")
+    ]
     if cloud_required:
         activity("deps", "[deps] Cloud-archive required deps:")
         for dep in cloud_required:
-            constraint = f"{dep.get('relation','')} {dep.get('version','')}".strip()
+            constraint = f"{dep.get('relation', '')} {dep.get('version', '')}".strip()
             activity("deps", f"[deps]   - {dep.get('name')} {constraint}")
 
     mir_list = [d for d in build_payload + runtime_payload if d.get("mir_warning")]
     if mir_list:
         activity("deps", "[deps] MIR warnings (universe):")
         for dep in mir_list:
-            constraint = f"{dep.get('relation','')} {dep.get('version','')}".strip()
+            constraint = f"{dep.get('relation', '')} {dep.get('version', '')}".strip()
             activity("deps", f"[deps]   - {dep.get('name')} {constraint}")
 
     if ctx.fail_on_cloud_archive_required and summary["cloud_archive_required_count"]:
@@ -1937,9 +2018,9 @@ def _resolve_modify_delete_conflicts(
         ["git", "diff", "--name-only", "--diff-filter=U"],
         cwd=pkg_repo,
     )
-    unmerged_files = [
-        f for f in unmerged_out.strip().splitlines() if f
-    ] if unmerged_rc == 0 else []
+    unmerged_files = (
+        [f for f in unmerged_out.strip().splitlines() if f] if unmerged_rc == 0 else []
+    )
 
     if not unmerged_files:
         return False, []
@@ -1949,8 +2030,11 @@ def _resolve_modify_delete_conflicts(
 
     conclude_rc, _conclude_out, _conclude_err = run_command(
         [
-            "git", "commit", "--no-edit",
-            "-m", f"Merging upstream release {upstream_tag}",
+            "git",
+            "commit",
+            "--no-edit",
+            "-m",
+            f"Merging upstream release {upstream_tag}",
         ],
         cwd=pkg_repo,
     )
@@ -2085,9 +2169,7 @@ def import_and_patch(
                 f"Generating component tarball: bundle-{comp_name}.sh {comp_version}",
             )
             bundle_cmd = ["bash", str(bundle_script), comp_version]
-            bundle_rc, bundle_out, bundle_err = run_command(
-                bundle_cmd, cwd=pkg_repo
-            )
+            bundle_rc, bundle_out, bundle_err = run_command(bundle_cmd, cwd=pkg_repo)
 
             if bundle_rc != 0:
                 activity(
@@ -2104,8 +2186,7 @@ def import_and_patch(
                 continue
 
             comp_tarball = (
-                pkg_repo.parent
-                / f"{ctx.pkg_name}_{comp_version}.orig-{comp_name}.tar.gz"
+                pkg_repo.parent / f"{ctx.pkg_name}_{comp_version}.orig-{comp_name}.tar.gz"
             )
             if comp_tarball.exists():
                 activity(
@@ -2152,7 +2233,9 @@ def import_and_patch(
             # git ref character), so convert accordingly for all git operations.
             upstream_tag = (import_result.upstream_version or "").replace("~", "_")
             if upstream_tag:
-                activity("import-orig", f"Merging upstream tag '{upstream_tag}' with -Xtheirs strategy")
+                activity(
+                    "import-orig", f"Merging upstream tag '{upstream_tag}' with -Xtheirs strategy"
+                )
 
                 # Check if tag is already merged
                 check_merged = ["git", "branch", "--contains", upstream_tag]
@@ -2162,7 +2245,14 @@ def import_and_patch(
                     activity("import-orig", f"Tag '{upstream_tag}' already merged into master")
                 else:
                     # Perform merge with -Xtheirs to prefer upstream for conflicts
-                    merge_cmd = ["git", "merge", "-Xtheirs", "-m", f"Merging upstream release {upstream_tag}", upstream_tag]
+                    merge_cmd = [
+                        "git",
+                        "merge",
+                        "-Xtheirs",
+                        "-m",
+                        f"Merging upstream release {upstream_tag}",
+                        upstream_tag,
+                    ]
                     merge_rc, merge_out, merge_err = run_command(merge_cmd, cwd=pkg_repo)
 
                     if merge_rc == 0:
@@ -2174,7 +2264,8 @@ def import_and_patch(
                         # *.egg-info/*) that upstream still ships.  We honour the
                         # packaging branch's deletion.
                         resolved, resolved_files = _resolve_modify_delete_conflicts(
-                            pkg_repo, upstream_tag,
+                            pkg_repo,
+                            upstream_tag,
                         )
                         if resolved:
                             activity(
@@ -2184,10 +2275,12 @@ def import_and_patch(
                             for rfile in resolved_files:
                                 activity("import-orig", f"  Resolved conflict: {rfile} (delete)")
                             merge_rc = 0
-                            run.log_event({
-                                "event": "import-orig.merge_conflict_resolved",
-                                "resolved_files": resolved_files,
-                            })
+                            run.log_event(
+                                {
+                                    "event": "import-orig.merge_conflict_resolved",
+                                    "resolved_files": resolved_files,
+                                }
+                            )
 
                     if merge_rc == 0:
                         packaging_files = [".launchpad.yaml", ".gitattributes"]
@@ -2200,7 +2293,9 @@ def import_and_patch(
                             if check_rc == 0 and check_out.strip() and not file_path.exists():
                                 # File existed before merge but is now missing - restore it
                                 restore_cmd = ["git", "checkout", "HEAD", "--", pfile]
-                                restore_rc, _restore_out, restore_err = run_command(restore_cmd, cwd=pkg_repo)
+                                restore_rc, _restore_out, restore_err = run_command(
+                                    restore_cmd, cwd=pkg_repo
+                                )
 
                                 if restore_rc == 0:
                                     activity("import-orig", f"Restored {pfile} after merge")
@@ -2208,13 +2303,18 @@ def import_and_patch(
                                     stage_cmd = ["git", "add", pfile]
                                     run_command(stage_cmd, cwd=pkg_repo)
                                 else:
-                                    activity("import-orig", f"Warning: Could not restore {pfile}: {restore_err}")
+                                    activity(
+                                        "import-orig",
+                                        f"Warning: Could not restore {pfile}: {restore_err}",
+                                    )
 
                         # Amend the merge commit if we restored any files
                         amend_cmd = ["git", "commit", "--amend", "--no-edit"]
                         amend_rc, _, _ = run_command(amend_cmd, cwd=pkg_repo)
                         if amend_rc == 0:
-                            activity("import-orig", "Updated merge commit with restored packaging files")
+                            activity(
+                                "import-orig", "Updated merge commit with restored packaging files"
+                            )
 
                         run.log_event({"event": "import-orig.merge_complete", "tag": upstream_tag})
                     else:
@@ -2226,7 +2326,9 @@ def import_and_patch(
                                 exit_code=EXIT_FETCH_FAILED,
                             )
                             return PhaseResult.fail(EXIT_FETCH_FAILED, "Merge failed")
-                        run.log_event({"event": "import-orig.merge_failed", "error": merge_err or merge_out})
+                        run.log_event(
+                            {"event": "import-orig.merge_failed", "error": merge_err or merge_out}
+                        )
         else:
             activity("import-orig", f"Import failed: {import_result.output}")
             if not ctx.force:
@@ -2273,11 +2375,13 @@ def import_and_patch(
                     activity("patches", f"  Auto-drop error: {err}")
 
                 auto_dropped = drop_result.all_dropped
-                run.log_event({
-                    "event": "patches.auto_drop",
-                    "dropped": drop_result.dropped,
-                    "skipped": drop_result.skipped,
-                })
+                run.log_event(
+                    {
+                        "event": "patches.auto_drop",
+                        "dropped": drop_result.dropped,
+                        "skipped": drop_result.skipped,
+                    }
+                )
 
         if not auto_dropped and not ctx.force:
             activity("patches", "Use --force to continue with potentially upstreamed patches")
@@ -2288,7 +2392,9 @@ def import_and_patch(
                 exit_code=EXIT_PATCH_FAILED,
             )
             return PhaseResult.fail(EXIT_PATCH_FAILED, "Patches upstreamed")
-        run.log_event({"event": "patches.upstreamed", "patches": [r.patch_name for r in upstreamed]})
+        run.log_event(
+            {"event": "patches.upstreamed", "patches": [r.patch_name for r in upstreamed]}
+        )
 
     pq_result = pq_import(pkg_repo, ignore_new=ignore_new)
     if pq_result.success:
@@ -2339,7 +2445,9 @@ def import_and_patch(
 
     # Export patches and return to master branch
     if (pkg_repo / ".git").exists():
-        branch_rc, branch_out, _ = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=pkg_repo)
+        branch_rc, branch_out, _ = run_command(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=pkg_repo
+        )
         current_branch = branch_out.strip() if branch_rc == 0 else None
 
         if current_branch and current_branch.startswith("patch-queue/"):
@@ -2354,7 +2462,9 @@ def import_and_patch(
                     )
                     return PhaseResult.fail(EXIT_PATCH_FAILED, "Patch export failed")
         else:
-            activity("patches", f"Skipping patch export: current branch {current_branch or 'unknown'}")
+            activity(
+                "patches", f"Skipping patch export: current branch {current_branch or 'unknown'}"
+            )
 
         checkout_rc, checkout_out, checkout_err = run_command(
             ["git", "checkout", "master"], cwd=pkg_repo
@@ -2414,10 +2524,12 @@ def import_and_patch(
     current_changelog_version = get_current_version(debian_dir / "changelog")
     if current_changelog_version == new_version:
         activity("changelog", f"debian/changelog already at {new_version}, skipping update")
-        run.log_event({
-            "event": "changelog.already_current",
-            "version": new_version,
-        })
+        run.log_event(
+            {
+                "event": "changelog.already_current",
+                "version": new_version,
+            }
+        )
         return PhaseResult.ok()
 
     git_sha = snapshot_result.git_sha if snapshot_result else ""
@@ -2487,9 +2599,13 @@ def import_and_patch(
     )
 
     if not changelog_updated:
-        error_msg = f"Failed to update debian/changelog to version {new_version}: {changelog_error}"
+        error_msg = (
+            f"Failed to update debian/changelog to version {new_version}: {changelog_error}"
+        )
         activity("changelog", f"ERROR: {error_msg}")
-        run.log_event({"event": "changelog.update_failed", "version": new_version, "error": changelog_error})
+        run.log_event(
+            {"event": "changelog.update_failed", "version": new_version, "error": changelog_error}
+        )
         if not ctx.force:
             run.write_summary(
                 status="failed",
@@ -2501,10 +2617,12 @@ def import_and_patch(
 
     if changelog_updated:
         activity("changelog", f"Updated debian/changelog to {new_version}")
-        run.log_event({
-            "event": "changelog.updated",
-            "version": new_version,
-        })
+        run.log_event(
+            {
+                "event": "changelog.updated",
+                "version": new_version,
+            }
+        )
 
         # Commit the changelog update
         if (pkg_repo / ".git").exists():
@@ -2590,7 +2708,9 @@ def build_packages(
         result.changes_file = source_result.changes_file
     else:
         activity("build", f"Source build failed: {source_result.output}")
-        run.write_summary(status="failed", error="Source build failed", exit_code=EXIT_BUILD_FAILED)
+        run.write_summary(
+            status="failed", error="Source build failed", exit_code=EXIT_BUILD_FAILED
+        )
         return PhaseResult.fail(EXIT_BUILD_FAILED, "Source build failed"), result
 
     # Optional binary build
@@ -2606,6 +2726,7 @@ def build_packages(
                 # Ensure local repo has indexes before sbuild
                 if not ctx.skip_repo_regen and not ctx.archive_deps:
                     from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+
                     refresh_local_repo_indexes(ctx.local_repo, host_arch, run, phase="build")
 
                 sbuild_config = SbuildConfig(
@@ -2615,6 +2736,7 @@ def build_packages(
                     arch=host_arch,
                     local_repo_root=None if ctx.archive_deps else ctx.local_repo,
                     chroot_name=ctx.schroot_name,
+                    chroot_mode=ctx.chroot_mode,
                     run_log_dir=run.logs_path,
                     source_package=ctx.package,
                     version=str(
@@ -2743,7 +2865,11 @@ def build_packages(
             else:
                 activity("build", f"Binary build failed: {binary_result.output}")
                 run.log_event(
-                    {"event": "build.binary_failed", "builder": "dpkg", "output": binary_result.output}
+                    {
+                        "event": "build.binary_failed",
+                        "builder": "dpkg",
+                        "output": binary_result.output,
+                    }
                 )
 
     return PhaseResult.ok(), result
@@ -2805,7 +2931,9 @@ def verify_and_publish(
                 p for p in publish_result.published_paths if p.suffix in {".deb", ".udeb", ".ddeb"}
             ]
             activity("verify", f"Published binaries: {len(published_debs)} debs")
-            activity("verify", f"Published {len(publish_result.published_paths)} files to local repo")
+            activity(
+                "verify", f"Published {len(publish_result.published_paths)} files to local repo"
+            )
             run.log_event(
                 {
                     "event": "verify.publish",
@@ -2816,17 +2944,20 @@ def verify_and_publish(
 
             if not ctx.skip_repo_regen:
                 from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+
                 refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
         else:
             activity("verify", f"Warning: Failed to publish artifacts: {publish_result.error}")
             run.log_event({"event": "verify.publish_failed", "error": publish_result.error})
             if not ctx.skip_repo_regen:
                 from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+
                 refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
     else:
         activity("verify", "No build artifacts to publish; ensuring local repo metadata exists")
         if not ctx.skip_repo_regen:
             from packastack.build.localrepo_helpers import refresh_local_repo_indexes
+
             refresh_local_repo_indexes(ctx.local_repo, host_arch, run)
 
     activity("verify", "Verification complete")
@@ -2873,10 +3004,12 @@ def _fix_sudoers_args(ctx: SingleBuildContext) -> None:
     if result.files_fixed:
         fixed_names = ", ".join(result.files_fixed)
         activity("sudoers", f"Fixed sudoers command arguments in: {fixed_names}")
-        ctx.run.log_event({
-            "event": "sudoers.fixed",
-            "files": result.files_fixed,
-        })
+        ctx.run.log_event(
+            {
+                "event": "sudoers.fixed",
+                "files": result.files_fixed,
+            }
+        )
         commit_result = git_commit(
             ctx.pkg_repo,
             "d/sudoers: remove command arguments for sudo-rs compatibility",
@@ -3024,19 +3157,19 @@ def _ai_diagnose_patch_failure(
                 # run pq_export which commits all refreshed patches together
                 # as "d/patches/*: refresh patches".
                 try:
-                    patch_path.write_text(
-                        refresh_result.patch_content, encoding="utf-8"
-                    )
+                    patch_path.write_text(refresh_result.patch_content, encoding="utf-8")
                 except OSError as exc:
                     activity("ai", f"Failed to write refreshed patch: {exc}")
                     continue
 
                 activity("ai", f"Refreshed patch: {patch_name}")
-                ctx.run.log_event({
-                    "event": "ai.patch_refreshed",
-                    "patch_name": patch_name,
-                    "explanation": refresh_result.explanation,
-                })
+                ctx.run.log_event(
+                    {
+                        "event": "ai.patch_refreshed",
+                        "patch_name": patch_name,
+                        "explanation": refresh_result.explanation,
+                    }
+                )
                 refreshed_any = True
             else:
                 reason = refresh_result.error or refresh_result.explanation
@@ -3091,11 +3224,13 @@ def _ai_diagnose_patch_failure(
             continue
 
         activity("ai", f"Dropped patch: {patch_name}")
-        ctx.run.log_event({
-            "event": "ai.patch_dropped",
-            "patch_name": patch_name,
-            "explanation": diagnosis.explanation,
-        })
+        ctx.run.log_event(
+            {
+                "event": "ai.patch_dropped",
+                "patch_name": patch_name,
+                "explanation": diagnosis.explanation,
+            }
+        )
         dropped_any = True
 
     return dropped_any or refreshed_any
@@ -3184,9 +3319,7 @@ def _ai_diagnose_and_retry_build(
 
             # Build failed after AI fix -- save memory for next run
             activity("ai", "Build still failed after AI fix. Saving memory for next run.")
-            memory = previous_memory or AIMemory(
-                package=ctx.pkg_name, version=new_version
-            )
+            memory = previous_memory or AIMemory(package=ctx.pkg_name, version=new_version)
             sbuild_error = ""
             if retry_data.sbuild_result:
                 sbuild_error = getattr(retry_data.sbuild_result, "validation_message", "")
@@ -3201,9 +3334,7 @@ def _ai_diagnose_and_retry_build(
         else:
             activity("ai", "Failed to apply AI-proposed fix")
             # Save memory about invalid fix
-            memory = previous_memory or AIMemory(
-                package=ctx.pkg_name, version=new_version
-            )
+            memory = previous_memory or AIMemory(package=ctx.pkg_name, version=new_version)
             memory.add_attempt(
                 patch_filename=diagnosis.patch_filename,
                 patch_content=diagnosis.patch_content,
@@ -3376,10 +3507,12 @@ def build_single_package(
         try:
             provenance_path = write_provenance(ctx.provenance, run.logs_path)
             activity("provenance", f"Written to: {provenance_path}")
-            run.log_event({
-                "event": "provenance.written",
-                "path": str(provenance_path),
-            })
+            run.log_event(
+                {
+                    "event": "provenance.written",
+                    "path": str(provenance_path),
+                }
+            )
         except Exception as e:
             activity("provenance", f"Warning: Failed to write provenance: {e}")
             run.log_event({"event": "provenance.write_failed", "error": str(e)})

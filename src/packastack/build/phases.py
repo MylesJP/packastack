@@ -66,6 +66,7 @@ class RetirementCheckResult:
         source: Source of retirement information
         description: Optional description of retirement reason
     """
+
     is_retired: bool = False
     is_possibly_retired: bool = False
     upstream_project: str | None = None
@@ -150,13 +151,15 @@ def check_retirement_status(
             activity("policy", f"  Reason: {retirement_info.description}")
         activity("policy", "Use --include-retired to override")
 
-        run.log_event({
-            "event": "policy.retired_project",
-            "package": pkg_name,
-            "upstream_project": retirement_info.upstream_project,
-            "source": retirement_info.source,
-            "description": retirement_info.description,
-        })
+        run.log_event(
+            {
+                "event": "policy.retired_project",
+                "package": pkg_name,
+                "upstream_project": retirement_info.upstream_project,
+                "source": retirement_info.source,
+                "description": retirement_info.description,
+            }
+        )
 
         run.write_summary(
             status="skipped",
@@ -170,14 +173,18 @@ def check_retirement_status(
         result.is_possibly_retired = True
         result.source = retirement_info.source
 
-        activity("policy", f"Warning: {pkg_name} may be retired upstream (not released in 3+ cycles)")
+        activity(
+            "policy", f"Warning: {pkg_name} may be retired upstream (not released in 3+ cycles)"
+        )
         activity("policy", f"  Source: {retirement_info.source}")
 
-        run.log_event({
-            "event": "policy.possibly_retired",
-            "package": pkg_name,
-            "source": retirement_info.source,
-        })
+        run.log_event(
+            {
+                "event": "policy.possibly_retired",
+                "package": pkg_name,
+                "source": retirement_info.source,
+            }
+        )
 
     return PhaseResult.ok(), result
 
@@ -192,6 +199,7 @@ class RegistryResolutionResult:
         project_key: Resolved project key from registry
         is_openstack_governed: Whether package is in openstack/releases
     """
+
     registry: UpstreamsRegistry | None = None
     resolved: ResolvedUpstream | None = None
     project_key: str = ""
@@ -241,12 +249,14 @@ def resolve_upstream_registry(
         registry = UpstreamsRegistry()
         result.registry = registry
 
-        run.log_event({
-            "event": "registry.loaded",
-            "version": registry.version,
-            "override_applied": registry.override_applied,
-            "override_path": registry.override_path,
-        })
+        run.log_event(
+            {
+                "event": "registry.loaded",
+                "version": registry.version,
+                "override_applied": registry.override_applied,
+                "override_path": registry.override_path,
+            }
+        )
 
         if registry.override_applied:
             activity("resolve", f"Registry override applied: {registry.override_path}")
@@ -273,7 +283,9 @@ def resolve_upstream_registry(
 
     # Resolve upstream configuration from registry
     try:
-        resolved_upstream = registry.resolve(package, openstack_governed=result.is_openstack_governed)
+        resolved_upstream = registry.resolve(
+            package, openstack_governed=result.is_openstack_governed
+        )
         result.resolved = resolved_upstream
         result.project_key = resolved_upstream.project
 
@@ -281,24 +293,28 @@ def resolve_upstream_registry(
         resolution_source = resolved_upstream.resolution_source
 
         activity("resolve", f"Upstream resolution: {resolution_source.value}")
-        run.log_event({
-            "event": "registry.resolved",
-            "project": package,
-            "project_key": resolved_upstream.project,
-            "resolution_source": resolution_source.value,
-            "upstream_host": upstream_config.upstream.host,
-            "upstream_url": upstream_config.upstream.url,
-        })
+        run.log_event(
+            {
+                "event": "registry.resolved",
+                "project": package,
+                "project_key": resolved_upstream.project,
+                "resolution_source": resolution_source.value,
+                "upstream_host": upstream_config.upstream.host,
+                "upstream_url": upstream_config.upstream.url,
+            }
+        )
 
         # Log tarball and verification config
         tarball_methods = [m.value for m in upstream_config.tarball.prefer]
         activity("policy", f"Tarball prefer: {', '.join(tarball_methods)}")
         activity("policy", f"Signature mode: {upstream_config.signatures.mode.value}")
-        run.log_event({
-            "event": "policy.tarball_verification",
-            "tarball_prefer": tarball_methods,
-            "signature_mode": upstream_config.signatures.mode.value,
-        })
+        run.log_event(
+            {
+                "event": "policy.tarball_verification",
+                "tarball_prefer": tarball_methods,
+                "signature_mode": upstream_config.signatures.mode.value,
+            }
+        )
 
     except ProjectNotFoundError as e:
         activity("resolve", f"Registry error: {e}")
@@ -322,6 +338,7 @@ class PolicyCheckResult:
         preferred_version: Preferred version if snapshot blocked
         forced: Whether --force was used to override
     """
+
     snapshot_eligible: bool = True
     snapshot_reason: str = ""
     preferred_version: str = ""
@@ -406,11 +423,13 @@ def check_policy(
         elif "Warning" in reason:
             activity("policy", f"Warning: {reason}")
 
-        run.log_event({
-            "event": "policy.snapshot",
-            "eligible": eligible,
-            "reason": reason,
-        })
+        run.log_event(
+            {
+                "event": "policy.snapshot",
+                "eligible": eligible,
+                "reason": reason,
+            }
+        )
 
     activity("policy", "Policy check: OK")
     return PhaseResult.ok(), result
@@ -425,6 +444,7 @@ class PackageIndexes:
         cloud_archive: Package index from Cloud Archive (optional)
         local_repo: Package index from local repository (optional)
     """
+
     ubuntu: PackageIndex
     cloud_archive: PackageIndex | None = None
     local_repo: PackageIndex | None = None
@@ -484,7 +504,9 @@ def load_package_indexes(
 
     # Load Ubuntu index
     with activity_spinner("plan", "Loading package indexes"):
-        ubuntu_index = load_package_index(ubuntu_cache, resolved_ubuntu, ubuntu_pockets, ubuntu_components)
+        ubuntu_index = load_package_index(
+            ubuntu_cache, resolved_ubuntu, ubuntu_pockets, ubuntu_components
+        )
     activity("plan", f"Ubuntu index: {len(ubuntu_index.packages)} packages")
     run.log_event({"event": "plan.ubuntu_index", "count": len(ubuntu_index.packages)})
 
@@ -522,6 +544,7 @@ class ToolCheckResult:
         missing_tools: List of missing tool names
         error_message: Formatted message about missing tools
     """
+
     is_complete: bool = True
     missing_tools: list[str] | None = None
     error_message: str = ""
@@ -580,14 +603,18 @@ def check_tools(
 
 @dataclass
 class SchrootSetupResult:
-    """Result of schroot setup phase.
+    """Result of the build-chroot setup phase.
 
     Attributes:
-        schroot_name: Name of the schroot (empty if not needed)
-        created: True if schroot was created during this run
-        skipped: True if schroot setup was skipped (not needed)
+        schroot_name: Name of the schroot, or path to the unshare build
+            tarball (empty if not needed)
+        chroot_mode: Resolved sbuild chroot mode ("schroot" or "unshare")
+        created: True if the build chroot was created during this run
+        skipped: True if setup was skipped (not needed)
     """
+
     schroot_name: str = ""
+    chroot_mode: str = "schroot"
     created: bool = False
     skipped: bool = False
 
@@ -600,11 +627,13 @@ def ensure_schroot_ready(
     components: list[str],
     offline: bool,
     run: RunContextType,
+    chroot_mode: str = "auto",
 ) -> tuple[PhaseResult, SchrootSetupResult]:
-    """Ensure schroot exists for sbuild-based binary builds.
+    """Ensure a build chroot exists for sbuild-based binary builds.
 
-    This phase checks if an sbuild schroot is needed for binary builds,
-    and if so, ensures it exists or creates it.
+    Resolves which sbuild chroot backend to use (schroot or unshare — see
+    ``resolve_chroot_mode``) and ensures the matching build environment
+    exists, creating it if missing.
 
     Args:
         binary: Whether binary builds are requested
@@ -612,20 +641,28 @@ def ensure_schroot_ready(
         resolved_ubuntu: Ubuntu series codename (e.g., 'noble')
         mirror: Ubuntu mirror URL
         components: Ubuntu components (e.g., ['main', 'universe'])
-        offline: If True, don't create schroot if missing
+        offline: If True, don't create the build chroot if missing
         run: RunContext for logging
+        chroot_mode: Configured mode: "schroot", "unshare", or "auto"
+            (detect from existing chroots and the installed sbuild).
 
     Returns:
         Tuple of (PhaseResult, SchrootSetupResult).
-        PhaseResult.success is False if schroot is needed but can't be created.
+        PhaseResult.success is False if a chroot is needed but can't be
+        created.
 
     Side Effects:
-        - May create a new schroot
-        - Logs schroot status via activity()
+        - May create a new schroot or unshare build tarball
+        - Logs chroot status via activity()
         - Logs events to run context
     """
     from packastack.build.errors import EXIT_CONFIG_ERROR, EXIT_TOOL_MISSING
     from packastack.build.schroot import SchrootConfig, ensure_schroot
+    from packastack.build.unshare import (
+        ChrootModeError,
+        ensure_unshare_tarball,
+        resolve_chroot_mode,
+    )
     from packastack.target.arch import get_host_arch
 
     result = SchrootSetupResult()
@@ -635,36 +672,62 @@ def ensure_schroot_ready(
         result.skipped = True
         return PhaseResult.ok(), result
 
-    schroot_config = SchrootConfig.from_lists(
+    arch = get_host_arch()
+
+    try:
+        resolved_mode = resolve_chroot_mode(chroot_mode, resolved_ubuntu, arch)
+    except ChrootModeError as exc:
+        activity("plan", f"Chroot mode error: {exc}")
+        run.write_summary(
+            status="failed",
+            error=str(exc),
+            exit_code=EXIT_CONFIG_ERROR,
+        )
+        return PhaseResult.fail(EXIT_CONFIG_ERROR, str(exc)), result
+
+    result.chroot_mode = resolved_mode
+    activity("plan", f"sbuild chroot mode: {resolved_mode}")
+
+    env_config = SchrootConfig.from_lists(
         series=resolved_ubuntu,
-        arch=get_host_arch(),
+        arch=arch,
         mirror=mirror,
         components=components,
     )
 
-    schroot_result = ensure_schroot(config=schroot_config, offline=offline)
-    # Use the name returned by ensure_schroot — it may be the alias
-    # (packastack-*) or the sbuild-registered name ({series}-{arch}-packastack).
-    result.schroot_name = schroot_result.name
+    # SchrootResult and UnshareResult share the same shape
+    # (name/exists/created/error), so the rest of the phase is common.
+    if resolved_mode == "unshare":
+        env_result = ensure_unshare_tarball(config=env_config, offline=offline)
+    else:
+        env_result = ensure_schroot(config=env_config, offline=offline)
 
-    if not schroot_result.exists:
-        activity("plan", f"Schroot error: {schroot_result.error}")
-        exit_code = EXIT_TOOL_MISSING if "not found" in schroot_result.error else EXIT_CONFIG_ERROR
+    # Use the name returned by the backend — for schroot it may be the
+    # alias (packastack-*) or the sbuild-registered name
+    # ({series}-{arch}-packastack); for unshare it is the tarball path.
+    result.schroot_name = env_result.name
+
+    if not env_result.exists:
+        activity("plan", f"Build chroot error: {env_result.error}")
+        exit_code = EXIT_TOOL_MISSING if "not found" in env_result.error else EXIT_CONFIG_ERROR
         run.write_summary(
             status="failed",
-            error=schroot_result.error,
+            error=env_result.error,
             exit_code=exit_code,
         )
-        return PhaseResult.fail(exit_code, schroot_result.error), result
+        return PhaseResult.fail(exit_code, env_result.error), result
 
-    if schroot_result.created:
-        activity("plan", f"Created schroot: {schroot_result.name}")
+    if env_result.created:
+        activity("plan", f"Created build chroot ({resolved_mode}): {env_result.name}")
         result.created = True
 
-    run.log_event({
-        "event": "schroot.ready",
-        "name": schroot_result.name,
-        "created": schroot_result.created,
-    })
+    run.log_event(
+        {
+            "event": "schroot.ready",
+            "name": env_result.name,
+            "mode": resolved_mode,
+            "created": env_result.created,
+        }
+    )
 
     return PhaseResult.ok(), result

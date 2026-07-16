@@ -39,6 +39,29 @@ The ``paths`` section defines all on-disk locations used by PackaStack:
 sbuild
 ------
 
+``sbuild.chroot_mode`` selects the sbuild chroot backend and defaults to
+``auto``:
+
+- ``schroot`` — classic directory chroots managed by ``schroot`` (the sbuild
+  default before 0.88). Creation and local-repo wiring require sudo.
+- ``unshare`` — rootless tarball chroots in ``~/.cache/sbuild/`` built in
+  user namespaces (the sbuild default since 0.88). No sudo required; the
+  host needs ``mmdebstrap`` and subordinate-id entries in ``/etc/subuid``
+  and ``/etc/subgid``.
+- ``auto`` — prefer whichever build environment already exists for the
+  target series/arch (unshare tarball first, then a PackaStack schroot);
+  when neither exists, follow the installed sbuild's own default, falling
+  back to ``schroot`` when unshare prerequisites are missing.
+
+The two backends are incompatible: an environment created for one cannot be
+used by the other. PackaStack always passes ``--chroot-mode`` explicitly so
+the host's sbuild default cannot silently change behaviour:
+
+.. code-block:: yaml
+
+   sbuild:
+     chroot_mode: unshare
+
 The optional ``sbuild.python_versions`` list makes PackaStack run one isolated
 sbuild pass per requested interpreter. In each pass the interpreter is added
 as an ephemeral build-dependency, and PackaStack sets

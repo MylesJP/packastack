@@ -266,17 +266,19 @@ def parse_sbuild_output_for_paths(output: str) -> SbuildPaths:
 
     # Pattern for log file path mentions
     # Example: "sbuild log file: /path/to/file.log"
+    # Path characters include "@" and "+" — home directories under
+    # directory-service logins (user@example.com) contain them.
     log_patterns = [
-        re.compile(r"log\s+file[:\s]+([/\w.-]+\.(?:log|build))", re.IGNORECASE),
-        re.compile(r"build\s+log[:\s]+([/\w.-]+)", re.IGNORECASE),
-        re.compile(r"Writing build log to ([/\w.-]+)", re.IGNORECASE),
+        re.compile(r"log\s+file[:\s]+([/\w.@+-]+\.(?:log|build))", re.IGNORECASE),
+        re.compile(r"build\s+log[:\s]+([/\w.@+-]+)", re.IGNORECASE),
+        re.compile(r"Writing build log to ([/\w.@+-]+)", re.IGNORECASE),
     ]
 
     # Pattern for build directory mentions
     # Example: "Build directory: /path/to/build"
     build_patterns = [
-        re.compile(r"build\s+dir(?:ectory)?[:\s]+([/\w.-]+)", re.IGNORECASE),
-        re.compile(r"output\s+dir(?:ectory)?[:\s]+([/\w.-]+)", re.IGNORECASE),
+        re.compile(r"build\s+dir(?:ectory)?[:\s]+([/\w.@+-]+)", re.IGNORECASE),
+        re.compile(r"output\s+dir(?:ectory)?[:\s]+([/\w.@+-]+)", re.IGNORECASE),
     ]
 
     for line in output.splitlines():

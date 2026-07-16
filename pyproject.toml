@@ -117,6 +117,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Pytest's default norecursedirs excludes any directory named "build",
+# which silently skipped all of tests/build/. Override with the default
+# list minus "build".
+norecursedirs = ["*.egg", ".*", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
 addopts = [
     "-v",
     "--cov=packastack",

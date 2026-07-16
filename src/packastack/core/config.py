@@ -100,6 +100,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     # Settings that affect only sbuild-based binary builds.
     "sbuild": {
+        # sbuild chroot backend: "schroot", "unshare", or "auto". Auto
+        # prefers an existing build environment (unshare tarball, then
+        # Packastack schroot) and otherwise follows the installed sbuild's
+        # own default (unshare since sbuild 0.88).
+        "chroot_mode": "auto",
         # Empty means let Debian's pybuild select its normal supported
         # interpreter set. A non-empty list runs a separate sbuild pass with
         # each requested Python version selected for its unit tests.

@@ -9,7 +9,7 @@ PackaStack applies patches (via gbp), shapes the source tree, and emits a ``.dsc
 
 The sbuild command line
 -----------------------
-By default you’ll see something like ``sbuild -d <series> --arch <arch> -c packastack-<series>-<arch> <foo>.dsc``. PackaStack sprinkles in ``--chroot-setup-commands`` to bind-mount your local repo at ``/srv/packastack-apt`` and add it as a trusted source, plus matching cleanup commands so we don’t leave dishes in the sink. Any extra args you pass get stapled on; exit code 0 is applause, anything else is a frown.
+By default you’ll see something like ``sbuild --chroot-mode=<mode> -d <series> --arch <arch> -c <chroot> <foo>.dsc``. The chroot mode is always explicit — sbuild 0.88 flipped its default from ``schroot`` to ``unshare``, and the two backends can't read each other's environments, so PackaStack detects the right one (see :doc:`../reference/schroot`) rather than trusting the host default. In schroot mode ``-c`` names the ``packastack-<series>-<arch>`` schroot and the local repo is bind-mounted via the schroot fstab; in unshare mode ``-c`` points at the ``~/.cache/sbuild`` tarball and the bind-mount rides in through ``$unshare_bind_mounts`` in a generated ``SBUILD_CONFIG`` fragment. Either way, ``--chroot-setup-commands`` add the repo at ``/srv/packastack-apt`` as a trusted apt source (schroot mode also gets matching cleanup commands so we don’t leave dishes in the sink). Any extra args you pass get stapled on; exit code 0 is applause, anything else is a frown.
 
 What happens inside the schroot
 -------------------------------
